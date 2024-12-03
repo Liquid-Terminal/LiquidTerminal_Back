@@ -72,6 +72,7 @@ export class MarketService {
       // Wait until all logo requests have been completed
       const marketsData = await Promise.all(marketsDataPromises);
 
+      // Sort marketsData by marketCap in descending order
       return marketsData.sort((a, b) => b.marketCap - a.marketCap);
 
     } catch (error) {

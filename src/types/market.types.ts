@@ -32,11 +32,17 @@ export interface AssetContext {
 
 export interface MarketData {
     name: string;
-    logo?: string;
+    logo: string | null;
     price: number;
     marketCap: number;
     volume: number;
     change24h: number;
     liquidity: number;
     supply: number;
+}
+
+export interface TokenDetails {
+    name: string;
+    img: string;
+    desc: string;
 }

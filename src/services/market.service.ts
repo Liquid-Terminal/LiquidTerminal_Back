@@ -1,13 +1,27 @@
 import fetch from 'node-fetch';
-import type { SpotContext, AssetContext, MarketData } from '../types/market.types';
+import type { SpotContext, AssetContext, MarketData, TokenDetails } from '../types/market.types';
 
 export class MarketService {
-  private readonly API_URL = 'https://api.hyperliquid.xyz/info';
+  private readonly HYPERLIQUID_API = 'https://api.hyperliquid.xyz/info';
+  private readonly HYPURRSCAN_API = 'https://api.hypurrscan.io/tokenDetails';
+
+  async getTokenLogo(tokenName: string): Promise<string | null> {
+    try {
+      const url = `${this.HYPURRSCAN_API}/${tokenName}`;
+      const response = await fetch(url);
+      if (!response.ok) {
+        return null;
+      }
+      const data = await response.json() as TokenDetails;
+      return data.img || null;
+    } catch (error) {
+      return null;
+    }
+  }
 
   async getMarketsData(): Promise<MarketData[]> {
     try {
-      console.log('Fetching data from API...');
-      const response = await fetch(this.API_URL, {
+      const response = await fetch(this.HYPERLIQUID_API, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -21,24 +35,31 @@ export class MarketService {
 
       const [spotData, assetContexts] = await response.json() as [SpotContext, AssetContext[]];
       
-      console.log('Raw API response:', { spotData, assetContexts });
+      const tokenNames = spotData.tokens.reduce((acc, token) => {
+        acc[token.index] = token.name;
+        return acc;
+      }, {} as Record<number, string>);
 
-      // Transform and sort by marketCap in descending order
-      const marketsData: MarketData[] = spotData.universe.map((market, index) => {
+      // Recover all the logos in parallel
+      const marketsDataPromises = spotData.universe.map(async (market, index) => {
         const assetContext = assetContexts[index];
+        const tokenIndex = market.tokens[0];
+        const tokenName = tokenNames[tokenIndex];
         
-        // Converting strings to numbers
+        // Recover the logo
+        const logo = await this.getTokenLogo(tokenName);
+        
         const currentPrice = Number(assetContext.markPx);
         const prevDayPrice = Number(assetContext.prevDayPx);
         const circulatingSupply = Number(assetContext.circulatingSupply);
         
-        // Calculs
         const priceChange = ((currentPrice - prevDayPrice) / prevDayPrice) * 100;
         const volume = Number(assetContext.dayNtlVlm);
-        const marketCap = currentPrice * circulatingSupply; // Market cap calculation
+        const marketCap = currentPrice * circulatingSupply;
 
         return {
-          name: market.name.split('/')[0],
+          name: tokenName,
+          logo: logo,
           price: currentPrice,
           marketCap: marketCap,
           volume: volume,
@@ -48,14 +69,12 @@ export class MarketService {
         };
       });
 
-      // Sort by marketCap in descending order
-      const sortedMarketsData = marketsData.sort((a, b) => b.marketCap - a.marketCap);
+      // Wait until all logo requests have been completed
+      const marketsData = await Promise.all(marketsDataPromises);
 
-      console.log('Sorted market data:', sortedMarketsData);
-      return sortedMarketsData;
+      return marketsData.sort((a, b) => b.marketCap - a.marketCap);
 
     } catch (error) {
-      console.error('Error fetching market data:', error);
       throw error;
     }
   }

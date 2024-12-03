@@ -23,6 +23,7 @@ export class MarketService {
       
       console.log('Raw API response:', { spotData, assetContexts });
 
+      // Transform and sort by marketCap in descending order
       const marketsData: MarketData[] = spotData.universe.map((market, index) => {
         const assetContext = assetContexts[index];
         
@@ -47,8 +48,11 @@ export class MarketService {
         };
       });
 
-      console.log('Transformed market data:', marketsData);
-      return marketsData;
+      // Sort by marketCap in descending order
+      const sortedMarketsData = marketsData.sort((a, b) => b.marketCap - a.marketCap);
+
+      console.log('Sorted market data:', sortedMarketsData);
+      return sortedMarketsData;
 
     } catch (error) {
       console.error('Error fetching market data:', error);

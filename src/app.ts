@@ -2,8 +2,9 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import http from 'http'; // Importer le module HTTP
-import explorerRoutes from './routes/market.routes';
-import { setupWebSocket } from './websocket.server'; // Importer la configuration WebSocket
+import marketRoutes from './routes/market.routes';
+import strictListRoutes from './routes/strictList.routes'; // Importer la nouvelle route Strict List
+import { setupWebSocket } from './websocket.server';
 
 const app = express();
 
@@ -13,7 +14,8 @@ app.use(cors());
 app.use(express.json());
 
 // Routes
-app.use('/api', explorerRoutes);
+app.use('/api', marketRoutes);
+app.use('/api', strictListRoutes); // Ajouter la route Strict List
 
 // Créer le serveur HTTP
 const server = http.createServer(app);

@@ -5,6 +5,7 @@ export class MarketService {
   private readonly HYPERLIQUID_API = 'https://api.hyperliquid.xyz/info';
   private readonly HYPURRSCAN_API = 'https://api.hypurrscan.io/tokenDetails';
 
+  // Fetch token logo
   async getTokenLogo(tokenName: string): Promise<string | null> {
     try {
       const url = `${this.HYPURRSCAN_API}/${tokenName}`;
@@ -15,18 +16,18 @@ export class MarketService {
       const data = await response.json() as TokenDetails;
       return data.img || null;
     } catch (error) {
+      console.error(`Error fetching logo for token ${tokenName}:`, error);
       return null;
     }
   }
 
   async getMarketsData(): Promise<MarketData[]> {
     try {
+      // Fetch market data from Hyperliquid API
       const response = await fetch(this.HYPERLIQUID_API, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: "spotMetaAndAssetCtxs"
-        })
+        body: JSON.stringify({ type: "spotMetaAndAssetCtxs" })
       });
 
       if (!response.ok) {
@@ -34,32 +35,42 @@ export class MarketService {
       }
 
       const [spotData, assetContexts] = await response.json() as [SpotContext, AssetContext[]];
-      
-      const tokenNames = spotData.tokens.reduce((acc, token) => {
-        acc[token.index] = token.name;
-        return acc;
-      }, {} as Record<number, string>);
 
-      // Recover all the logos in parallel
-      const marketsDataPromises = spotData.universe.map(async (market, index) => {
-        const assetContext = assetContexts[index];
+      // Create a token map for fast lookups
+      const tokenMap = spotData.tokens.reduce((acc, token) => {
+        acc[token.index] = token; // Map token.index to token details
+        return acc;
+      }, {} as Record<number, { name: string }>);
+
+      // Map markets and align with assetContexts
+      const marketsDataPromises = spotData.universe.map(async (market) => {
+        const assetContext = assetContexts.find(ctx => ctx.coin === market.name); // Match by coin name
+        if (!assetContext) {
+          console.warn(`No asset context found for market: ${market.name}`);
+          return null;
+        }
+
         const tokenIndex = market.tokens[0];
-        const tokenName = tokenNames[tokenIndex];
-        
-        // Recover the logo
-        const logo = await this.getTokenLogo(tokenName);
-        
+        const token = tokenMap[tokenIndex]; // Get token details using index
+        if (!token) {
+          console.warn(`No token found for index: ${tokenIndex}`);
+          return null;
+        }
+
+        // Optional: Fetch logo (does not block processing)
+        const logo = await this.getTokenLogo(token.name);
+
+        // Parse and calculate market data
         const currentPrice = Number(assetContext.markPx);
         const prevDayPrice = Number(assetContext.prevDayPx);
         const circulatingSupply = Number(assetContext.circulatingSupply);
-        
         const priceChange = ((currentPrice - prevDayPrice) / prevDayPrice) * 100;
         const volume = Number(assetContext.dayNtlVlm);
         const marketCap = currentPrice * circulatingSupply;
 
         return {
-          name: tokenName,
-          logo: logo,
+          name: token.name,
+          logo: logo || null,
           price: currentPrice,
           marketCap: marketCap,
           volume: volume,
@@ -69,13 +80,14 @@ export class MarketService {
         };
       });
 
-      // Wait until all logo requests have been completed
-      const marketsData = await Promise.all(marketsDataPromises);
+      // Resolve all promises and filter null values
+      const marketsData = (await Promise.all(marketsDataPromises)).filter(Boolean) as MarketData[];
 
-      // Sort marketsData by marketCap in descending order
+      // Sort by marketCap in descending order
       return marketsData.sort((a, b) => b.marketCap - a.marketCap);
 
     } catch (error) {
+      console.error('Error fetching market data:', error);
       throw error;
     }
   }

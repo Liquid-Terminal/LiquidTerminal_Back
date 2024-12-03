@@ -18,7 +18,7 @@ export function setupWebSocket(server: Server): void {
         console.error('Error fetching market data:', error);
         ws.send(JSON.stringify({ error: 'Failed to fetch market data' }));
       }
-    }, 1000);
+    }, 3000);
 
     ws.on('close', () => {
       console.log('Client disconnected');

@@ -34,7 +34,7 @@ export function setupWebSocket(server: Server): void {
           })
         );
       }
-    }, 3000); // Rafraîchir toutes les secondes
+    }, 10000); // Rafraîchir toutes les secondes
 
     ws.on("close", () => {
       console.log("Client disconnected");

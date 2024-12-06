@@ -1,0 +1,65 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            Int         @id @default(autoincrement())
+  privyUserId   String      @unique
+  name          String?     @db.VarChar(255)
+  email         String?     @unique @db.VarChar(255) // Ajout optionnel pour future identification
+  createdAt     DateTime    @default(now()) @db.Timestamp(6)
+  verified      Boolean     @default(false)
+  Wallets       Wallet[]    // Relation avec les wallets
+  Watchlists    Watchlist[] // Relation avec les watchlists
+}
+
+model Wallet {
+  id        Int      @id @default(autoincrement())
+  address   String   @unique @db.VarChar(255) // Adresse publique du wallet
+  addedAt   DateTime @default(now()) @db.Timestamp(6)
+  userId    Int      // Relation avec l'utilisateur
+  User      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Project {
+  id          Int      @id @default(autoincrement())
+  createdAt   DateTime @default(now()) @db.Timestamp(6)
+  title       String   @unique @db.VarChar(255)
+  desc        String   @db.VarChar(255)
+  logo        String   @db.VarChar(255)
+  twitter     String?  @unique @db.VarChar(255)
+  discord     String?  @unique @db.VarChar(255)
+  telegram    String?  @unique @db.VarChar(255)
+  website     String?  @unique @db.VarChar(255)
+}
+
+model Watchlist {
+  id        Int             @id @default(autoincrement())
+  name      String          @db.VarChar(255)
+  createdAt DateTime        @default(now()) @db.Timestamp(6)
+  userId    Int             // Relation avec l'utilisateur
+  User      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items     WatchlistItem[] // Relation avec les éléments de la watchlist
+}
+
+model WatchlistItem {
+  id          Int          @id @default(autoincrement())
+  addedAt     DateTime     @default(now()) @db.Timestamp(6)
+  resourceId  Int
+  watchlistId Int
+  Resource    Resource     @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+  Watchlist   Watchlist    @relation(fields: [watchlistId], references: [id], onDelete: Cascade)
+}
+
+model Resource {
+  id        Int             @id @default(autoincrement())
+  name      String          @db.VarChar(255)
+  type      String          @db.VarChar(50) // Peut contenir "Token", "Wallet", etc.
+  createdAt DateTime        @default(now()) @db.Timestamp(6)
+  watchlistItems WatchlistItem[] // Relation avec WatchlistItem
+}

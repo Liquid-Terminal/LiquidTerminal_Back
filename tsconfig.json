@@ -20,6 +20,6 @@
     /* Interop Constraints */
     "isolatedModules": true                              /* Ensure each file can be compiled independently. */
   },
-  "include": ["src"],                                    /* Include all files in the "src" directory. */
+  "include": ["src", "lib"],                                    /* Include all files in the "src" directory. */
   "exclude": ["node_modules", "dist"]                   /* Exclude "node_modules" and "dist" directories. */
 }

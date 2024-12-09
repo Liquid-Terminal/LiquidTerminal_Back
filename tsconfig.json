@@ -18,7 +18,12 @@
     "sourceMap": true,                                   /* Include source maps in the output. */
 
     /* Interop Constraints */
-    "isolatedModules": true                              /* Ensure each file can be compiled independently. */
+    "isolatedModules": true,                              /* Ensure each file can be compiled independently. */
+
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"]
+    }
   },
   "include": ["src", "lib"],                                    /* Include all files in the "src" directory. */
   "exclude": ["node_modules", "dist"]                   /* Exclude "node_modules" and "dist" directories. */

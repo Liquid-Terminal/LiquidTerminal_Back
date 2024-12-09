@@ -4,7 +4,9 @@ import helmet from 'helmet';
 import http from 'http'; // Importer le module HTTP
 import marketRoutes from './routes/market.routes';
 import strictListRoutes from './routes/strictList.routes'; // Importer la nouvelle route Strict List
+import authRoutes from './routes/auth.routes';  // Ajouter l'import
 import { setupWebSocket } from './websocket.server';
+import walletRoutes from './routes/wallet.routes';  // Ajouter l'import
 
 const app = express();
 
@@ -16,6 +18,8 @@ app.use(express.json());
 // Routes
 app.use('/api', marketRoutes);
 app.use('/api', strictListRoutes); // Ajouter la route Strict List
+app.use('/api/auth', authRoutes);  // Ajouter la route d'authentification
+app.use('/api/wallets', walletRoutes);  // Ajouter la route
 
 // Créer le serveur HTTP
 const server = http.createServer(app);

@@ -7,6 +7,7 @@ import strictListRoutes from './routes/strictList.routes'; // Importer la nouvel
 import authRoutes from './routes/auth.routes';  // Ajouter l'import
 import { setupWebSocket } from './websocket.server';
 import walletRoutes from './routes/wallet.routes';  // Ajouter l'import
+import projectRoutes from './routes/project.routes';  // Ajouter l'import
 
 const app = express();
 
@@ -20,6 +21,7 @@ app.use('/api', marketRoutes);
 app.use('/api', strictListRoutes); // Ajouter la route Strict List
 app.use('/api/auth', authRoutes);  // Ajouter la route d'authentification
 app.use('/api/wallets', walletRoutes);  // Ajouter la route
+app.use('/api/projects', projectRoutes);  // Ajouter la route
 
 // Créer le serveur HTTP
 const server = http.createServer(app);

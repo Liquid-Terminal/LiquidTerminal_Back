@@ -32,10 +32,10 @@ model Project {
   title       String   @unique @db.VarChar(255)
   desc        String   @db.VarChar(255)
   logo        String   @db.VarChar(255)
-  twitter     String?  @unique @db.VarChar(255)
-  discord     String?  @unique @db.VarChar(255)
-  telegram    String?  @unique @db.VarChar(255)
-  website     String?  @unique @db.VarChar(255)
+  twitter     String?  @db.VarChar(255)
+  discord     String?  @db.VarChar(255)
+  telegram    String?  @db.VarChar(255)
+  website     String?  @db.VarChar(255)
 }
 
 model Watchlist {
@@ -62,4 +62,17 @@ model Resource {
   type      String          @db.VarChar(50) // Peut contenir "Token", "Wallet", etc.
   createdAt DateTime        @default(now()) @db.Timestamp(6)
   watchlistItems WatchlistItem[] // Relation avec WatchlistItem
+}
+
+model Auction {
+  id        Int      @id @default(autoincrement())
+  time      BigInt
+  deployer  String
+  name      String
+  deployGas String
+  tokenId   String   @unique
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+
+  @@index([time])
 }

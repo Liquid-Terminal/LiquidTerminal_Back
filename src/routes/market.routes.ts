@@ -17,4 +17,16 @@ router.get('/markets', async (req, res) => {
   }
 });
 
+router.get('/tokens-without-pairs', async (req, res) => {
+  try {
+    const tokens = await marketService.getTokensWithoutPairs();
+    res.json(tokens);
+  } catch (error) {
+    res.status(500).json({
+      error: 'Failed to fetch tokens without pairs',
+      message: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
 export default router;

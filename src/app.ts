@@ -8,6 +8,8 @@ import authRoutes from './routes/auth.routes';  // Ajouter l'import
 import { setupWebSocket } from './websocket.server';
 import walletRoutes from './routes/wallet.routes';  // Ajouter l'import
 import projectRoutes from './routes/project.routes';  // Ajouter l'import
+import tokenInfoRoutes from './routes/tokenInfo.routes';  // Ajouter l'import
+import auctionRoutes from './routes/auction.routes';
 
 const app = express();
 
@@ -17,11 +19,13 @@ app.use(cors());
 app.use(express.json());
 
 // Routes
-app.use('/api', marketRoutes);
+app.use('/api/markets', marketRoutes);
 app.use('/api', strictListRoutes); // Ajouter la route Strict List
 app.use('/api/auth', authRoutes);  // Ajouter la route d'authentification
 app.use('/api/wallets', walletRoutes);  // Ajouter la route
 app.use('/api/projects', projectRoutes);  // Ajouter la route
+app.use('/api/token-info', tokenInfoRoutes);  // Ajouter la route
+app.use('/api/auctions', auctionRoutes);
 
 // Créer le serveur HTTP
 const server = http.createServer(app);

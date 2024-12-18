@@ -1,5 +1,5 @@
 import fetch from 'node-fetch';
-import type { SpotContext, AssetContext, MarketData, TokenDetails } from '../types/market.types';
+import type { SpotContext, AssetContext, MarketData, TokenDetails, Token } from '../types/market.types';
 
 export class MarketService {
   private readonly HYPERLIQUID_API = 'https://api.hyperliquid.xyz/info';
@@ -88,6 +88,40 @@ export class MarketService {
 
     } catch (error) {
       console.error('Error fetching market data:', error);
+      throw error;
+    }
+  }
+
+  async getTokensWithoutPairs(): Promise<string[]> {
+    try {
+      const response = await fetch(this.HYPERLIQUID_API, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: "spotMetaAndAssetCtxs" })
+      });
+
+      if (!response.ok) {
+        throw new Error(`API responded with status: ${response.status}`);
+      }
+
+      const [spotData] = await response.json() as [SpotContext, AssetContext[]];
+
+      // Créer un Set des index de tokens utilisés dans l'univers
+      const usedTokenIndexes = new Set<number>();
+      spotData.universe.forEach(market => {
+        market.tokens.forEach(tokenIndex => {
+          usedTokenIndexes.add(tokenIndex);
+        });
+      });
+
+      // Filtrer les tokens qui ne sont pas dans l'univers et extraire uniquement les noms
+      const unusedTokenNames = spotData.tokens
+        .filter(token => !usedTokenIndexes.has(token.index))
+        .map(token => token.name);
+
+      return unusedTokenNames;
+    } catch (error) {
+      console.error('Error fetching unused tokens:', error);
       throw error;
     }
   }

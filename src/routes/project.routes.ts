@@ -1,5 +1,5 @@
 import express, { Request, Response, RequestHandler } from "express";
-import { ProjectService } from "../services/project.service";
+import { ProjectService } from "../services/pages/project.service";
 
 const router = express.Router();
 const projectService = new ProjectService();

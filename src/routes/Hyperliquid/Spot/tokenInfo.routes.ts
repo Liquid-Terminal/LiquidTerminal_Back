@@ -1,5 +1,5 @@
 import express, { Request, Response, RequestHandler } from "express";
-import { TokenInfoService } from "../services/tokenInfo.service";
+import { TokenInfoService } from "../../../services/apiHyperliquid/Spot/tokenInfo.service";
 
 const router = express.Router();
 const tokenInfoService = new TokenInfoService();

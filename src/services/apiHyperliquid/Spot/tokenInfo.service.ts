@@ -1,4 +1,4 @@
-import { TokenInfoResponse, FormattedTokenInfo, TokenHolder } from '../types/tokenInfo.types';
+import { TokenInfoResponse, FormattedTokenInfo, TokenHolder } from '../../../types/tokenInfo.types';
 
 export class TokenInfoService {
   private readonly HYPERLIQUID_API = 'https://api-ui.hyperliquid.xyz/info';

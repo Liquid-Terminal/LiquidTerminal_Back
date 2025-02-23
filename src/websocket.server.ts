@@ -1,12 +1,12 @@
-import { WebSocketServer } from "ws"; // Utiliser WebSocketServer
+import { WebSocketServer } from "ws";
 import type { Server } from "http";
-import { MarketService } from "./services/market.service";
-import { StrictListService } from "./services/strictList.service";
+import { SpotAssetContextService } from "./services/apiHyperliquid/Spot/spotAssetContext.service";
+import { StrictListService } from "./services/pages/Market/Spot/strictList.service";
 
 export function setupWebSocket(server: Server): void {
   const wss = new WebSocketServer({ server });
 
-  const marketService = new MarketService();
+  const marketService = new SpotAssetContextService();
   const strictListService = new StrictListService();
 
   wss.on("connection", (ws) => {
@@ -34,7 +34,7 @@ export function setupWebSocket(server: Server): void {
           })
         );
       }
-    }, 10000); // Rafraîchir toutes les secondes
+    }, 10000); // Rafraîchir toutes les 10 secondes
 
     ws.on("close", () => {
       console.log("Client disconnected");

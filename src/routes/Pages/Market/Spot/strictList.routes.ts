@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { StrictListService } from '../services/strictList.service';
+import { StrictListService } from '../../../../services/pages/Market/Spot/strictList.service';
 
 const router = Router();
 const strictListService = new StrictListService();

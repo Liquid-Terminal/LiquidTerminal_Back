@@ -1,6 +1,6 @@
 import express, { Request, Response, RequestHandler } from "express";
-import { WalletService } from "../services/wallet.service";
-import prisma from "../lib/prisma";
+import { WalletService } from "../../../services/walletDB.service";
+import prisma from "../../../lib/prisma";
 
 const router = express.Router();
 const walletService = new WalletService();

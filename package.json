@@ -15,17 +15,22 @@
   "license": "ISC",
   "dependencies": {
     "@prisma/client": "^6.0.1",
+    "compression": "^1.7.5",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.21.1",
+    "express-rate-limit": "^7.5.0",
     "helmet": "^8.0.0",
     "jose": "^5.9.6",
     "node-fetch": "^3.3.2",
+    "redis": "^4.7.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {
+    "@types/compression": "^1.7.5",
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
+    "@types/express-rate-limit": "^6.0.2",
     "@types/node": "^22.10.1",
     "@types/ws": "^8.5.13",
     "prisma": "^6.0.1",

@@ -5,6 +5,13 @@ export type AuctionInfo = {
   deployGas: string;
 }
 
+export interface TokenDetailsResponse {
+  deployTime: string;
+  deployer: string;
+  name: string;
+  deployGas: string;
+}
+
 export interface GasAuctionResponse {
   states: any[];
   gasAuction: {

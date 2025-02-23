@@ -1,5 +1,5 @@
-import prisma from "../lib/prisma";
-import { CreateProjectDto } from "../types/project.types";
+import prisma from "../../lib/prisma";
+import { CreateProjectDto } from "../../types/project.types";
 
 export class ProjectService {
   public async createProject(projectData: CreateProjectDto) {

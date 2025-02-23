@@ -1,10 +1,14 @@
 import express, { Request, Response, RequestHandler } from 'express';
-import { TokenIDListService } from '../services/tokenContract.service';
-import { AuctionService } from '../services/auction.service';
+import { AuctionPageService } from '../../../../services/pages/Market/Auction/auction.service';
+import { SpotAssetContextService } from '../../../../services/apiHyperliquid/Spot/spotAssetContext.service';
+import { TokenDetailsApiService } from '../../../../services/apiHyperliquid/Spot/tokenDetails.service';
+import { SpotDeployStateApiService } from '../../../../services/apiHyperliquid/Spot/spotDeployState.service';
 
 const router = express.Router();
-const tokenIDListService = new TokenIDListService();
-const auctionService = new AuctionService(tokenIDListService);
+const spotAssetContextService = new SpotAssetContextService();
+const tokenDetailsApi = new TokenDetailsApiService();
+const spotDeployStateApi = new SpotDeployStateApiService();
+const auctionService = new AuctionPageService(tokenDetailsApi, spotDeployStateApi, spotAssetContextService);
 
 router.get('/', (async (_req: Request, res: Response) => {
   try {

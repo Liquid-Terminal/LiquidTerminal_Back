@@ -1,13 +1,11 @@
 import { WebSocketServer } from "ws";
 import type { Server } from "http";
-import { SpotAssetContextService } from "./services/apiHyperliquid/Spot/spotAssetContext.service";
-import { StrictListService } from "./services/pages/Market/Spot/strictList.service";
+import { SpotAssetContextService } from "./services/apiHyperliquid/spot/spotAssetContext.service";
 
 export function setupWebSocket(server: Server): void {
   const wss = new WebSocketServer({ server });
 
   const marketService = new SpotAssetContextService();
-  const strictListService = new StrictListService();
 
   wss.on("connection", (ws) => {
     console.log("Client connected via WebSocket");
@@ -16,14 +14,11 @@ export function setupWebSocket(server: Server): void {
       try {
         // Récupérer toutes les données
         const allMarketsData = await marketService.getMarketsData();
-        // Filtrer pour la Strict List
-        const strictMarketsData = await strictListService.getStrictMarketsData();
 
-        // Envoyer les deux ensembles de données
+        // Envoyer les données
         ws.send(
           JSON.stringify({
-            all: allMarketsData,
-            strict: strictMarketsData,
+            all: allMarketsData
           })
         );
       } catch (error) {

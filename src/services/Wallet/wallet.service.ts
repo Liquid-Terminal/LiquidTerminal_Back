@@ -1,4 +1,4 @@
-import { WalletService } from './walletDB.service';
+import { WalletService } from '../walletDB.service';
 import type { WalletState } from '../../types/wallet.types';
 
 export class PortfolioService {

@@ -46,3 +46,34 @@ export interface TokenDetails {
     img: string;
     desc: string;
 }
+
+// Types pour les marchés perpétuels
+export interface PerpMarket {
+    name: string;
+    szDecimals: number;
+    maxLeverage: number;
+    onlyIsolated?: boolean;
+}
+
+export interface PerpAssetContext {
+    dayNtlVlm: string;
+    funding: string;
+    impactPxs: string[];
+    markPx: string;
+    midPx: string;
+    openInterest: string;
+    oraclePx: string;
+    premium: string;
+    prevDayPx: string;
+}
+
+export interface PerpMarketData {
+    name: string;
+    price: number;
+    change24h: number;
+    volume: number;
+    openInterest: number;
+    funding: number;
+    maxLeverage: number;
+    onlyIsolated: boolean;
+}

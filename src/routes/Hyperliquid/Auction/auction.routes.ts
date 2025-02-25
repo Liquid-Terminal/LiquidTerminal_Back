@@ -1,14 +1,14 @@
 import express, { Request, Response, RequestHandler } from 'express';
-import { AuctionPageService } from '../../../../services/pages/Market/Auction/auction.service';
-import { SpotAssetContextService } from '../../../../services/apiHyperliquid/Spot/spotAssetContext.service';
-import { TokenDetailsApiService } from '../../../../services/apiHyperliquid/Spot/tokenDetails.service';
-import { SpotDeployStateApiService } from '../../../../services/apiHyperliquid/Spot/spotDeployState.service';
+import { AuctionPageService } from '../../../services/apiHyperliquid/Auction/auction.service';
+import { SpotAssetContextService } from '../../../services/apiHyperliquid/Spot/spotAssetContext.service';
+import { TokenInfoService } from '../../../services/apiHyperliquid/Spot/tokenInfo.service';
+import { SpotDeployStateApiService } from '../../../services/apiHyperliquid/Spot/spotDeployState.service';
 
 const router = express.Router();
 const spotAssetContextService = new SpotAssetContextService();
-const tokenDetailsApi = new TokenDetailsApiService();
+const tokenInfoService = new TokenInfoService();
 const spotDeployStateApi = new SpotDeployStateApiService();
-const auctionService = new AuctionPageService(tokenDetailsApi, spotDeployStateApi, spotAssetContextService);
+const auctionService = new AuctionPageService(tokenInfoService, spotDeployStateApi, spotAssetContextService);
 
 router.get('/', (async (_req: Request, res: Response) => {
   try {
@@ -44,6 +44,19 @@ router.post('/update-cache', (async (_req: Request, res: Response) => {
     console.error('Error updating cache:', error);
     res.status(500).json({
       error: 'Failed to update cache',
+      message: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+}) as RequestHandler);
+
+router.get('/cache-status', (async (_req: Request, res: Response) => {
+  try {
+    const status = await auctionService.getCacheStatus();
+    res.json(status);
+  } catch (error) {
+    console.error('Error fetching cache status:', error);
+    res.status(500).json({
+      error: 'Failed to fetch cache status',
       message: error instanceof Error ? error.message : 'Unknown error'
     });
   }

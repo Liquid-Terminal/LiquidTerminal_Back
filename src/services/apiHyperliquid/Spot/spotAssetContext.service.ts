@@ -18,6 +18,14 @@ export class SpotAssetContextService extends BaseApiService {
   }
 
   /**
+   * Calcule la variation en pourcentage entre deux prix
+   */
+  private calculatePriceChange(currentPrice: number, previousPrice: number): number {
+    if (previousPrice === 0) return 0;
+    return Number(((currentPrice - previousPrice) / previousPrice * 100).toFixed(2));
+  }
+
+  /**
    * Récupère tous les tokens avec leurs informations complètes
    */
   public async getTokens(): Promise<Token[]> {
@@ -79,7 +87,6 @@ export class SpotAssetContextService extends BaseApiService {
             const currentPrice = Number(assetContext.markPx);
             const prevDayPrice = Number(assetContext.prevDayPx);
             const circulatingSupply = Number(assetContext.circulatingSupply);
-            const priceChange = ((currentPrice - prevDayPrice) / prevDayPrice) * 100;
             const volume = Number(assetContext.dayNtlVlm);
             const marketCap = currentPrice * circulatingSupply;
 
@@ -89,7 +96,7 @@ export class SpotAssetContextService extends BaseApiService {
               price: currentPrice,
               marketCap: marketCap,
               volume: volume,
-              change24h: Number(priceChange.toFixed(2)),
+              change24h: this.calculatePriceChange(currentPrice, prevDayPrice),
               liquidity: Number(assetContext.midPx),
               supply: circulatingSupply
             };

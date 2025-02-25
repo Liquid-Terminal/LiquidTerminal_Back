@@ -1,6 +1,6 @@
-import prisma from "../lib/prisma";
-import { SpotBalanceApiService } from './apiHyperliquid/Spot/spotBalance.api.service';
-import type { WalletState } from '../types/wallet.types';
+import prisma from "../../lib/prisma";
+import { SpotBalanceApiService } from '../apiHyperliquid/Spot/spotBalance.service';
+import type { WalletState } from '../../types/wallet.types';
 
 export class WalletService {
   private spotBalanceApiService: SpotBalanceApiService;

@@ -1,5 +1,5 @@
 import { Router, Request, Response, RequestHandler } from 'express';
-import { SpotBalanceApiService } from '../../../services/apiHyperliquid/Spot/spotBalance.api.service';
+import { SpotBalanceApiService } from '../../../services/apiHyperliquid/Spot/spotBalance.service';
 import { marketRateLimiter } from '../../../middleware/rateLimiter';
 
 const router = Router();

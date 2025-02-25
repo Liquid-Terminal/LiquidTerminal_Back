@@ -1,16 +1,16 @@
 import { Router, Request, Response, RequestHandler } from 'express';
-import { TokenDetailsApiService } from '../../../services/apiHyperliquid/Spot/tokenDetails.service';
+import { TokenInfoService } from '../../../services/apiHyperliquid/Spot/tokenInfo.service';
 import { marketRateLimiter } from '../../../middleware/rateLimiter';
 
 const router = Router();
-const tokenDetailsService = new TokenDetailsApiService();
+const tokenInfoService = new TokenInfoService();
 
 router.use(marketRateLimiter);
 
 router.get('/:tokenId', (async (req: Request, res: Response) => {
   try {
     const { tokenId } = req.params;
-    const details = await tokenDetailsService.getTokenDetailsRaw(tokenId);
+    const details = await tokenInfoService.getTokenDetailsRaw(tokenId);
     
     if (!details) {
       return res.status(404).json({ message: 'Token details not found' });

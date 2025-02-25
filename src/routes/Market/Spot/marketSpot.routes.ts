@@ -1,7 +1,7 @@
 // src/routes/market.routes.ts
 import { Router, Request, Response } from 'express';
-import { SpotAssetContextService } from '../../../../services/apiHyperliquid/Spot/spotAssetContext.service';
-import { marketRateLimiter } from '../../../../middleware/rateLimiter';
+import { SpotAssetContextService } from '../../../services/apiHyperliquid/Spot/spotAssetContext.service';
+import { marketRateLimiter } from '../../../middleware/rateLimiter';
 
 const router = Router();
 const marketService = new SpotAssetContextService();

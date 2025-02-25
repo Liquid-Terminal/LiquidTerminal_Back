@@ -3,6 +3,7 @@ export type AuctionInfo = {
   deployer: string;
   name: string;
   deployGas: string;
+  tokenId?: string; // Identifiant du token, optionnel car peut ne pas être disponible pour tous les tokens
 }
 
 export interface TokenDetailsResponse {

@@ -1,5 +1,5 @@
-import { WalletService } from '../../walletDB.service';
-import type { WalletState } from '../../../types/wallet.types';
+import { WalletService } from './walletDB.service';
+import type { WalletState } from '../../types/wallet.types';
 
 export class PortfolioService {
   private walletService: WalletService;

@@ -1,17 +1,10 @@
-import { DashboardGlobalStats } from '../types/globalStats.types';
+import { DashboardGlobalStats, SpotGlobalStats, PerpGlobalStats } from '../types/globalStats.types';
 import { GlobalStatsService } from './apiHyperliquid/globalStats.service';
 import { BridgedUsdcService } from './apiHyperliquid/bridgedUsdc.service';
 import { ValidatorSummariesService } from './apiHyperliquid/staking/validatorSummaries.service';
 import { SpotAssetContextService } from './apiHyperliquid/spot/spotAssetContext.service';
 import { SpotUSDCService } from './apiHyperliquid/spot/spotUSDC.service';
-
-export interface SpotGlobalStats {
-  totalVolume24h: number;
-  totalPairs: number;
-  totalMarketCap: number;
-  totalSpotUSDC: number;
-  totalHIP2: number;
-}
+import { PerpAssetContextService } from './apiHyperliquid/perp/perpAssetContext.service';
 
 export class DashboardGlobalStatsService {
   private globalStatsService: GlobalStatsService;
@@ -19,6 +12,7 @@ export class DashboardGlobalStatsService {
   private validatorSummariesService: ValidatorSummariesService;
   private spotAssetContextService: SpotAssetContextService;
   private spotUSDCService: SpotUSDCService;
+  private perpAssetContextService: PerpAssetContextService;
   private readonly HYPE_DECIMALS = 8;
 
   constructor() {
@@ -27,6 +21,7 @@ export class DashboardGlobalStatsService {
     this.validatorSummariesService = new ValidatorSummariesService();
     this.spotAssetContextService = new SpotAssetContextService();
     this.spotUSDCService = new SpotUSDCService();
+    this.perpAssetContextService = new PerpAssetContextService();
   }
 
   private formatHypeAmount(rawAmount: number): number {
@@ -97,6 +92,34 @@ export class DashboardGlobalStatsService {
       };
     } catch (error) {
       console.error('Error fetching spot global stats:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Récupère les statistiques globales du marché perpétuel
+   */
+  public async getPerpGlobalStats(): Promise<PerpGlobalStats> {
+    try {
+      // Récupérer les données des marchés perpétuels
+      const perpMarketsData = await this.perpAssetContextService.getPerpMarketsData();
+
+      // Calculer le volume total sur 24h
+      const totalVolume24h = perpMarketsData.reduce((total, market) => total + market.volume, 0);
+      
+      // Calculer le nombre total de paires
+      const totalPairs = perpMarketsData.length;
+      
+      // Calculer l'intérêt ouvert total
+      const totalOpenInterest = perpMarketsData.reduce((total, market) => total + market.openInterest, 0);
+
+      return {
+        totalOpenInterest,
+        totalVolume24h,
+        totalPairs
+      };
+    } catch (error) {
+      console.error('Error fetching perp global stats:', error);
       throw error;
     }
   }

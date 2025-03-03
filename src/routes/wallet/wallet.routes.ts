@@ -48,6 +48,15 @@ router.get("/user/:privyUserId", (async (req: Request, res: Response) => {
 router.get("/:address/info", (async (req: Request, res: Response) => {
   try {
     const { address } = req.params;
+    
+    // Vérifier que l'adresse est au format hexadécimal
+    if (!address || !/^0x[a-fA-F0-9]{40}$/.test(address)) {
+      return res.status(400).json({
+        error: 'Invalid address format',
+        message: 'Address must be a 42-character hexadecimal string starting with 0x'
+      });
+    }
+    
     const walletInfo = await walletService.getWalletInfo(address);
     res.json(walletInfo);
   } catch (error) {

@@ -15,4 +15,18 @@ export interface DashboardGlobalStats {
   dailyVolume: number;
   bridgedUsdc: number;
   totalHypeStake: number;
+}
+
+export interface SpotGlobalStats {
+  totalVolume24h: number;
+  totalPairs: number;
+  totalMarketCap: number;
+  totalSpotUSDC: number;
+  totalHIP2: number;
+}
+
+export interface PerpGlobalStats {
+  totalOpenInterest: number;
+  totalVolume24h: number;
+  totalPairs: number;
 } 

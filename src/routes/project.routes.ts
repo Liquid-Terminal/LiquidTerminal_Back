@@ -75,4 +75,58 @@ router.delete("/:id", (async (req: Request, res: Response) => {
   }
 }) as RequestHandler);
 
+// Mettre à jour la catégorie d'un projet
+router.put("/:id/category", (async (req: Request, res: Response) => {
+  try {
+    const projectId = parseInt(req.params.id);
+    const { categoryId } = req.body;
+    
+    // Vérifier que categoryId est un nombre ou null
+    if (categoryId !== null && (isNaN(Number(categoryId)) || !Number.isInteger(Number(categoryId)))) {
+      return res.status(400).json({ message: "L'ID de catégorie doit être un nombre entier ou null" });
+    }
+    
+    const project = await projectService.updateProjectCategory(
+      projectId, 
+      categoryId === null ? null : Number(categoryId)
+    );
+    
+    res.json(project);
+  } catch (error: any) {
+    console.error("Erreur lors de la mise à jour de la catégorie du projet:", error);
+    
+    if (error.message === "Projet non trouvé") {
+      return res.status(404).json({ message: "Projet non trouvé" });
+    }
+    
+    if (error.message === "Catégorie non trouvée") {
+      return res.status(404).json({ message: "Catégorie non trouvée" });
+    }
+    
+    res.status(500).json({ message: error.message || "Erreur interne du serveur" });
+  }
+}) as RequestHandler);
+
+// Récupérer tous les projets d'une catégorie
+router.get("/category/:categoryId", (async (req: Request, res: Response) => {
+  try {
+    const categoryId = parseInt(req.params.categoryId);
+    
+    if (isNaN(categoryId)) {
+      return res.status(400).json({ message: "L'ID de catégorie doit être un nombre entier" });
+    }
+    
+    const projects = await projectService.getProjectsByCategory(categoryId);
+    res.json(projects);
+  } catch (error: any) {
+    console.error("Erreur lors de la récupération des projets par catégorie:", error);
+    
+    if (error.message === "Catégorie non trouvée") {
+      return res.status(404).json({ message: "Catégorie non trouvée" });
+    }
+    
+    res.status(500).json({ message: error.message || "Erreur interne du serveur" });
+  }
+}) as RequestHandler);
+
 export default router; 

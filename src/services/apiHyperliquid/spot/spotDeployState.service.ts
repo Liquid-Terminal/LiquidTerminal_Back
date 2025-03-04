@@ -19,7 +19,8 @@ export class SpotDeployStateApiService extends BaseApiService {
 
   public async getAuctionTiming(): Promise<AuctionTimingInfo> {
     const response = await this.post<GasAuctionResponse>('', {
-      type: "spotDeployState"
+      type: "spotDeployState",
+  user: "0x0000000000000000000000000000000000000000"
     });
 
     const { gasAuction } = response;

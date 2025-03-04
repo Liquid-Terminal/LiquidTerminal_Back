@@ -8,60 +8,72 @@ datasource db {
 }
 
 model User {
-  id            Int         @id @default(autoincrement())
-  privyUserId   String      @unique
-  name          String?     @db.VarChar(255)
-  email         String?     @unique @db.VarChar(255) // Ajout optionnel pour future identification
-  createdAt     DateTime    @default(now()) @db.Timestamp(6)
-  verified      Boolean     @default(false)
-  Wallets       Wallet[]    // Relation avec les wallets
-  Watchlists    Watchlist[] // Relation avec les watchlists
+  id          Int         @id @default(autoincrement())
+  privyUserId String      @unique
+  name        String?     @db.VarChar(255)
+  email       String?     @unique @db.VarChar(255)
+  createdAt   DateTime    @default(now()) @db.Timestamp(6)
+  verified    Boolean     @default(false)
+  Wallets     Wallet[]
+  Watchlists  Watchlist[]
 }
 
 model Wallet {
-  id        Int      @id @default(autoincrement())
-  address   String   @unique @db.VarChar(255) // Adresse publique du wallet
-  addedAt   DateTime @default(now()) @db.Timestamp(6)
-  userId    Int      // Relation avec l'utilisateur
-  User      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id      Int      @id @default(autoincrement())
+  address String   @unique @db.VarChar(255)
+  addedAt DateTime @default(now()) @db.Timestamp(6)
+  userId  Int
+  User    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Category {
+  id          Int       @id @default(autoincrement())
+  name        String    @unique @db.VarChar(100)
+  description String?   @db.VarChar(255)
+  createdAt   DateTime  @default(now()) @db.Timestamp(6)
+  updatedAt   DateTime  @updatedAt
+  projects    Project[]
 }
 
 model Project {
-  id          Int      @id @default(autoincrement())
-  createdAt   DateTime @default(now()) @db.Timestamp(6)
-  title       String   @unique @db.VarChar(255)
-  desc        String   @db.VarChar(255)
-  logo        String   @db.VarChar(255)
-  twitter     String?  @db.VarChar(255)
-  discord     String?  @db.VarChar(255)
-  telegram    String?  @db.VarChar(255)
-  website     String?  @db.VarChar(255)
+  id         Int       @id @default(autoincrement())
+  createdAt  DateTime  @default(now()) @db.Timestamp(6)
+  updatedAt  DateTime  @updatedAt
+  title      String    @unique @db.VarChar(255)
+  desc       String    @db.VarChar(255)
+  logo       String    @db.VarChar(255)
+  twitter    String?   @db.VarChar(255)
+  discord    String?   @db.VarChar(255)
+  telegram   String?   @db.VarChar(255)
+  website    String?   @db.VarChar(255)
+  categoryId Int?
+  category   Category? @relation(fields: [categoryId], references: [id])
 }
 
 model Watchlist {
   id        Int             @id @default(autoincrement())
   name      String          @db.VarChar(255)
   createdAt DateTime        @default(now()) @db.Timestamp(6)
-  userId    Int             // Relation avec l'utilisateur
+  userId    Int
   User      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  items     WatchlistItem[] // Relation avec les éléments de la watchlist
+  items     WatchlistItem[]
 }
 
 model WatchlistItem {
-  id          Int          @id @default(autoincrement())
-  addedAt     DateTime     @default(now()) @db.Timestamp(6)
+  id          Int       @id @default(autoincrement())
+  addedAt     DateTime  @default(now()) @db.Timestamp(6)
   resourceId  Int
   watchlistId Int
-  Resource    Resource     @relation(fields: [resourceId], references: [id], onDelete: Cascade)
-  Watchlist   Watchlist    @relation(fields: [watchlistId], references: [id], onDelete: Cascade)
+  Resource    Resource  @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+  Watchlist   Watchlist @relation(fields: [watchlistId], references: [id], onDelete: Cascade)
 }
 
 model Resource {
-  id        Int             @id @default(autoincrement())
-  name      String          @db.VarChar(255)
-  type      String          @db.VarChar(50) // Peut contenir "Token", "Wallet", etc.
-  createdAt DateTime        @default(now()) @db.Timestamp(6)
-  watchlistItems WatchlistItem[] // Relation avec WatchlistItem
+  id             Int             @id @default(autoincrement())
+  name           String          @db.VarChar(255)
+  type           String          @db.VarChar(50)
+  createdAt      DateTime        @default(now()) @db.Timestamp(6)
+  watchlistItems WatchlistItem[]
 }
 
 model Auction {

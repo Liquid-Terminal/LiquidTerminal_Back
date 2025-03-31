@@ -1,3 +1,5 @@
+import { BaseResponse, TimeRange } from './common.types';
+
 export interface VaultPortfolioData {
   accountValueHistory: [number, string][];
   pnlHistory: [number, string][];
@@ -29,8 +31,18 @@ export interface VaultRelationship {
   type: string;
   data: {
     childAddresses?: string[];
-    // Autres propriétés possibles selon le type de relation
+    parentAddress?: string;
+    relationshipType?: 'parent' | 'child' | 'sibling';
   };
+}
+
+export interface FollowerState {
+  isFollowing: boolean;
+  canFollow: boolean;
+  canUnfollow: boolean;
+  pendingWithdrawal: boolean;
+  withdrawalAmount?: string;
+  withdrawalTime?: number;
 }
 
 export interface VaultDetails {
@@ -40,7 +52,7 @@ export interface VaultDetails {
   description: string;
   portfolio: [string, VaultPortfolioData][];
   apr: number;
-  followerState: any;
+  followerState: FollowerState;
   leaderFraction: number;
   leaderCommission: number;
   followers: VaultFollower[];
@@ -52,8 +64,12 @@ export interface VaultDetails {
   alwaysCloseOnWithdraw: boolean;
 }
 
-export interface VaultDetailsRequest {
+export interface VaultDetailsRequest extends TimeRange {
   type: string;
   vaultAddress: string;
   user?: string;
+}
+
+export interface VaultDetailsResponse extends BaseResponse {
+  data: VaultDetails;
 } 

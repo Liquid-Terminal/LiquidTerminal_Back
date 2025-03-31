@@ -1,11 +1,15 @@
+import { BaseResponse, TokenAmount } from './common.types';
+
 export interface Delegation {
   validator: string;
   amount: string;
   lockedUntilTimestamp: number;
 }
 
-export interface DelegationsResponse {
-  delegations: Delegation[];
+export interface DelegationsResponse extends BaseResponse {
+  data: {
+    delegations: Delegation[];
+  };
 }
 
 export interface DelegatorSummary {
@@ -61,4 +65,8 @@ export interface ValidatorSummary {
   unjailableAfter: number | null;
 }
 
-export type ValidatorSummaries = ValidatorSummary[]; 
+export type ValidatorSummaries = ValidatorSummary[];
+
+export interface ValidatorSummariesResponse extends BaseResponse {
+  data: ValidatorSummaries;
+} 

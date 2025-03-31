@@ -1,10 +1,11 @@
-import { DashboardGlobalStats, SpotGlobalStats, PerpGlobalStats } from '../types/globalStats.types';
-import { GlobalStatsService } from './apiHyperliquid/globalStats.service';
-import { BridgedUsdcService } from './apiHyperliquid/bridgedUsdc.service';
-import { ValidatorSummariesService } from './apiHyperliquid/staking/validatorSummaries.service';
-import { SpotAssetContextService } from './apiHyperliquid/spot/spotAssetContext.service';
-import { SpotUSDCService } from './apiHyperliquid/spot/spotUSDC.service';
-import { PerpAssetContextService } from './apiHyperliquid/perp/perpAssetContext.service';
+import { DashboardGlobalStats, SpotGlobalStats, PerpGlobalStats, MarketData } from '../types/market.types';
+import { ValidatorSummary } from '../types/staking.types';
+import { GlobalStatsService } from './globalStats.service';
+import { BridgedUsdcService } from './bridgedUsdc.service';
+import { ValidatorSummariesService } from './staking/validatorSummaries.service';
+import { SpotAssetContextService } from './market/spot/spotAssetContext.service';
+import { SpotUSDCService } from './market/spot/spotUSDC.service';
+import { PerpAssetContextService } from './market/perp/perpAssetContext.service';
 
 export class DashboardGlobalStatsService {
   private globalStatsService: GlobalStatsService;
@@ -41,7 +42,7 @@ export class DashboardGlobalStatsService {
       ]);
 
       // Calculer le total de HYPE staké
-      const rawTotalHypeStake = validatorSummaries.reduce((total, validator) => total + validator.stake, 0);
+      const rawTotalHypeStake = validatorSummaries.reduce((total: number, validator: ValidatorSummary) => total + validator.stake, 0);
       const totalHypeStake = this.formatHypeAmount(rawTotalHypeStake);
 
       // Prendre la dernière valeur de USDC bridgé
@@ -71,13 +72,13 @@ export class DashboardGlobalStatsService {
       ]);
 
       // Calculer le volume total sur 24h
-      const totalVolume24h = marketsData.reduce((total, market) => total + market.volume, 0);
+      const totalVolume24h = marketsData.reduce((total: number, market: MarketData) => total + market.volume, 0);
       
       // Calculer le nombre total de paires
       const totalPairs = marketsData.length;
       
       // Calculer la capitalisation totale du marché
-      const totalMarketCap = marketsData.reduce((total, market) => total + market.marketCap, 0);
+      const totalMarketCap = marketsData.reduce((total: number, market: MarketData) => total + market.marketCap, 0);
       
       // Récupérer les données USDC spot
       const totalSpotUSDC = spotUSDCData.totalSpotUSDC;

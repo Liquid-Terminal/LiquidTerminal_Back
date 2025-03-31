@@ -1,3 +1,5 @@
+import { BaseResponse } from './common.types';
+
 export interface BlockDetailsRequest {
   type: string;
   height: number;
@@ -36,4 +38,12 @@ export interface TxDetails {
   value: string;
   type: string;
   // Autres propriétés possibles selon la réponse de l'API
+}
+
+export interface BlockDetailsResponse extends BaseResponse {
+  data: BlockDetails;
+}
+
+export interface TxDetailsResponse extends BaseResponse {
+  data: TxDetails;
 } 

@@ -75,7 +75,7 @@ export abstract class BaseApiService {
     }
   
     // Méthodes HTTP principales
-    protected async post<T>(endpoint: string, body: any): Promise<T> {
+    public async post<T>(endpoint: string, body: any): Promise<T> {
       return this.withRetry(() => 
         this.fetchWithTimeout<T>(endpoint, {
           method: 'POST',
@@ -84,7 +84,7 @@ export abstract class BaseApiService {
       );
     }
   
-    protected async get<T>(endpoint: string): Promise<T> {
+    public async get<T>(endpoint: string): Promise<T> {
       return this.withRetry(() => 
         this.fetchWithTimeout<T>(endpoint, {
           method: 'GET',
@@ -97,7 +97,7 @@ export abstract class BaseApiService {
       return new Promise(resolve => setTimeout(resolve, ms));
     }
   
-    protected handleError(error: unknown): never {
+    public handleError(error: unknown): never {
       if (error instanceof Error) {
         throw new Error(`${this.constructor.name} error: ${error.message}`);
       }

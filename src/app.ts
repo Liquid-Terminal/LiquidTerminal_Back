@@ -5,31 +5,18 @@ import authRoutes from './routes/auth.routes';
 import marketSpotRoutes from './routes/market/Spot/marketSpot.routes';
 import marketPerpRoutes from './routes/market/Perp/marketPerp.routes';
 import walletRoutes from './routes/wallet/wallet.routes';
-import projectRoutes from './routes/project.routes';
-import categoryRoutes from './routes/category.routes';
-import tokenInfoRoutes from './routes/hyperLiquid/spot/tokenInfo.routes';
-import tokenDetailsRoutes from './routes/hyperLiquid/spot/tokenDetails.routes';
-import spotDeployStateRoutes from './routes/hyperLiquid/spot/spotDeployState.routes';
-import spotBalanceRoutes from './routes/hyperLiquid/spot/spotBalance.routes';
-import spotAssetContextRoutes from './routes/hyperLiquid/spot/spotAssetContext.routes';
-import spotMetaRoutes from './routes/hyperLiquid/spot/spotMeta.routes';
-import spotUSDCRoutes from './routes/hyperLiquid/spot/spotUSDC.routes';
-import perpAssetContextRoutes from './routes/hyperLiquid/perp/perpAssetContext.routes'; 
-import delegationsRoutes from './routes/hyperLiquid/staking/delegations.routes';
-import delegatorSummaryRoutes from './routes/hyperLiquid/staking/delegatorSummary.routes';
-import delegatorHistoryRoutes from './routes/hyperLiquid/staking/delegatorHistory.routes';
-import delegatorRewardsRoutes from './routes/hyperLiquid/staking/delegatorRewards.routes';
-import validatorSummariesRoutes from './routes/hyperLiquid/staking/validatorSummaries.routes';
+import projectRoutes from './routes/project/project.routes';
+import categoryRoutes from './routes/project/category.routes';
+import walletDetailsRoutes from './routes/explorer/walletDetails.routes';
+import blockDetailsRoutes from './routes/explorer/blockDetails.routes';
+import txDetailsRoutes from './routes/explorer/txDetails.routes';
+
 import dashboardGlobalStatsRoutes from './routes/globalStats.routes';
 import globalSpotStatsRoutes from './routes/market/Spot/globalSpotStats.routes';
 import globalPerpStatsRoutes from './routes/market/Perp/globalPerpStats.routes';
-import vaultDetailsRoutes from './routes/hyperLiquid/vault/vaultDetails.routes';
-import blockDetailsRoutes from './routes/hyperLiquid/explorer/blockDetails.routes';
-import txDetailsRoutes from './routes/hyperLiquid/explorer/txDetails.routes';
-import globalStatsRoutes from './routes/hyperLiquid/globalStats.routes';
-import bridgedUsdcRoutes from './routes/hyperLiquid/bridgedUsdc.routes';
+
 import { setupWebSocket } from './websocket.server';
-import auctionRoutes from './routes/hyperLiquid/auction/auction.routes';
+import auctionRoutes from './routes/market/auction.routes';
 
 const app = express();
 const server = createServer(app);
@@ -46,33 +33,16 @@ app.use('/pages/market/auction', auctionRoutes);
 app.use('/pages/wallet', walletRoutes);
 app.use('/pages/projects', projectRoutes);
 app.use('/pages/categories', categoryRoutes);
-app.use('/pages/dashboard/globalstats', dashboardGlobalStatsRoutes);
+app.use('/dashboard/globalstats', dashboardGlobalStatsRoutes);
 app.use('/pages/market/spot/globalstats', globalSpotStatsRoutes);
 app.use('/pages/market/perp/globalstats', globalPerpStatsRoutes);
 
+// Routes Explorer
+app.use('/explorer', walletDetailsRoutes);
+app.use('/explorer/block', blockDetailsRoutes);
+app.use('/explorer/tx', txDetailsRoutes);
+
 // Routes Hyperliquid
-app.use('/hyperliquid/spot/token-info', tokenInfoRoutes);
-app.use('/hyperliquid/spot/token-details', tokenDetailsRoutes);
-app.use('/hyperliquid/spot/deploy-state', spotDeployStateRoutes);
-app.use('/hyperliquid/spot/balance', spotBalanceRoutes);
-app.use('/hyperliquid/spot/asset-context', spotAssetContextRoutes);
-app.use('/hyperliquid/spot/meta', spotMetaRoutes);
-app.use('/hyperliquid/spot/usdc', spotUSDCRoutes);
-
-app.use('/hyperliquid/perp/asset-context', perpAssetContextRoutes);
-
-app.use('/hyperliquid/staking/delegations', delegationsRoutes);
-app.use('/hyperliquid/staking/summary', delegatorSummaryRoutes);
-app.use('/hyperliquid/staking/history', delegatorHistoryRoutes);
-app.use('/hyperliquid/staking/rewards', delegatorRewardsRoutes);
-app.use('/hyperliquid/staking/validators', validatorSummariesRoutes);
-
-app.use('/hyperliquid/bridged-usdc', bridgedUsdcRoutes);
-app.use('/hyperliquid/global-stats', globalStatsRoutes);
-app.use('/hyperliquid/vault/details', vaultDetailsRoutes);
-
-app.use('/hyperliquid/explorer/block', blockDetailsRoutes);
-app.use('/hyperliquid/explorer/tx', txDetailsRoutes);
 
 // WebSocket setup
 setupWebSocket(server);

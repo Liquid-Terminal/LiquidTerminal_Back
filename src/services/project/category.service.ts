@@ -1,5 +1,5 @@
 import prisma from '../../lib/prisma';
-import { CategoryCreateInput, CategoryUpdateInput } from '../../types/category.types';
+import { CategoryCreateInput, CategoryUpdateInput } from '../../types/project.types';
 
 export class CategoryService {
   /**

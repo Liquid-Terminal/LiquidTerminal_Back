@@ -1,12 +1,14 @@
 import express, { Request, Response, RequestHandler } from 'express';
-import { AuctionPageService } from '../../services/market/auction/auction.service';
-import { SpotAssetContextService } from '../../services/market/spot/spotAssetContext.service';
-import { TokenInfoService } from '../../services/market/spot/tokenInfo.service';
-import { SpotDeployStateApiService } from '../../services/market/spot/spotDeployState.service';
+import { AuctionPageService } from '../../services/spot/auction/auction.service';
+import { SpotAssetContextService } from '../../services/spot/marketData.service';
+import { TokenInfoService } from '../../services/spot/tokenInfo.service';
+import { SpotDeployStateApiService } from '../../services/spot/auction/auctionTiming.service';
+import { HyperliquidSpotClient } from '../../clients/hyperliquid/spot/spot.assetcontext.client';
+import { HyperliquidTokenInfoClient } from '../../clients/hyperliquid/spot/spot.tokeninfo.client';
 
 const router = express.Router();
-const spotAssetContextService = new SpotAssetContextService();
-const tokenInfoService = new TokenInfoService();
+const spotAssetContextService = new SpotAssetContextService(HyperliquidSpotClient.getInstance());
+const tokenInfoService = new TokenInfoService(HyperliquidTokenInfoClient.getInstance());
 const spotDeployStateApi = new SpotDeployStateApiService();
 const auctionService = new AuctionPageService(tokenInfoService, spotDeployStateApi, spotAssetContextService);
 

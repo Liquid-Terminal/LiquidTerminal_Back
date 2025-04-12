@@ -1,32 +1,30 @@
-import { BaseApiService } from '../base/base.api.service';
-import { VaultDetails, VaultDetailsRequest } from '../../types/vault.types';
+import { VaultDetails } from '../../types/vault.types';
+import { HyperliquidVaultClient } from '../../clients/hyperliquid/vault/vault.client';
 
-export class VaultDetailsService extends BaseApiService {
+export class VaultDetailsService {
+  private hyperliquidClient: HyperliquidVaultClient;
+
   constructor() {
-    super('https://api.hyperliquid.xyz/info');
+    this.hyperliquidClient = HyperliquidVaultClient.getInstance();
   }
 
   /**
-   * Récupère les détails d'un vault spécifique
-   * @param vaultAddress Adresse du vault au format hexadécimal
-   * @param user Adresse de l'utilisateur (optionnel)
+   * Récupère les détails du vault pour une adresse donnée
+   * @param address L'adresse de l'utilisateur
    */
-  public async getVaultDetails(vaultAddress: string, user?: string): Promise<VaultDetails> {
+  public async getVaultDetailsRaw(address: string): Promise<VaultDetails> {
     try {
-      const request: VaultDetailsRequest = {
-        type: "vaultDetails",
-        vaultAddress: vaultAddress
-      };
-
-      // Ajouter l'utilisateur à la requête s'il est fourni
-      if (user) {
-        request.user = user;
-      }
-
-      const response = await this.post('', request) as VaultDetails;
-      return response;
+      return await this.hyperliquidClient.getVaultDetailsRaw(address);
     } catch (error) {
-      throw this.handleError(error);
+      console.error('Error fetching vault details:', error);
+      throw error;
     }
+  }
+
+  /**
+   * Récupère le poids de la requête pour le rate limiting
+   */
+  public getRequestWeight(): number {
+    return HyperliquidVaultClient.getRequestWeight();
   }
 } 

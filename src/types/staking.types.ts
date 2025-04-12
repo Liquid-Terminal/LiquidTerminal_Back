@@ -1,55 +1,5 @@
-import { BaseResponse, TokenAmount } from './common.types';
+import { BaseResponse } from './common.types';
 
-export interface Delegation {
-  validator: string;
-  amount: string;
-  lockedUntilTimestamp: number;
-}
-
-export interface DelegationsResponse extends BaseResponse {
-  data: {
-    delegations: Delegation[];
-  };
-}
-
-export interface DelegatorSummary {
-  delegated: string;
-  undelegated: string;
-  totalPendingWithdrawal: string;
-  nPendingWithdrawals: number;
-}
-
-export interface DelegationAction {
-  validator: string;
-  amount: string;
-  isUndelegate: boolean;
-}
-
-export interface DelegationDelta {
-  delegate: DelegationAction;
-}
-
-export interface DelegatorHistoryEntry {
-  time: number;
-  hash: string;
-  delta: DelegationDelta;
-}
-
-export type DelegatorHistory = DelegatorHistoryEntry[];
-
-export interface DelegatorReward {
-  time: number;
-  source: 'delegation' | 'commission';
-  totalAmount: string;
-}
-
-export type DelegatorRewards = DelegatorReward[];
-
-export interface ValidatorStats {
-  uptimeFraction: string;
-  predictedApr: string;
-  nSamples: number;
-}
 
 export interface ValidatorSummary {
   validator: string;
@@ -61,7 +11,6 @@ export interface ValidatorSummary {
   name: string;
   signer: string;
   stake: number;
-  stats: [string, ValidatorStats][];
   unjailableAfter: number | null;
 }
 
@@ -69,4 +18,26 @@ export type ValidatorSummaries = ValidatorSummary[];
 
 export interface ValidatorSummariesResponse extends BaseResponse {
   data: ValidatorSummaries;
+}
+
+export interface TrendingValidator {
+  name: string;
+  stake: number;
+  apr: number;
+}
+
+export interface ValidatorDetails {
+  name: string;
+  stake: number;
+  apr: number;
+  commission: number;
+  uptime: number;
+}
+
+export interface TrendingValidatorsResponse extends BaseResponse {
+  data: TrendingValidator[];
+}
+
+export interface ValidatorDetailsResponse extends BaseResponse {
+  data: ValidatorDetails[];
 } 

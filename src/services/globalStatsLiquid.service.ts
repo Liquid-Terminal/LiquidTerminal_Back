@@ -2,10 +2,12 @@ import { DashboardGlobalStats, SpotGlobalStats, PerpGlobalStats, MarketData } fr
 import { ValidatorSummary } from '../types/staking.types';
 import { GlobalStatsService } from './globalStats.service';
 import { BridgedUsdcService } from './bridgedUsdc.service';
-import { ValidatorSummariesService } from './staking/validatorSummaries.service';
-import { SpotAssetContextService } from './market/spot/spotAssetContext.service';
-import { SpotUSDCService } from './market/spot/spotUSDC.service';
-import { PerpAssetContextService } from './market/perp/perpAssetContext.service';
+import { ValidatorSummariesService } from './staking/validator.service';
+import { SpotAssetContextService } from './spot/marketData.service';
+import { SpotUSDCService } from './spot/spotUSDC.service';
+import { PerpAssetContextService } from './perp/perpAssetContext.service';
+import { HyperliquidSpotClient } from '../clients/hyperliquid/spot/spot.assetcontext.client';
+import { HyperliquidPerpClient } from '../clients/hyperliquid/perp/perp.assetcontext.client';
 
 export class DashboardGlobalStatsService {
   private globalStatsService: GlobalStatsService;
@@ -19,10 +21,10 @@ export class DashboardGlobalStatsService {
   constructor() {
     this.globalStatsService = new GlobalStatsService();
     this.bridgedUsdcService = new BridgedUsdcService();
-    this.validatorSummariesService = new ValidatorSummariesService();
-    this.spotAssetContextService = new SpotAssetContextService();
+    this.validatorSummariesService = ValidatorSummariesService.getInstance();
+    this.spotAssetContextService = new SpotAssetContextService(HyperliquidSpotClient.getInstance());
     this.spotUSDCService = new SpotUSDCService();
-    this.perpAssetContextService = new PerpAssetContextService();
+    this.perpAssetContextService = new PerpAssetContextService(HyperliquidPerpClient.getInstance());
   }
 
   private formatHypeAmount(rawAmount: number): number {
@@ -38,7 +40,7 @@ export class DashboardGlobalStatsService {
       const [globalStats, bridgedUsdcData, validatorSummaries] = await Promise.all([
         this.globalStatsService.getGlobalStats(),
         this.bridgedUsdcService.getBridgedUsdcData(),
-        this.validatorSummariesService.getValidatorSummariesRaw()
+        this.validatorSummariesService.getValidatorSummaries()
       ]);
 
       // Calculer le total de HYPE staké

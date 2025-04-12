@@ -1,0 +1,99 @@
+import { Request, Response, NextFunction } from 'express';
+import { redisService } from '../core/redis.service';
+
+// Configuration des limites
+const RATE_LIMITS = {
+  // Limites par seconde pour prévenir les bursts
+  BURST_LIMIT: {
+    WINDOW: 1,      // 1 seconde
+    MAX_REQUESTS: 50 // 50 requêtes max par seconde
+  },
+  // Limites par minute pour le moyen terme
+  MINUTE_LIMIT: {
+    WINDOW: 60,      // 60 secondes
+    MAX_REQUESTS: 300 // 300 requêtes max par minute
+  },
+  // Limites par heure pour détecter les abus
+  HOUR_LIMIT: {
+    WINDOW: 3600,     // 3600 secondes
+    MAX_REQUESTS: 1000 // 1000 requêtes max par heure
+  }
+};
+
+// Clés Redis pour les différentes fenêtres de temps
+const getRedisKeys = (ip: string) => ({
+  burstKey: `ratelimit:${ip}:burst`,
+  minuteKey: `ratelimit:${ip}:minute`,
+  hourKey: `ratelimit:${ip}:hour`
+});
+
+export const marketRateLimiter = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  const ip = req.ip;
+  
+  if (!ip) {
+    res.status(400).json({
+      error: 'IP address not found',
+      message: 'Could not determine client IP address'
+    });
+    return;
+  }
+
+  const keys = getRedisKeys(ip);
+  const now = Math.floor(Date.now() / 1000);
+
+  try {
+    // Vérification multi-niveaux avec Redis
+    const [burstCount, minuteCount, hourCount] = await Promise.all([
+      incrementAndGetCount(keys.burstKey, now, RATE_LIMITS.BURST_LIMIT.WINDOW),
+      incrementAndGetCount(keys.minuteKey, now, RATE_LIMITS.MINUTE_LIMIT.WINDOW),
+      incrementAndGetCount(keys.hourKey, now, RATE_LIMITS.HOUR_LIMIT.WINDOW)
+    ]);
+
+    // Vérification des limites
+    if (burstCount > RATE_LIMITS.BURST_LIMIT.MAX_REQUESTS) {
+      return sendLimitExceededResponse(res, 'Too many requests per second');
+    }
+
+    if (minuteCount > RATE_LIMITS.MINUTE_LIMIT.MAX_REQUESTS) {
+      return sendLimitExceededResponse(res, 'Too many requests per minute');
+    }
+
+    if (hourCount > RATE_LIMITS.HOUR_LIMIT.MAX_REQUESTS) {
+      return sendLimitExceededResponse(res, 'Too many requests per hour');
+    }
+
+    next();
+  } catch (error) {
+    console.error('Rate limiter error:', error);
+    // En cas d'erreur Redis, on laisse passer la requête
+    // mais on log l'erreur pour le monitoring
+    next();
+  }
+};
+
+async function incrementAndGetCount(key: string, now: number, window: number): Promise<number> {
+  const multi = redisService.multi();
+  
+  // Ajouter le timestamp actuel au sorted set
+  multi.zAdd(key, { score: now, value: `${now}` });
+  
+  // Nettoyer les anciennes entrées
+  multi.zRemRangeByScore(key, 0, now - window);
+  
+  // Compter les entrées restantes
+  multi.zCard(key);
+  
+  // Définir une expiration sur la clé
+  multi.expire(key, window * 2);
+  
+  const results = await multi.exec();
+  return results ? results[2] as number : 0;
+}
+
+function sendLimitExceededResponse(res: Response, message: string): void {
+  res.status(429).json({
+    error: 'Rate limit exceeded',
+    message,
+    retryAfter: 60 // Suggérer d'attendre 1 minute
+  });
+} 

@@ -1,5 +1,4 @@
 import { WalletService } from './walletDB.service';
-import type { WalletState } from '../../types/wallet.types';
 
 export class PortfolioService {
   private walletService: WalletService;
@@ -10,19 +9,15 @@ export class PortfolioService {
 
   async getPortfolioData(userId: number) {
     try {
-      const walletsInfo = await this.walletService.getAllWalletsInfo(userId);
+      // Récupérer uniquement les wallets stockés en DB
+      const wallets = await this.walletService.getWalletsByUser(userId);
       
       return {
-        wallets: walletsInfo,
-        totalBalance: this.calculateTotalBalance(walletsInfo),
-        // Autres données nécessaires pour la page portfolio...
+        wallets: wallets,
+        // On ne calcule plus de totalBalance car on n'a plus les données de balance
       };
     } catch (error) {
       throw new Error(`Erreur lors de la récupération des données du portfolio: ${error}`);
     }
-  }
-
-  private calculateTotalBalance(wallets: WalletState[]) {
-    // Logique de calcul du total
   }
 }

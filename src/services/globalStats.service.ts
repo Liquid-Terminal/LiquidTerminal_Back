@@ -1,5 +1,5 @@
 import { GlobalStats, GlobalStatsResponse } from '../types/market.types';
-import { redisService } from '../services/redis.service';
+import { redisService } from '../core/redis.service';
 
 export class GlobalStatsService {
   private readonly HYPERLIQUID_API = 'https://api.hyperliquid.xyz/info';

@@ -25,6 +25,6 @@
       "@/*": ["src/*"]
     }
   },
-  "include": ["src", "lib"],                                    /* Include all files in the "src" directory. */
+  "include": ["src", "lib", "src/services/market/spot/marketData.service.ts"],                                    /* Include all files in the "src" directory. */
   "exclude": ["node_modules", "dist"]                   /* Exclude "node_modules" and "dist" directories. */
 }

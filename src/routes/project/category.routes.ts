@@ -1,6 +1,6 @@
 import { Router, Request, Response, RequestHandler } from 'express';
 import { CategoryService } from '../../services/project/category.service';
-import { CategoryCreateInput, CategoryUpdateInput } from '../../types/category.types';
+import { CategoryCreateInput, CategoryUpdateInput } from '../../types/project.types';
 
 const router = Router();
 const categoryService = new CategoryService();

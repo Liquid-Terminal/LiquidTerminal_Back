@@ -1,6 +1,6 @@
 import { Router, Request, Response, RequestHandler } from 'express';
 import { DashboardGlobalStatsService } from '../services/globalStatsLiquid.service';
-import { marketRateLimiter } from '../middleware/rateLimiter';
+import { marketRateLimiter } from '../middleware/apiRateLimiter';
 
 const router = Router();
 const dashboardGlobalStatsService = new DashboardGlobalStatsService();

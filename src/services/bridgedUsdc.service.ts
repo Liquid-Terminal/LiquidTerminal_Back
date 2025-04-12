@@ -1,4 +1,4 @@
-import { BaseApiService } from './base/base.api.service';
+import { BaseApiService } from '../core/base.api.service';
 import { BridgedUsdcData } from '../types/market.types';
 
 export class BridgedUsdcService extends BaseApiService {

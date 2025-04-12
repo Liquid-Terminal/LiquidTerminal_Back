@@ -4,20 +4,23 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "jest",
     "dev": "tsx watch src/app.ts",
     "build": "tsc",
-    "start": "node dist/app.js"
+    "start": "tsx src/app.ts"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
     "@prisma/client": "^6.0.1",
+    "@types/ioredis": "^5.0.0",
     "cors": "^2.8.5",
     "express": "^4.21.1",
     "express-rate-limit": "^7.5.0",
+    "ioredis": "^5.6.0",
     "jose": "^5.9.6",
+    "jsonwebtoken": "^9.0.2",
     "node-fetch": "^3.3.2",
     "redis": "^4.7.0",
     "ws": "^8.18.0"
@@ -27,10 +30,13 @@
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
     "@types/express-rate-limit": "^6.0.2",
-    "@types/node": "^22.13.9",
+    "@types/jsonwebtoken": "^9.0.9",
+    "@types/node": "^18.19.84",
     "@types/ws": "^8.5.13",
+    "nodemon": "^3.1.9",
     "prisma": "^6.0.1",
+    "ts-node": "^10.9.2",
     "tsx": "^4.19.2",
-    "typescript": "^5.7.2"
+    "typescript": "^4.9.5"
   }
 }

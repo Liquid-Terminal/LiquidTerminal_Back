@@ -1,9 +1,13 @@
 import express, { Request, Response, RequestHandler } from "express";
 import { WalletService } from "../../services/wallet/walletDB.service";
 import prisma from "../../lib/prisma";
+import { marketRateLimiter } from "../../middleware/apiRateLimiter";
 
 const router = express.Router();
 const walletService = new WalletService();
+
+// Appliquer le rate limiting
+router.use(marketRateLimiter);
 
 // Endpoint pour ajouter un wallet
 router.post("/", (async (req: Request, res: Response) => {
@@ -44,70 +48,5 @@ router.get("/user/:privyUserId", (async (req: Request, res: Response) => {
   }
 }) as RequestHandler);
 
-// Endpoint pour récupérer les positions spot d'un wallet
-router.get("/:address/spot", (async (req: Request, res: Response) => {
-  try {
-    const { address } = req.params;
-    
-    // Vérifier que l'adresse est au format hexadécimal
-    if (!address || !/^0x[a-fA-F0-9]{40}$/.test(address)) {
-      return res.status(400).json({
-        error: 'Invalid address format',
-        message: 'Address must be a 42-character hexadecimal string starting with 0x'
-      });
-    }
-    
-    const walletInfo = await walletService.getWalletInfo(address);
-    res.json(walletInfo.spot);
-  } catch (error) {
-    console.error("Erreur lors de la récupération des positions spot:", error);
-    res.status(500).json({ message: "Erreur interne du serveur" });
-  }
-}) as RequestHandler);
-
-// Endpoint pour récupérer les positions perp d'un wallet
-router.get("/:address/perp", (async (req: Request, res: Response) => {
-  try {
-    const { address } = req.params;
-    
-    // Vérifier que l'adresse est au format hexadécimal
-    if (!address || !/^0x[a-fA-F0-9]{40}$/.test(address)) {
-      return res.status(400).json({
-        error: 'Invalid address format',
-        message: 'Address must be a 42-character hexadecimal string starting with 0x'
-      });
-    }
-    
-    const walletInfo = await walletService.getWalletInfo(address);
-    res.json(walletInfo.perp);
-  } catch (error) {
-    console.error("Erreur lors de la récupération des positions perp:", error);
-    res.status(500).json({ message: "Erreur interne du serveur" });
-  }
-}) as RequestHandler);
-
-// Endpoint pour récupérer toutes les informations d'un wallet (spot + perp)
-router.get("/:address/info", (async (req: Request, res: Response) => {
-  try {
-    const { address } = req.params;
-    
-    // Vérifier que l'adresse est au format hexadécimal
-    if (!address || !/^0x[a-fA-F0-9]{40}$/.test(address)) {
-      return res.status(400).json({
-        error: 'Invalid address format',
-        message: 'Address must be a 42-character hexadecimal string starting with 0x'
-      });
-    }
-    
-    const walletInfo = await walletService.getWalletInfo(address);
-    res.json({
-      spot: walletInfo.spot,
-      perp: walletInfo.perp
-    });
-  } catch (error) {
-    console.error("Erreur lors de la récupération des infos du wallet:", error);
-    res.status(500).json({ message: "Erreur interne du serveur" });
-  }
-}) as RequestHandler);
-
 export default router;
+

@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
-import { SpotAssetContextService } from '../../../services/spot/marketData.service';
-import { HyperliquidSpotClient } from '../../../clients/hyperliquid/spot/spot.assetcontext.client';
-import { marketRateLimiter } from '../../../middleware/apiRateLimiter';
+import { SpotAssetContextService } from '../../services/spot/marketData.service';
+import { HyperliquidSpotClient } from '../../clients/hyperliquid/spot/spot.assetcontext.client';
+import { marketRateLimiter } from '../../middleware/apiRateLimiter';
 
 const router = Router();
 const marketService = new SpotAssetContextService(HyperliquidSpotClient.getInstance());

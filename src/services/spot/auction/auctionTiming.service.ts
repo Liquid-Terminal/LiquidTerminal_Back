@@ -1,4 +1,4 @@
-import { GasAuctionResponse, AuctionTimingInfo } from '../../../types/auction.types';
+import { AuctionTimingInfo } from '../../../types/auction.types';
 import { HyperliquidSpotDeployClient } from '../../../clients/hyperliquid/spot/spot.deploy.client';
 
 export class SpotDeployStateApiService {
@@ -18,7 +18,12 @@ export class SpotDeployStateApiService {
         throw new Error('No spot deploy state data available');
       }
 
-      const { gasAuction } = response.data;
+      // L'API retourne directement l'objet avec states et gasAuction
+      const gasAuction = response.gasAuction;
+      if (!gasAuction) {
+        throw new Error('No gas auction data available');
+      }
+
       const currentStartTime = gasAuction.startTimeSeconds * 1000;
       const currentEndTime = (gasAuction.startTimeSeconds + gasAuction.durationSeconds) * 1000;
       const nextStartTime = currentEndTime + (31 * 3600 * 1000);
@@ -31,6 +36,7 @@ export class SpotDeployStateApiService {
           startTime: currentStartTime,
           endTime: currentEndTime,
           startGas: gasAuction.startGas,
+          currentGas: gasAuction.currentGas,
           endGas: gasAuction.endGas || "0"
         },
         nextAuction: {

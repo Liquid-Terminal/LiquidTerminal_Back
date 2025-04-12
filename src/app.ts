@@ -2,20 +2,20 @@ import express from 'express';
 import cors from 'cors';
 import { createServer } from 'http';
 import authRoutes from './routes/auth.routes';
-import marketSpotRoutes from './routes/market/Spot/marketSpot.routes';
-import marketSpotTrendingRoutes from './routes/market/Spot/marketSpotTrending.routes';
-import marketPerpRoutes from './routes/market/Perp/marketPerp.routes';
-import marketPerpTrendingRoutes from './routes/market/Perp/marketPerpTrending.routes';
+import marketSpotRoutes from './routes/Spot/marketSpot.routes';
+import marketSpotTrendingRoutes from './routes/Spot/marketSpotTrending.routes';
+import marketPerpRoutes from './routes/Perp/marketPerp.routes';
+import marketPerpTrendingRoutes from './routes/Perp/marketPerpTrending.routes';
 import walletRoutes from './routes/wallet/wallet.routes';
 import projectRoutes from './routes/project/project.routes';
 import categoryRoutes from './routes/project/category.routes';
 import validatorRoutes from './routes/staking/validator.routes';
 
 import dashboardGlobalStatsRoutes from './routes/globalStats.routes';
-import globalSpotStatsRoutes from './routes/market/Spot/globalSpotStats.routes';
-import globalPerpStatsRoutes from './routes/market/Perp/globalPerpStats.routes';
+import globalSpotStatsRoutes from './routes/Spot/globalSpotStats.routes';
+import globalPerpStatsRoutes from './routes/Perp/globalPerpStats.routes';
 
-import auctionRoutes from './routes/market/auction.routes';
+import auctionRoutes from './routes/Spot/auction.routes';
 
 const app = express();
 const server = createServer(app);

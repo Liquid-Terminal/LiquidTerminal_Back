@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
-import { PerpAssetContextService } from '../../../services/perp/perpAssetContext.service';
-import { HyperliquidPerpClient } from '../../../clients/hyperliquid/perp/perp.assetcontext.client';
-import { marketRateLimiter } from '../../../middleware/apiRateLimiter';
+import { PerpAssetContextService } from '../../services/perp/perpAssetContext.service';
+import { HyperliquidPerpClient } from '../../clients/hyperliquid/perp/perp.assetcontext.client';
+import { marketRateLimiter } from '../../middleware/apiRateLimiter';
 
 const router = Router();
 const perpMarketService = new PerpAssetContextService(HyperliquidPerpClient.getInstance());

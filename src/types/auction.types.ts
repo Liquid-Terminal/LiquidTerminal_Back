@@ -26,16 +26,15 @@ export interface AuctionState {
   status: 'pending' | 'active' | 'completed';
 }
 
-export interface GasAuctionResponse extends BaseResponse {
-  data: {
-    states: AuctionState[];
-    gasAuction: {
-      startTimeSeconds: number;
-      durationSeconds: number;
-      startGas: string;
-      currentGas: string | null;
-      endGas: string;
-    };
+// Structure réelle de la réponse de l'API
+export interface GasAuctionResponse {
+  states: AuctionState[];
+  gasAuction: {
+    startTimeSeconds: number;
+    durationSeconds: number;
+    startGas: string;
+    currentGas: string | null;
+    endGas: string | null;
   };
 }
 
@@ -44,6 +43,7 @@ export interface AuctionTimingInfo {
     startTime: number;
     endTime: number;
     startGas: string;
+    currentGas: string | null;
     endGas: string;
   };
   nextAuction: {

@@ -1,36 +1,88 @@
 import { Router, Request, Response } from "express";
-import { AuthService } from "../services/auth.service";
+import { AuthService } from "../services/auth/auth.service";
 import { validatePrivyToken } from "../middleware/authMiddleware";
+import { validateLogin, validateUserParams } from "../middleware/validation/authValidation.middleware";
+import { marketRateLimiter } from "../middleware/apiRateLimiter";
+import { UserNotFoundError, UnauthorizedError } from "../errors/auth.errors";
 import { PrismaClient } from "@prisma/client";
+import { logger } from "../utils/logger";
 
 const router = Router();
-const authService = new AuthService();
+const authService = AuthService.getInstance();
 const prisma = new PrismaClient();
 
-router.post("/login", validatePrivyToken, (req: Request, res: Response): void => {
+// Appliquer le rate limiting à toutes les routes d'authentification
+router.use(marketRateLimiter);
+
+// Route de connexion
+router.post("/login", validatePrivyToken, validateLogin, (req: Request, res: Response): void => {
   const { privyUserId, name } = req.body;
 
   if (!req.user) {
-    res.status(401).json({ message: "Non authentifié" });
+    logger.warn('Login attempt without authentication', { privyUserId, name });
+    res.status(401).json({ 
+      success: false,
+      message: "Not authenticated",
+      code: "NOT_AUTHENTICATED"
+    });
     return;
   }
 
   if (req.user.sub !== privyUserId) {
-    res.status(400).json({ message: "PrivyUserId invalide" });
+    logger.warn('Login attempt with invalid Privy User ID', { 
+      tokenSub: req.user.sub, 
+      providedSub: privyUserId, 
+      name 
+    });
+    res.status(400).json({ 
+      success: false,
+      message: "Invalid Privy User ID",
+      code: "INVALID_PRIVY_USER_ID"
+    });
     return;
   }
 
   authService.findOrCreateUser(req.user, name)
-    .then(user => res.status(200).json({ message: "Utilisateur authentifié", user }))
+    .then(user => {
+      logger.info('User authenticated successfully', { privyUserId, name });
+      res.status(200).json({ 
+        success: true,
+        message: "User authenticated successfully", 
+        user 
+      });
+    })
     .catch(error => {
-      console.error("Erreur lors de l'authentification:", error);
-      res.status(500).json({ message: "Erreur interne du serveur" });
+      logger.error("Authentication error:", { error, privyUserId, name });
+      
+      if (error instanceof UserNotFoundError) {
+        res.status(error.statusCode).json({ 
+          success: false,
+          message: error.message,
+          code: error.code
+        });
+        return;
+      }
+      
+      res.status(500).json({ 
+        success: false,
+        message: "Internal server error",
+        code: "INTERNAL_SERVER_ERROR"
+      });
     });
 });
 
-router.get("/user/:privyUserId", validatePrivyToken, (req: Request, res: Response): void => {
+// Route pour récupérer les informations d'un utilisateur
+router.get("/user/:privyUserId", validatePrivyToken, validateUserParams, (req: Request, res: Response): void => {
   if (req.user?.sub !== req.params.privyUserId) {
-    res.status(403).json({ message: "Accès non autorisé" });
+    logger.warn('Unauthorized access attempt', { 
+      tokenSub: req.user?.sub, 
+      requestedSub: req.params.privyUserId 
+    });
+    res.status(403).json({ 
+      success: false,
+      message: "Unauthorized access",
+      code: "UNAUTHORIZED_ACCESS"
+    });
     return;
   }
 
@@ -39,14 +91,39 @@ router.get("/user/:privyUserId", validatePrivyToken, (req: Request, res: Respons
   })
     .then(user => {
       if (!user) {
-        res.status(404).json({ message: "Utilisateur non trouvé" });
+        logger.warn('User not found', { privyUserId: req.params.privyUserId });
+        res.status(404).json({ 
+          success: false,
+          message: "User not found",
+          code: "USER_NOT_FOUND"
+        });
         return;
       }
-      res.json(user);
+      
+      logger.info('User retrieved successfully', { privyUserId: req.params.privyUserId });
+      res.status(200).json({ 
+        success: true,
+        message: "User retrieved successfully",
+        user 
+      });
     })
     .catch(error => {
-      console.error("Erreur lors de la récupération de l'utilisateur:", error);
-      res.status(500).json({ message: "Erreur interne du serveur" });
+      logger.error("Error retrieving user:", { error, privyUserId: req.params.privyUserId });
+      
+      if (error instanceof UserNotFoundError) {
+        res.status(error.statusCode).json({ 
+          success: false,
+          message: error.message,
+          code: error.code
+        });
+        return;
+      }
+      
+      res.status(500).json({ 
+        success: false,
+        message: "Internal server error",
+        code: "INTERNAL_SERVER_ERROR"
+      });
     });
 });
 

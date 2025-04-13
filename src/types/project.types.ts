@@ -59,4 +59,17 @@ export interface CategoryResponseWrapper extends BaseResponse {
 
 export interface CategoriesResponseWrapper extends BaseResponse {
   data: CategoryResponse[];
-} 
+}
+
+export interface ProjectCreateInput {
+  title: string;
+  desc: string;
+  logo: string;
+  twitter?: string;
+  discord?: string;
+  telegram?: string;
+  website?: string;
+  categoryId?: number;
+}
+
+export interface ProjectUpdateInput extends Partial<ProjectCreateInput> {} 

@@ -12,6 +12,7 @@ export interface ValidatorSummary {
   signer: string;
   stake: number;
   unjailableAfter: number | null;
+  stats: [string, { predictedApr: string; uptimeFraction: string }][];
 }
 
 export type ValidatorSummaries = ValidatorSummary[];
@@ -32,6 +33,11 @@ export interface ValidatorDetails {
   apr: number;
   commission: number;
   uptime: number;
+}
+
+export interface ValidatorStats {
+  predictedApr: string;
+  uptimeFraction: string;
 }
 
 export interface TrendingValidatorsResponse extends BaseResponse {

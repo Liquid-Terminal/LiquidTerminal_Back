@@ -1,6 +1,8 @@
 import { MarketData } from '../../types/market.types';
 import { HyperliquidSpotClient } from '../../clients/hyperliquid/spot/spot.assetcontext.client';
 import { redisService } from '../../core/redis.service';
+import { MarketDataError } from '../../errors/spot.errors';
+import { logger } from '../../utils/logger';
 
 export class SpotAssetContextService {
   private readonly UPDATE_CHANNEL = 'spot:data:updated';
@@ -16,9 +18,10 @@ export class SpotAssetContextService {
         const { type, timestamp } = JSON.parse(message);
         if (type === 'DATA_UPDATED') {
           this.lastUpdate = timestamp;  // Mise à jour du timestamp
+          logger.info('Spot data cache updated', { timestamp });
         }
       } catch (error) {
-        console.error('Error processing cache update:', error);
+        logger.error('Error processing cache update:', { error });
       }
     });
   }
@@ -35,68 +38,91 @@ export class SpotAssetContextService {
    * Récupère les données de marché
    */
   public async getMarketsData(): Promise<MarketData[]> {
-    const [spotData, assetContexts] = await this.hyperliquidClient.getSpotMetaAndAssetCtxsRaw();
-    
-    const tokenMap = spotData.tokens.reduce((acc, token) => {
-      acc[token.index] = token;
-      return acc;
-    }, {} as Record<number, { name: string }>);
+    try {
+      const [spotData, assetContexts] = await this.hyperliquidClient.getSpotMetaAndAssetCtxsRaw();
+      
+      const tokenMap = spotData.tokens.reduce((acc, token) => {
+        acc[token.index] = token;
+        return acc;
+      }, {} as Record<number, { name: string }>);
 
-    const marketsData = await Promise.all(
-      spotData.universe.map(async (market) => {
-        try {
-          const assetContext = assetContexts.find(ctx => ctx.coin === market.name);
-          if (!assetContext) {
-            console.warn(`No asset context found for market: ${market.name}`);
+      const marketsData = await Promise.all(
+        spotData.universe.map(async (market) => {
+          try {
+            const assetContext = assetContexts.find(ctx => ctx.coin === market.name);
+            if (!assetContext) {
+              logger.warn('No asset context found', { market: market.name });
+              return null;
+            }
+
+            const tokenIndex = market.tokens[0];
+            const token = tokenMap[tokenIndex];
+            if (!token) {
+              logger.warn('No token found', { index: tokenIndex });
+              return null;
+            }
+
+            const currentPrice = Number(assetContext.markPx);
+            const prevDayPrice = Number(assetContext.prevDayPx);
+            const circulatingSupply = Number(assetContext.circulatingSupply);
+            const volume = Number(assetContext.dayNtlVlm);
+            const marketCap = currentPrice * circulatingSupply;
+
+            return {
+              name: token.name,
+              logo: null,
+              price: currentPrice,
+              marketCap: marketCap,
+              volume: volume,
+              change24h: this.calculatePriceChange(currentPrice, prevDayPrice),
+              liquidity: Number(assetContext.midPx),
+              supply: circulatingSupply
+            };
+          } catch (error) {
+            logger.error('Error processing market:', { error, market: market.name });
             return null;
           }
+        })
+      );
 
-          const tokenIndex = market.tokens[0];
-          const token = tokenMap[tokenIndex];
-          if (!token) {
-            console.warn(`No token found for index: ${tokenIndex}`);
-            return null;
-          }
+      const validMarketsData = marketsData
+        .filter(Boolean)
+        .sort((a, b) => b!.marketCap - a!.marketCap) as MarketData[];
 
-          const currentPrice = Number(assetContext.markPx);
-          const prevDayPrice = Number(assetContext.prevDayPx);
-          const circulatingSupply = Number(assetContext.circulatingSupply);
-          const volume = Number(assetContext.dayNtlVlm);
-          const marketCap = currentPrice * circulatingSupply;
+      logger.info('Market data retrieved successfully', { 
+        count: validMarketsData.length,
+        lastUpdate: this.lastUpdate
+      });
 
-          return {
-            name: token.name,
-            logo: null,
-            price: currentPrice,
-            marketCap: marketCap,
-            volume: volume,
-            change24h: this.calculatePriceChange(currentPrice, prevDayPrice),
-            liquidity: Number(assetContext.midPx),
-            supply: circulatingSupply
-          };
-        } catch (error) {
-          console.error(`Error processing market ${market.name}:`, error);
-          return null;
-        }
-      })
-    );
-
-    return marketsData
-      .filter(Boolean)
-      .sort((a, b) => b!.marketCap - a!.marketCap) as MarketData[];
+      return validMarketsData;
+    } catch (error) {
+      logger.error('Error fetching market data:', { error });
+      throw new MarketDataError(error instanceof Error ? error.message : 'Failed to fetch market data');
+    }
   }
 
   /**
    * Récupère les tokens sans paires
    */
   public async getTokensWithoutPairs(): Promise<string[]> {
-    const [spotData] = await this.hyperliquidClient.getSpotMetaAndAssetCtxsRaw();
-    
-    return spotData.tokens
-      .filter(token => !spotData.universe.some(market => 
-        market.tokens[0] === token.index
-      ))
-      .map(token => token.name);
+    try {
+      const [spotData] = await this.hyperliquidClient.getSpotMetaAndAssetCtxsRaw();
+      
+      const tokens = spotData.tokens
+        .filter(token => !spotData.universe.some(market => 
+          market.tokens[0] === token.index
+        ))
+        .map(token => token.name);
+
+      logger.info('Tokens without pairs retrieved successfully', { 
+        count: tokens.length 
+      });
+
+      return tokens;
+    } catch (error) {
+      logger.error('Error fetching tokens without pairs:', { error });
+      throw new MarketDataError(error instanceof Error ? error.message : 'Failed to fetch tokens without pairs');
+    }
   }
 
   /**
@@ -104,10 +130,21 @@ export class SpotAssetContextService {
    * Utilisé principalement par AuctionService
    */
   public async getTokenIds(): Promise<string[]> {
-    const [spotData] = await this.hyperliquidClient.getSpotMetaAndAssetCtxsRaw();
-    return spotData.tokens
-      .filter(token => token.tokenId)
-      .map(token => token.tokenId);
+    try {
+      const [spotData] = await this.hyperliquidClient.getSpotMetaAndAssetCtxsRaw();
+      const tokenIds = spotData.tokens
+        .filter(token => token.tokenId)
+        .map(token => token.tokenId);
+
+      logger.info('Token IDs retrieved successfully', { 
+        count: tokenIds.length 
+      });
+
+      return tokenIds;
+    } catch (error) {
+      logger.error('Error fetching token IDs:', { error });
+      throw new MarketDataError(error instanceof Error ? error.message : 'Failed to fetch token IDs');
+    }
   }
 
   /**

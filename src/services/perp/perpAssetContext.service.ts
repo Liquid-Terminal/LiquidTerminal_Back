@@ -1,6 +1,8 @@
 import { PerpMarketData } from '../../types/market.types';
 import { HyperliquidPerpClient } from '../../clients/hyperliquid/perp/perp.assetcontext.client';
 import { redisService } from '../../core/redis.service';
+import { logger } from '../../utils/logger';
+import { PerpMarketDataError, PerpCacheError } from '../../errors/perp.errors';
 
 export class PerpAssetContextService {
   private readonly UPDATE_CHANNEL = 'perp:data:updated';
@@ -16,9 +18,11 @@ export class PerpAssetContextService {
         const { type, timestamp } = JSON.parse(message);
         if (type === 'DATA_UPDATED') {
           this.lastUpdate = timestamp;  // Mise à jour du timestamp
+          logger.info('Perp data cache updated', { timestamp });
         }
       } catch (error) {
-        console.error('Error processing cache update:', error);
+        logger.error('Error processing cache update:', { error });
+        throw new PerpCacheError('Failed to process cache update message');
       }
     });
   }
@@ -38,7 +42,7 @@ export class PerpAssetContextService {
     try {
       const [meta, assetContexts] = await this.hyperliquidClient.getMetaAndAssetCtxsRaw();
 
-      return meta.universe.map((market, index) => {
+      const marketsData = meta.universe.map((market, index) => {
         const assetContext = assetContexts[index];
         const currentPrice = Number(assetContext.markPx);
         const prevDayPrice = Number(assetContext.prevDayPx);
@@ -54,9 +58,21 @@ export class PerpAssetContextService {
           onlyIsolated: market.onlyIsolated || false
         };
       });
+
+      logger.info('Perp markets data retrieved successfully', { 
+        count: marketsData.length,
+        lastUpdate: this.lastUpdate
+      });
+
+      return marketsData;
     } catch (error) {
-      console.error('Error fetching perp markets data:', error);
-      throw error;
+      logger.error('Error fetching perp markets data:', { error });
+      
+      if (error instanceof Error && error.message.includes('timed out')) {
+        throw new PerpMarketDataError('API request timed out');
+      }
+      
+      throw new PerpMarketDataError('Failed to fetch perp market data');
     }
   }
 

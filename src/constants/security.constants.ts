@@ -2,7 +2,7 @@ export const SECURITY_CONSTANTS = {
   // Liste des origines autorisées pour les requêtes CORS
   ALLOWED_ORIGINS: [
     'https://liquidterminal.xyz',
-    'http://localhost:3000'
+    'http://localhost:3002'
   ] as const,
   
   // Durée de validité du token JWT (24 heures)

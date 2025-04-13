@@ -1,0 +1,123 @@
+import { Request, Response, NextFunction, RequestHandler } from 'express';
+import { AnyZodObject, ZodError } from 'zod';
+import { redisService } from '../../core/redis.service';
+
+/**
+ * Middleware de validation générique utilisant Zod
+ * @param schema Schéma Zod pour valider la requête
+ * @param validateCacheKey Clé de cache optionnelle pour stocker les résultats de validation
+ * @param cacheTTL Durée de vie du cache en secondes (par défaut: 300 secondes / 5 minutes)
+ */
+export const validateRequest = (
+  schema: AnyZodObject,
+  validateCacheKey?: string,
+  cacheTTL: number = 300
+): RequestHandler => {
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      // Vérifier si nous avons un cache de validation
+      if (validateCacheKey && redisService) {
+        const cacheKey = `validation:${validateCacheKey}:${req.originalUrl}`;
+        const cachedValidation = await redisService.get(cacheKey);
+        
+        if (cachedValidation) {
+          // Si la validation est en cache et valide, on continue
+          next();
+          return;
+        }
+      }
+
+      // Valider la requête avec le schéma Zod
+      await schema.parseAsync({
+        body: req.body,
+        query: req.query,
+        params: req.params,
+      });
+
+      // Si la validation réussit et qu'on a une clé de cache, on met en cache
+      if (validateCacheKey && redisService) {
+        const cacheKey = `validation:${validateCacheKey}:${req.originalUrl}`;
+        await redisService.set(cacheKey, 'valid', cacheTTL);
+      }
+
+      // Continuer vers le prochain middleware
+      next();
+    } catch (error) {
+      // Gérer les erreurs de validation Zod
+      if (error instanceof ZodError) {
+        const errors = error.errors.map(err => ({
+          path: err.path.join('.'),
+          message: err.message,
+        }));
+
+        res.status(400).json({
+          error: 'Validation Error',
+          details: errors,
+        });
+        return;
+      }
+
+      // Gérer les autres erreurs
+      console.error('Validation middleware error:', error);
+      res.status(500).json({
+        error: 'Internal Server Error',
+        message: 'An error occurred during request validation',
+      });
+    }
+  };
+};
+
+/**
+ * Middleware de validation pour les paramètres de requête spécifiques
+ * @param paramName Nom du paramètre à valider
+ * @param validator Fonction de validation personnalisée
+ */
+export const validateParam = (
+  paramName: string,
+  validator: (value: any) => boolean
+): RequestHandler => {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    const value = req.params[paramName];
+    
+    if (!value) {
+      res.status(400).json({
+        error: 'Validation Error',
+        message: `Missing required parameter: ${paramName}`,
+      });
+      return;
+    }
+    
+    if (!validator(value)) {
+      res.status(400).json({
+        error: 'Validation Error',
+        message: `Invalid value for parameter: ${paramName}`,
+      });
+      return;
+    }
+    
+    next();
+  };
+};
+
+/**
+ * Middleware de validation pour les corps de requête
+ * @param validator Fonction de validation personnalisée
+ */
+export const validateBody = (
+  validator: (body: any) => { isValid: boolean; errors?: string[] }
+): RequestHandler => {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    const { isValid, errors } = validator(req.body);
+    
+    if (!isValid) {
+      res.status(400).json({
+        error: 'Validation Error',
+        message: 'Invalid request body',
+        details: errors,
+      });
+      return;
+    }
+    
+    next();
+  };
+}; 

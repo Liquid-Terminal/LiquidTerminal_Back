@@ -1,5 +1,7 @@
 import { AuctionTimingInfo } from '../../../types/auction.types';
 import { HyperliquidSpotDeployClient } from '../../../clients/hyperliquid/spot/spot.deploy.client';
+import { AuctionError, InvalidAuctionDataError } from '../../../errors/spot.errors';
+import { logger } from '../../../utils/logger';
 
 export class SpotDeployStateApiService {
   private hyperliquidClient: HyperliquidSpotDeployClient;
@@ -15,13 +17,15 @@ export class SpotDeployStateApiService {
     try {
       const response = await this.hyperliquidClient.getSpotDeployState();
       if (!response) {
-        throw new Error('No spot deploy state data available');
+        logger.warn('No spot deploy state data available');
+        throw new InvalidAuctionDataError('No spot deploy state data available');
       }
 
       // L'API retourne directement l'objet avec states et gasAuction
       const gasAuction = response.gasAuction;
       if (!gasAuction) {
-        throw new Error('No gas auction data available');
+        logger.warn('No gas auction data available');
+        throw new InvalidAuctionDataError('No gas auction data available');
       }
 
       const currentStartTime = gasAuction.startTimeSeconds * 1000;
@@ -31,6 +35,15 @@ export class SpotDeployStateApiService {
         (Number(gasAuction.endGas) * 2).toString() : 
         "0";
 
+      logger.info('Auction timing retrieved successfully', { 
+        currentStartTime,
+        currentEndTime,
+        nextStartTime,
+        startGas: gasAuction.startGas,
+        currentGas: gasAuction.currentGas,
+        endGas: gasAuction.endGas || "0"
+      });
+      
       return {
         currentAuction: {
           startTime: currentStartTime,
@@ -45,8 +58,11 @@ export class SpotDeployStateApiService {
         }
       };
     } catch (error) {
-      console.error('Error fetching auction timing:', error);
-      throw error;
+      logger.error('Error fetching auction timing:', { error });
+      if (error instanceof InvalidAuctionDataError) {
+        throw error;
+      }
+      throw new AuctionError(error instanceof Error ? error.message : 'Failed to fetch auction timing');
     }
   }
 

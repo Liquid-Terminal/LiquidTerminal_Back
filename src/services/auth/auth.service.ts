@@ -1,13 +1,15 @@
-import jwt from 'jsonwebtoken';
-import { AuthenticatedWebSocket, AuthMessage } from '../../types/security.types';
+import { importJWK, jwtVerify } from "jose";
+import prisma from "../../lib/prisma";
+import { PrivyPayload } from "../../types/auth.types";
+import { JWKSError, SigningKeyError, TokenValidationError, UserNotFoundError } from "../../errors/auth.errors";
+import { logger } from "../../utils/logger";
+
+const JWKS_URL = process.env.JWKS_URL!;
 
 export class AuthService {
   private static instance: AuthService;
-  private readonly JWT_SECRET: string;
 
-  private constructor() {
-    this.JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
-  }
+  private constructor() {}
 
   public static getInstance(): AuthService {
     if (!AuthService.instance) {
@@ -16,33 +18,78 @@ export class AuthService {
     return AuthService.instance;
   }
 
-  public async validateToken(token: string): Promise<string | null> {
+  private async getSigningKey(header: any): Promise<CryptoKey> {
     try {
-      const decoded = jwt.verify(token, this.JWT_SECRET) as { userId: string };
-      return decoded.userId;
-    } catch (error) {
-      console.error('Token validation error:', error);
-      return null;
-    }
-  }
-
-  public async authenticateConnection(ws: AuthenticatedWebSocket, message: AuthMessage): Promise<boolean> {
-    try {
-      const userId = await this.validateToken(message.token);
-      if (!userId) {
-        return false;
+      const response = await fetch(JWKS_URL);
+      if (!response.ok) {
+        logger.error('Error fetching JWKS', { status: response.status, statusText: response.statusText });
+        throw new JWKSError("Error fetching JWKS");
       }
 
-      ws.userId = userId;
-      ws.token = message.token;
-      return true;
+      const jwks = await response.json();
+      const signingKey = jwks.keys.find((key: any) => key.kid === header.kid);
+
+      if (!signingKey) {
+        logger.error('Signing key not found', { kid: header.kid });
+        throw new SigningKeyError("Signing key not found");
+      }
+
+      return (await importJWK(signingKey, "ES256")) as CryptoKey;
     } catch (error) {
-      console.error('Authentication error:', error);
-      return false;
+      if (error instanceof JWKSError || error instanceof SigningKeyError) {
+        throw error;
+      }
+      logger.error('Unexpected error during JWKS retrieval', { error });
+      throw new JWKSError("Unexpected error during JWKS retrieval");
     }
   }
 
-  public isAuthenticated(ws: AuthenticatedWebSocket): boolean {
-    return !!ws.userId && !!ws.token;
+  public async verifyToken(token: string): Promise<PrivyPayload> {
+    try {
+      const decodedHeader = JSON.parse(Buffer.from(token.split(".")[0], "base64").toString());
+      const signingKey = await this.getSigningKey(decodedHeader);
+
+      const { payload } = await jwtVerify(token, signingKey, {
+        issuer: "privy.io",
+        audience: process.env.NEXT_PUBLIC_PRIVY_AUDIENCE!,
+      });
+
+      return payload as PrivyPayload;
+    } catch (error) {
+      logger.error('Token validation error', { error });
+      throw new TokenValidationError("Invalid or expired token");
+    }
   }
-} 
+
+  public async findOrCreateUser(payload: PrivyPayload, username: string) {
+    const privyUserId = payload.sub;
+
+    if (!privyUserId) {
+      logger.error('Missing Privy User ID in token');
+      throw new TokenValidationError("Missing Privy User ID in token");
+    }
+
+    try {
+      let user = await prisma.user.findUnique({
+        where: { privyUserId },
+      });
+
+      if (!user) {
+        logger.info('Creating new user', { privyUserId, username });
+        user = await prisma.user.create({
+          data: {
+            privyUserId,
+            name: username,
+          },
+        });
+      } else {
+        logger.info('User found', { privyUserId, username });
+      }
+
+      return user;
+    } catch (error) {
+      logger.error('Error finding or creating user', { error, privyUserId, username });
+      throw new UserNotFoundError("Error finding or creating user");
+    }
+  }
+}

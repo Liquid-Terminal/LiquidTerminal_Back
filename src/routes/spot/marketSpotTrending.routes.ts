@@ -2,14 +2,18 @@ import { Router, Request, Response } from 'express';
 import { SpotAssetContextService } from '../../services/spot/marketData.service';
 import { HyperliquidSpotClient } from '../../clients/hyperliquid/spot/spot.assetcontext.client';
 import { marketRateLimiter } from '../../middleware/apiRateLimiter';
+import { validateRequest, sanitizeInput } from '../../middleware/validation';
+import { marketSpotTrendingQuerySchema } from '../../schemas/spot.schemas';
 
 const router = Router();
 const marketService = new SpotAssetContextService(HyperliquidSpotClient.getInstance());
 
-// Appliquer le rate limiting
+// Appliquer le rate limiting et la sanitization
 router.use(marketRateLimiter);
+router.use(sanitizeInput);
 
-router.get('/', async (req: Request, res: Response) => {
+// Appliquer la validation des requêtes
+router.get('/', validateRequest(marketSpotTrendingQuerySchema), async (req: Request, res: Response) => {
   try {
     const marketsData = await marketService.getMarketsData();
     
@@ -28,9 +32,9 @@ router.get('/', async (req: Request, res: Response) => {
         .sort((a, b) => marketsData[b].change24h - marketsData[a].change24h)
     };
 
-    // Récupérer les paramètres de la requête
+    // Récupérer les paramètres de la requête (déjà validés par le middleware)
     const sortBy = (req.query.sortBy as keyof typeof sortIndices) || 'volume';
-    const limit = Math.min(Number(req.query.limit) || 5, 100);
+    const limit = Number(req.query.limit) || 5;
 
     // Obtenir les indices des tokens triés
     const trendingIndices = sortIndices[sortBy].slice(0, limit);

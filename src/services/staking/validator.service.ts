@@ -1,6 +1,8 @@
-import { ValidatorSummary, TrendingValidator, ValidatorDetails, ValidatorStats } from '../../types/staking.types';
+import { ValidatorSummary, ValidatorDetails } from '../../types/staking.types';
 import { ValidatorClient } from '../../clients/hyperliquid/staking/validator';
 import { redisService } from '../../core/redis.service';
+import { logger } from '../../utils/logger';
+import { ValidatorError } from '../../errors/staking.errors';
 
 export type SortBy = 'stake' | 'apr';
 
@@ -21,9 +23,10 @@ export class ValidatorSummariesService {
         const { type, timestamp } = JSON.parse(message);
         if (type === 'DATA_UPDATED') {
           this.lastUpdate = timestamp;
+          logger.info('Validator data updated', { timestamp });
         }
       } catch (error) {
-        console.error('Error processing cache update:', error);
+        logger.error('Error processing cache update:', { error });
       }
     });
   }
@@ -39,7 +42,14 @@ export class ValidatorSummariesService {
    * Récupère les résumés des validateurs
    */
   public async getValidatorSummaries(): Promise<ValidatorSummary[]> {
-    return this.validatorClient.getValidatorSummariesRaw();
+    try {
+      const summaries = await this.validatorClient.getValidatorSummariesRaw();
+      logger.info('Validator summaries retrieved successfully', { count: summaries.length });
+      return summaries;
+    } catch (error) {
+      logger.error('Failed to fetch validator summaries:', { error });
+      throw new ValidatorError('Failed to fetch validator summaries');
+    }
   }
 
   /**
@@ -54,48 +64,6 @@ export class ValidatorSummariesService {
   }
 
   /**
-   * Récupère le top 5 des validateurs classés par nombre de tokens stake ou APR
-   */
-  public async getTrendingValidators(sortBy: SortBy = 'stake'): Promise<TrendingValidator[]> {
-    try {
-      const validators = await this.getValidatorSummaries();
-      
-      // Convertir les stakes (diviser par 10^8) et trier par ordre décroissant
-      const formattedValidators = validators.map(validator => {
-        const predictedApr = parseFloat(validator.stats[0][1].predictedApr) * 100;
-        return {
-          name: validator.name,
-          stake: Number(validator.stake) / 100000000,
-          apr: predictedApr
-        };
-      });
-
-      // Agréger les validateurs de Hyper Foundation
-      const hyperFoundationValidators = formattedValidators.filter(v => v.name.startsWith('Hyper Foundation'));
-      const otherValidators = formattedValidators.filter(v => !v.name.startsWith('Hyper Foundation'));
-
-      // Créer l'entrée agrégée pour Hyper Foundation
-      const hyperFoundationAggregate: TrendingValidator = {
-        name: 'Hyper Foundation (All)',
-        stake: hyperFoundationValidators.reduce((sum, v) => sum + v.stake, 0),
-        apr: hyperFoundationValidators[0]?.apr || 0 // Tous les APR sont identiques
-      };
-
-      // Combiner et trier
-      const allValidators = [
-        hyperFoundationAggregate,
-        ...otherValidators
-      ].sort((a, b) => sortBy === 'stake' ? b.stake - a.stake : b.apr - a.apr)
-        .slice(0, 5);
-      
-      return allValidators;
-    } catch (error) {
-      console.error('Error fetching trending validators:', error);
-      throw error;
-    }
-  }
-
-  /**
    * Récupère tous les validateurs avec leurs détails formatés
    */
   public async getAllValidatorsDetails(sortBy: SortBy = 'stake'): Promise<ValidatorDetails[]> {
@@ -103,8 +71,15 @@ export class ValidatorSummariesService {
       const validators = await this.getValidatorSummaries();
       
       const formattedValidators = validators.map(validator => {
-        const predictedApr = parseFloat(validator.stats[0][1].predictedApr) * 100;
-        const uptime = parseFloat(validator.stats[0][1].uptimeFraction) * 100;
+        // Vérifier si stats existe et contient les données nécessaires
+        const predictedApr = validator.stats && validator.stats.length > 0 && validator.stats[0][1] 
+          ? parseFloat(validator.stats[0][1].predictedApr) * 100 
+          : 0;
+        
+        const uptime = validator.stats && validator.stats.length > 0 && validator.stats[0][1] 
+          ? parseFloat(validator.stats[0][1].uptimeFraction) * 100 
+          : 0;
+        
         const commission = parseFloat(validator.commission) * 100;
         
         return {
@@ -117,16 +92,23 @@ export class ValidatorSummariesService {
       });
 
       // Trier les validateurs selon le critère spécifié
-      return formattedValidators.sort((a, b) => {
+      const sortedValidators = formattedValidators.sort((a, b) => {
         if (sortBy === 'stake') {
           return b.stake - a.stake;
         } else {
           return b.apr - a.apr;
         }
       });
+
+      logger.info('Validator details retrieved and formatted successfully', { 
+        count: sortedValidators.length,
+        sortBy 
+      });
+
+      return sortedValidators;
     } catch (error) {
-      console.error('Error fetching validator details:', error);
-      throw error;
+      logger.error('Error fetching validator details:', { error, sortBy });
+      throw new ValidatorError('Failed to fetch and format validator details');
     }
   }
 } 

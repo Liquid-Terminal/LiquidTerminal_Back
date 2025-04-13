@@ -1,64 +1,106 @@
 import express, { Request, Response, RequestHandler } from "express";
 import { ProjectService } from "../../services/project/project.service";
+import { validateRequest } from '../../middleware/validation/validation.middleware';
+import { 
+  projectQuerySchema, 
+  projectCreateSchema, 
+  projectUpdateSchema,
+  projectCategoryUpdateSchema 
+} from '../../schemas/project.schema';
+import { marketRateLimiter } from '../../middleware/apiRateLimiter';
+import { logger } from '../../utils/logger';
+import { 
+  ProjectNotFoundError, 
+  ProjectAlreadyExistsError,
+  CategoryNotFoundError 
+} from '../../errors/project.errors';
 
 const router = express.Router();
 const projectService = new ProjectService();
 
+// Appliquer le rate limiting à toutes les routes
+router.use(marketRateLimiter);
+
 // Créer un nouveau projet
-router.post("/", (async (req: Request, res: Response) => {
+router.post("/", validateRequest(projectCreateSchema), (async (req: Request, res: Response) => {
   try {
     const project = await projectService.createProject(req.body);
     res.status(201).json(project);
-  } catch (error: any) {
-    console.error("Erreur lors de la création du projet:", error);
-    res.status(error.message === "Un projet avec ce titre existe déjà" ? 400 : 500)
-      .json({ message: error.message || "Erreur interne du serveur" });
+  } catch (error) {
+    if (error instanceof ProjectAlreadyExistsError) {
+      logger.warn('Project creation failed: Project already exists', { 
+        title: req.body.title 
+      });
+      return res.status(400).json({ message: error.message });
+    }
+    
+    logger.error('Project creation failed:', { error, body: req.body });
+    res.status(500).json({ message: 'Internal server error' });
   }
 }) as RequestHandler);
 
 // Récupérer tous les projets
-router.get("/", (async (_req: Request, res: Response) => {
+router.get("/", validateRequest(projectQuerySchema), async (req, res) => {
   try {
-    console.log('Route GET /projects appelée');
-    const projects = await projectService.getAllProjects();
-    console.log('Projets récupérés avec succès');
-    res.json(projects);
+    const { page, limit, sort, order, search, categoryId } = req.query;
+    
+    const result = await projectService.getAllProjects({
+      page: page ? parseInt(page as string) : undefined,
+      limit: limit ? parseInt(limit as string) : undefined,
+      sort: sort as string,
+      order: order as 'asc' | 'desc',
+      search: search as string,
+      categoryId: categoryId ? parseInt(categoryId as string) : undefined
+    });
+
+    res.json(result);
   } catch (error) {
-    console.error("Erreur détaillée lors de la récupération des projets:", {
-      error,
-      message: error instanceof Error ? error.message : 'Unknown error',
-      stack: error instanceof Error ? error.stack : undefined
-    });
-    res.status(500).json({ 
-      message: "Erreur interne du serveur",
-      details: error instanceof Error ? error.message : 'Unknown error'
-    });
+    logger.error('Error fetching projects:', { error, query: req.query });
+    res.status(500).json({ message: 'Internal server error' });
   }
-}) as RequestHandler);
+});
 
 // Récupérer un projet par son ID
 router.get("/:id", (async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params.id);
+    if (isNaN(id)) {
+      logger.warn('Invalid project ID provided', { id: req.params.id });
+      return res.status(400).json({ message: "ID de projet invalide" });
+    }
+    
     const project = await projectService.getProjectById(id);
     res.json(project);
-  } catch (error: any) {
-    console.error("Erreur lors de la récupération du projet:", error);
-    res.status(error.message === "Projet non trouvé" ? 404 : 500)
-      .json({ message: error.message || "Erreur interne du serveur" });
+  } catch (error) {
+    if (error instanceof ProjectNotFoundError) {
+      logger.warn('Project not found', { projectId: req.params.id });
+      return res.status(404).json({ message: error.message });
+    }
+    
+    logger.error('Error fetching project:', { error, projectId: req.params.id });
+    res.status(500).json({ message: 'Internal server error' });
   }
 }) as RequestHandler);
 
 // Mettre à jour un projet
-router.put("/:id", (async (req: Request, res: Response) => {
+router.put("/:id", validateRequest(projectUpdateSchema), (async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params.id);
+    if (isNaN(id)) {
+      logger.warn('Invalid project ID provided', { id: req.params.id });
+      return res.status(400).json({ message: "ID de projet invalide" });
+    }
+    
     const project = await projectService.updateProject(id, req.body);
     res.json(project);
-  } catch (error: any) {
-    console.error("Erreur lors de la mise à jour du projet:", error);
-    res.status(error.message === "Projet non trouvé" ? 404 : 500)
-      .json({ message: error.message || "Erreur interne du serveur" });
+  } catch (error) {
+    if (error instanceof ProjectNotFoundError) {
+      logger.warn('Project not found for update', { projectId: req.params.id });
+      return res.status(404).json({ message: error.message });
+    }
+    
+    logger.error('Error updating project:', { error, projectId: req.params.id, body: req.body });
+    res.status(500).json({ message: 'Internal server error' });
   }
 }) as RequestHandler);
 
@@ -66,44 +108,60 @@ router.put("/:id", (async (req: Request, res: Response) => {
 router.delete("/:id", (async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params.id);
+    if (isNaN(id)) {
+      logger.warn('Invalid project ID provided', { id: req.params.id });
+      return res.status(400).json({ message: "ID de projet invalide" });
+    }
+    
     await projectService.deleteProject(id);
     res.status(204).send();
-  } catch (error: any) {
-    console.error("Erreur lors de la suppression du projet:", error);
-    res.status(error.message === "Projet non trouvé" ? 404 : 500)
-      .json({ message: error.message || "Erreur interne du serveur" });
+  } catch (error) {
+    if (error instanceof ProjectNotFoundError) {
+      logger.warn('Project not found for deletion', { projectId: req.params.id });
+      return res.status(404).json({ message: error.message });
+    }
+    
+    logger.error('Error deleting project:', { error, projectId: req.params.id });
+    res.status(500).json({ message: 'Internal server error' });
   }
 }) as RequestHandler);
 
 // Mettre à jour la catégorie d'un projet
-router.put("/:id/category", (async (req: Request, res: Response) => {
+router.put("/:id/category", validateRequest(projectCategoryUpdateSchema), (async (req: Request, res: Response) => {
   try {
     const projectId = parseInt(req.params.id);
-    const { categoryId } = req.body;
-    
-    // Vérifier que categoryId est un nombre ou null
-    if (categoryId !== null && (isNaN(Number(categoryId)) || !Number.isInteger(Number(categoryId)))) {
-      return res.status(400).json({ message: "L'ID de catégorie doit être un nombre entier ou null" });
+    if (isNaN(projectId)) {
+      logger.warn('Invalid project ID provided', { id: req.params.id });
+      return res.status(400).json({ message: "ID de projet invalide" });
     }
     
+    const { categoryId } = req.body;
     const project = await projectService.updateProjectCategory(
       projectId, 
-      categoryId === null ? null : Number(categoryId)
+      categoryId
     );
     
     res.json(project);
-  } catch (error: any) {
-    console.error("Erreur lors de la mise à jour de la catégorie du projet:", error);
-    
-    if (error.message === "Projet non trouvé") {
-      return res.status(404).json({ message: "Projet non trouvé" });
+  } catch (error) {
+    if (error instanceof ProjectNotFoundError) {
+      logger.warn('Project not found for category update', { projectId: req.params.id });
+      return res.status(404).json({ message: error.message });
     }
     
-    if (error.message === "Catégorie non trouvée") {
-      return res.status(404).json({ message: "Catégorie non trouvée" });
+    if (error instanceof CategoryNotFoundError) {
+      logger.warn('Category not found for project update', { 
+        projectId: req.params.id,
+        categoryId: req.body.categoryId
+      });
+      return res.status(404).json({ message: error.message });
     }
     
-    res.status(500).json({ message: error.message || "Erreur interne du serveur" });
+    logger.error('Error updating project category:', { 
+      error, 
+      projectId: req.params.id,
+      categoryId: req.body.categoryId
+    });
+    res.status(500).json({ message: 'Internal server error' });
   }
 }) as RequestHandler);
 
@@ -111,21 +169,24 @@ router.put("/:id/category", (async (req: Request, res: Response) => {
 router.get("/category/:categoryId", (async (req: Request, res: Response) => {
   try {
     const categoryId = parseInt(req.params.categoryId);
-    
     if (isNaN(categoryId)) {
-      return res.status(400).json({ message: "L'ID de catégorie doit être un nombre entier" });
+      logger.warn('Invalid category ID provided', { id: req.params.categoryId });
+      return res.status(400).json({ message: "ID de catégorie invalide" });
     }
     
     const projects = await projectService.getProjectsByCategory(categoryId);
     res.json(projects);
-  } catch (error: any) {
-    console.error("Erreur lors de la récupération des projets par catégorie:", error);
-    
-    if (error.message === "Catégorie non trouvée") {
-      return res.status(404).json({ message: "Catégorie non trouvée" });
+  } catch (error) {
+    if (error instanceof CategoryNotFoundError) {
+      logger.warn('Category not found', { categoryId: req.params.categoryId });
+      return res.status(404).json({ message: error.message });
     }
     
-    res.status(500).json({ message: error.message || "Erreur interne du serveur" });
+    logger.error('Error fetching projects by category:', { 
+      error, 
+      categoryId: req.params.categoryId
+    });
+    res.status(500).json({ message: 'Internal server error' });
   }
 }) as RequestHandler);
 

@@ -12,7 +12,7 @@ export class ValidatorClient extends BaseApiService {
 
   private readonly CACHE_KEY = 'staking:validators:raw_data';
   private readonly UPDATE_CHANNEL = 'staking:validators:updated';
-  private readonly UPDATE_INTERVAL = 30000; // 30 secondes
+  private readonly UPDATE_INTERVAL = 10000; // 10 secondes
   private lastUpdate: number = 0;
 
   private circuitBreaker: CircuitBreakerService;

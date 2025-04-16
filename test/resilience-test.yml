@@ -100,6 +100,12 @@ scenarios:
             - statusCode: 200
             - contentType: "application/json"
 
+      - get:
+          url: "/staking/validators/trending"
+          expect:
+            - statusCode: 200
+            - contentType: "application/json"
+
       # Global Stats Routes
       - get:
           url: "/dashboard/globalstats"
@@ -108,13 +114,13 @@ scenarios:
             - contentType: "application/json"
 
       - get:
-          url: "/pages/market/spot/globalstats"
+          url: "/market/spot/globalstats"
           expect:
             - statusCode: 200
             - contentType: "application/json"
 
       - get:
-          url: "/pages/market/perp/globalstats"
+          url: "/market/perp/globalstats"
           expect:
             - statusCode: 200
             - contentType: "application/json"

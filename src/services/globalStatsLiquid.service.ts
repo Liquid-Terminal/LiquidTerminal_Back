@@ -41,7 +41,7 @@ export class DashboardGlobalStatsService {
       const latestBridgedUsdc = bridgedUsdcData[bridgedUsdcData.length - 1]?.totalCirculating.peggedUSD || 0;
 
       return {
-        numberOfUsers: globalStats.nUsers,
+        numberOfUsers: globalStats.nUsers || 0,
         dailyVolume: globalStats.dailyVolume,
         bridgedUsdc: latestBridgedUsdc,
         totalHypeStake: totalHypeStake

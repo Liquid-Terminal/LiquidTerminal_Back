@@ -9,6 +9,7 @@ import {
   WalletError 
 } from "../../errors/wallet.errors";
 import { addWalletSchema, getWalletsByUserSchema } from "../../schemas/wallet.schema";
+import { logDeduplicator } from "../../utils/logDeduplicator";
 
 const router = express.Router();
 const walletService = WalletService.getInstance();
@@ -34,7 +35,10 @@ router.post("/", (async (req: Request, res: Response) => {
     const { privyUserId, address } = result.data;
     const wallet = await walletService.addWallet(privyUserId, address);
     
-    logger.info('Wallet added successfully', { address: wallet.address });
+    logDeduplicator.info('Wallet added successfully', { 
+      address: wallet.address,
+      userId: wallet.userId
+    });
     
     res.status(201).json({ 
       success: true,
@@ -77,7 +81,7 @@ router.get("/user/:privyUserId", (async (req: Request, res: Response) => {
     }
 
     const { privyUserId } = result.data;
-    logger.info('Fetching wallets for user', { privyUserId });
+    logDeduplicator.info('Fetching wallets for user', { privyUserId });
 
     const user = await prisma.user.findUnique({
       where: { privyUserId }
@@ -93,7 +97,7 @@ router.get("/user/:privyUserId", (async (req: Request, res: Response) => {
     }
 
     const wallets = await walletService.getWalletsByUser(user.id);
-    logger.info('Wallets retrieved successfully', { 
+    logDeduplicator.info('Wallets retrieved successfully', { 
       privyUserId, 
       userId: user.id,
       count: wallets.length 

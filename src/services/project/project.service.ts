@@ -6,24 +6,13 @@ import {
   ProjectAlreadyExistsError,
   CategoryNotFoundError 
 } from '../../errors/project.errors';
+import { logDeduplicator } from '../../utils/logDeduplicator';
 
 export class ProjectService {
   private prisma: PrismaClient;
-  private lastLogTimestamp: Record<string, number> = {};
-  private readonly LOG_THROTTLE_MS = 1000;
-
+  
   constructor() {
     this.prisma = new PrismaClient();
-  }
-
-  private logOnce(message: string, metadata: Record<string, any> = {}): void {
-    const now = Date.now();
-    const key = `${message}:${JSON.stringify(metadata)}`;
-    
-    if (!this.lastLogTimestamp[key] || now - this.lastLogTimestamp[key] > this.LOG_THROTTLE_MS) {
-      logger.info(message, metadata);
-      this.lastLogTimestamp[key] = now;
-    }
   }
 
   public async createProject(projectData: ProjectCreateInput) {
@@ -40,7 +29,7 @@ export class ProjectService {
         data: projectData
       });
 
-      this.logOnce('Project created successfully', { projectId: project.id });
+      logDeduplicator.info('Project created successfully', { projectId: project.id });
       return project;
     } catch (error) {
       if (error instanceof ProjectAlreadyExistsError) {
@@ -93,7 +82,7 @@ export class ProjectService {
         }
       });
 
-      this.logOnce('Projects retrieved successfully', { 
+      logDeduplicator.info('Projects retrieved successfully', { 
         count: projects.length,
         page,
         limit,
@@ -134,7 +123,7 @@ export class ProjectService {
         throw new ProjectNotFoundError();
       }
 
-      this.logOnce('Project retrieved successfully', { projectId: id });
+      logDeduplicator.info('Project retrieved successfully', { projectId: id });
       return project;
     } catch (error) {
       if (error instanceof ProjectNotFoundError) {
@@ -168,7 +157,7 @@ export class ProjectService {
         }
       });
 
-      this.logOnce('Project updated successfully', { projectId: id });
+      logDeduplicator.info('Project updated successfully', { projectId: id });
       return updatedProject;
     } catch (error) {
       if (error instanceof ProjectNotFoundError) {
@@ -193,7 +182,7 @@ export class ProjectService {
         where: { id }
       });
 
-      this.logOnce('Project deleted successfully', { projectId: id });
+      logDeduplicator.info('Project deleted successfully', { projectId: id });
     } catch (error) {
       if (error instanceof ProjectNotFoundError) {
         throw error;
@@ -240,21 +229,17 @@ export class ProjectService {
         }
       });
 
-      this.logOnce('Project category updated successfully', { 
+      logDeduplicator.info('Project category updated successfully', { 
         projectId,
         categoryId
       });
-
+      
       return updatedProject;
     } catch (error) {
       if (error instanceof ProjectNotFoundError || error instanceof CategoryNotFoundError) {
         throw error;
       }
-      logger.error('Error updating project category:', { 
-        error,
-        projectId,
-        categoryId
-      });
+      logger.error('Error updating project category:', { error, projectId, categoryId });
       throw error;
     }
   }
@@ -273,28 +258,28 @@ export class ProjectService {
       }
 
       const projects = await this.prisma.project.findMany({
-        where: {
-          categoryId
-        },
-        orderBy: {
-          createdAt: 'desc'
+        where: { categoryId },
+        include: {
+          category: {
+            select: {
+              id: true,
+              name: true
+            }
+          }
         }
       });
 
-      this.logOnce('Projects by category retrieved successfully', { 
+      logDeduplicator.info('Projects by category retrieved successfully', { 
         categoryId,
         count: projects.length
       });
-
+      
       return projects;
     } catch (error) {
       if (error instanceof CategoryNotFoundError) {
         throw error;
       }
-      logger.error('Error fetching projects by category:', { 
-        error,
-        categoryId
-      });
+      logger.error('Error fetching projects by category:', { error, categoryId });
       throw error;
     }
   }

@@ -1,19 +1,18 @@
 import { ValidatorSummary, ValidatorDetails } from '../../types/staking.types';
-import { ValidatorClient } from '../../clients/hyperliquid/staking/validator';
 import { redisService } from '../../core/redis.service';
 import { logger } from '../../utils/logger';
 import { ValidatorError } from '../../errors/staking.errors';
+import { logDeduplicator } from '../../utils/logDeduplicator';
 
 export type SortBy = 'stake' | 'apr';
 
 export class ValidatorSummariesService {
   private static instance: ValidatorSummariesService;
-  private validatorClient: ValidatorClient;
+  private readonly CACHE_KEY = 'staking:validators:raw_data';
   private readonly UPDATE_CHANNEL = 'staking:validators:updated';
   private lastUpdate: number = 0;
 
   private constructor() {
-    this.validatorClient = ValidatorClient.getInstance();
     this.setupSubscriptions();
   }
 
@@ -23,7 +22,7 @@ export class ValidatorSummariesService {
         const { type, timestamp } = JSON.parse(message);
         if (type === 'DATA_UPDATED') {
           this.lastUpdate = timestamp;
-          logger.info('Validator data updated', { timestamp });
+          logDeduplicator.info('Validator data updated', { timestamp });
         }
       } catch (error) {
         logger.error('Error processing cache update:', { error });
@@ -39,32 +38,29 @@ export class ValidatorSummariesService {
   }
 
   /**
-   * Récupère les résumés des validateurs
+   * Récupère les résumés des validateurs depuis le cache
    */
   public async getValidatorSummaries(): Promise<ValidatorSummary[]> {
     try {
-      const summaries = await this.validatorClient.getValidatorSummariesRaw();
-      logger.info('Validator summaries retrieved successfully', { count: summaries.length });
+      const cachedData = await redisService.get(this.CACHE_KEY);
+      if (!cachedData) {
+        throw new ValidatorError('No validator data available in cache');
+      }
+
+      const summaries = JSON.parse(cachedData) as ValidatorSummary[];
+      logDeduplicator.info('Validator summaries retrieved from cache', { 
+        count: summaries.length,
+        lastUpdate: this.lastUpdate
+      });
       return summaries;
     } catch (error) {
-      logger.error('Failed to fetch validator summaries:', { error });
-      throw new ValidatorError('Failed to fetch validator summaries');
+      logger.error('Failed to fetch validator summaries from cache:', { error });
+      throw new ValidatorError('Failed to fetch validator summaries from cache');
     }
   }
 
   /**
-   * Récupère le poids de la requête pour le rate limiting
-   */
-  public checkRateLimit(ip: string): boolean {
-    return this.validatorClient.checkRateLimit(ip);
-  }
-
-  public static getRequestWeight(): number {
-    return ValidatorClient.getRequestWeight();
-  }
-
-  /**
-   * Récupère tous les validateurs avec leurs détails formatés
+   * Récupère tous les validateurs avec leurs détails formatés depuis le cache
    */
   public async getAllValidatorsDetails(sortBy: SortBy = 'stake'): Promise<ValidatorDetails[]> {
     try {
@@ -100,15 +96,16 @@ export class ValidatorSummariesService {
         }
       });
 
-      logger.info('Validator details retrieved and formatted successfully', { 
+      logDeduplicator.info('Validator details retrieved and formatted from cache', { 
         count: sortedValidators.length,
-        sortBy 
+        sortBy,
+        lastUpdate: this.lastUpdate
       });
 
       return sortedValidators;
     } catch (error) {
-      logger.error('Error fetching validator details:', { error, sortBy });
-      throw new ValidatorError('Failed to fetch and format validator details');
+      logger.error('Error fetching validator details from cache:', { error, sortBy });
+      throw new ValidatorError('Failed to fetch and format validator details from cache');
     }
   }
 } 

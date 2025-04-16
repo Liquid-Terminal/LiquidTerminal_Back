@@ -1,30 +1,20 @@
-import { DashboardGlobalStats, SpotGlobalStats, PerpGlobalStats, MarketData } from '../types/market.types';
+import { DashboardGlobalStats } from '../types/market.types';
 import { ValidatorSummary } from '../types/staking.types';
 import { GlobalStatsService } from './globalStats.service';
 import { BridgedUsdcService } from './bridgedUsdc.service';
 import { ValidatorSummariesService } from './staking/validator.service';
-import { SpotAssetContextService } from './spot/marketData.service';
-import { SpotUSDCService } from './spot/spotUSDC.service';
-import { PerpAssetContextService } from './perp/perpAssetContext.service';
-import { HyperliquidSpotClient } from '../clients/hyperliquid/spot/spot.assetcontext.client';
-import { HyperliquidPerpClient } from '../clients/hyperliquid/perp/perp.assetcontext.client';
+import { logger } from '../utils/logger';
 
 export class DashboardGlobalStatsService {
   private globalStatsService: GlobalStatsService;
   private bridgedUsdcService: BridgedUsdcService;
   private validatorSummariesService: ValidatorSummariesService;
-  private spotAssetContextService: SpotAssetContextService;
-  private spotUSDCService: SpotUSDCService;
-  private perpAssetContextService: PerpAssetContextService;
   private readonly HYPE_DECIMALS = 8;
 
   constructor() {
     this.globalStatsService = new GlobalStatsService();
     this.bridgedUsdcService = new BridgedUsdcService();
     this.validatorSummariesService = ValidatorSummariesService.getInstance();
-    this.spotAssetContextService = new SpotAssetContextService(HyperliquidSpotClient.getInstance());
-    this.spotUSDCService = new SpotUSDCService();
-    this.perpAssetContextService = new PerpAssetContextService(HyperliquidPerpClient.getInstance());
   }
 
   private formatHypeAmount(rawAmount: number): number {
@@ -57,72 +47,7 @@ export class DashboardGlobalStatsService {
         totalHypeStake: totalHypeStake
       };
     } catch (error) {
-      console.error('Error fetching dashboard global stats:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Récupère les statistiques globales du marché spot
-   */
-  public async getSpotGlobalStats(): Promise<SpotGlobalStats> {
-    try {
-      // Récupérer les données en parallèle
-      const [marketsData, spotUSDCData] = await Promise.all([
-        this.spotAssetContextService.getMarketsData(),
-        this.spotUSDCService.getSpotUSDCData()
-      ]);
-
-      // Calculer le volume total sur 24h
-      const totalVolume24h = marketsData.reduce((total: number, market: MarketData) => total + market.volume, 0);
-      
-      // Calculer le nombre total de paires
-      const totalPairs = marketsData.length;
-      
-      // Calculer la capitalisation totale du marché
-      const totalMarketCap = marketsData.reduce((total: number, market: MarketData) => total + market.marketCap, 0);
-      
-      // Récupérer les données USDC spot
-      const totalSpotUSDC = spotUSDCData.totalSpotUSDC;
-      const totalHIP2 = spotUSDCData["HIP-2"];
-
-      return {
-        totalVolume24h,
-        totalPairs,
-        totalMarketCap,
-        totalSpotUSDC,
-        totalHIP2
-      };
-    } catch (error) {
-      console.error('Error fetching spot global stats:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Récupère les statistiques globales du marché perpétuel
-   */
-  public async getPerpGlobalStats(): Promise<PerpGlobalStats> {
-    try {
-      // Récupérer les données des marchés perpétuels
-      const perpMarketsData = await this.perpAssetContextService.getPerpMarketsData();
-
-      // Calculer le volume total sur 24h
-      const totalVolume24h = perpMarketsData.reduce((total, market) => total + market.volume, 0);
-      
-      // Calculer le nombre total de paires
-      const totalPairs = perpMarketsData.length;
-      
-      // Calculer l'intérêt ouvert total
-      const totalOpenInterest = perpMarketsData.reduce((total, market) => total + market.openInterest, 0);
-
-      return {
-        totalOpenInterest,
-        totalVolume24h,
-        totalPairs
-      };
-    } catch (error) {
-      console.error('Error fetching perp global stats:', error);
+      logger.error('Error fetching dashboard global stats:', { error });
       throw error;
     }
   }

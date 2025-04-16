@@ -1,0 +1,92 @@
+import { HyperliquidSpotClient } from '../clients/hyperliquid/spot/spot.assetcontext.client';
+import { HyperliquidPerpClient } from '../clients/hyperliquid/perp/perp.assetcontext.client';
+import { HyperliquidSpotDeployClient } from '../clients/hyperliquid/spot/spot.deploy.client';
+import { HyperliquidTokenInfoClient } from '../clients/hyperliquid/spot/spot.tokeninfo.client';
+import { ValidatorClient } from '../clients/hyperliquid/staking/validator';
+import { HyperliquidVaultClient } from '../clients/hyperliquid/vault/vault.client';
+import { HypurrscanClient } from '../clients/hypurrscan/auction.client';
+import { SpotUSDCClient } from '../clients/hypurrscan/spotUSDC.client';
+import { logger } from '../utils/logger';
+
+export class ClientInitializerService {
+  private static instance: ClientInitializerService;
+  private clients: Map<string, any> = new Map();
+
+  private constructor() {}
+
+  public static getInstance(): ClientInitializerService {
+    if (!ClientInitializerService.instance) {
+      ClientInitializerService.instance = new ClientInitializerService();
+    }
+    return ClientInitializerService.instance;
+  }
+
+  public initialize(): void {
+    try {
+      // Initialiser le client Spot
+      const spotClient = HyperliquidSpotClient.getInstance();
+      this.clients.set('spot', spotClient);
+
+      // Initialiser le client Perp
+      const perpClient = HyperliquidPerpClient.getInstance();
+      this.clients.set('perp', perpClient);
+
+      // Initialiser le client Spot Deploy
+      const spotDeployClient = HyperliquidSpotDeployClient.getInstance();
+      this.clients.set('spotDeploy', spotDeployClient);
+
+      // Initialiser le client Token Info
+      const tokenInfoClient = HyperliquidTokenInfoClient.getInstance();
+      this.clients.set('tokenInfo', tokenInfoClient);
+
+      // Initialiser le client Validator
+      const validatorClient = ValidatorClient.getInstance();
+      this.clients.set('validator', validatorClient);
+
+      // Initialiser le client Vault
+      const vaultClient = HyperliquidVaultClient.getInstance();
+      this.clients.set('vault', vaultClient);
+
+      // Initialiser les clients Hypurrscan
+      const hypurrscanClient = HypurrscanClient.getInstance();
+      this.clients.set('hypurrscanAuction', hypurrscanClient);
+
+      const spotUSDCClient = SpotUSDCClient.getInstance();
+      this.clients.set('spotUSDC', spotUSDCClient);
+
+      // Démarrer le polling pour tous les clients
+      this.startAllPolling();
+
+      logger.info('All clients initialized successfully');
+    } catch (error) {
+      logger.error('Error initializing clients:', { error });
+      throw error;
+    }
+  }
+
+  private startAllPolling(): void {
+    for (const [name, client] of this.clients.entries()) {
+      if ('startPolling' in client) {
+        try {
+          client.startPolling();
+          logger.info(`Started polling for ${name} client`);
+        } catch (error) {
+          logger.error(`Error starting polling for ${name} client:`, { error });
+        }
+      }
+    }
+  }
+
+  public stopAllPolling(): void {
+    for (const [name, client] of this.clients.entries()) {
+      if ('stopPolling' in client) {
+        try {
+          client.stopPolling();
+          logger.info(`Stopped polling for ${name} client`);
+        } catch (error) {
+          logger.error(`Error stopping polling for ${name} client:`, { error });
+        }
+      }
+    }
+  }
+} 

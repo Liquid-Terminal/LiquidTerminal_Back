@@ -1,30 +1,29 @@
 {
   "compilerOptions": {
     /* Language and Environment */
-    "target": "ES2020",                                  /* Use modern JavaScript features supported by ES2020. */
-    "module": "ESNext",                                  /* Generate JavaScript modules in ESNext format. */
-    "moduleResolution": "node",                         /* Use Node.js-style module resolution. */
-    "lib": ["ES2020", "DOM"],                            /* Add support for ES2020 and DOM libraries. */
-    "allowSyntheticDefaultImports": true,               /* Allow default imports for compatibility with CommonJS modules. */
-    "esModuleInterop": true,                             /* Enable compatibility with CommonJS and legacy modules. */
-    "forceConsistentCasingInFileNames": true,            /* Ensure consistent casing in imports. */
-    "strict": true,                                      /* Enable all strict type-checking options. */
-    "skipLibCheck": true,                                /* Skip type checking of declaration files. */
+    "target": "ES2020",
+    "module": "CommonJS",
+    "moduleResolution": "node",
+    "lib": ["ES2020", "DOM"],
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "strict": true,
+    "skipLibCheck": true,
 
     /* Emit */
-    "outDir": "./dist",                                  /* Output folder for compiled JavaScript files. */
-    "declaration": true,                                 /* Generate .d.ts declaration files. */
-    "declarationMap": true,                              /* Include source maps for declaration files. */
-    "sourceMap": true,                                   /* Include source maps in the output. */
+    "outDir": "./dist",
+    "declaration": true,
+    "sourceMap": true,
 
     /* Interop Constraints */
-    "isolatedModules": true,                              /* Ensure each file can be compiled independently. */
+    "isolatedModules": true,
 
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"]
     }
   },
-  "include": ["src", "lib", "src/services/market/spot/marketData.service.ts"],                                    /* Include all files in the "src" directory. */
-  "exclude": ["node_modules", "dist"]                   /* Exclude "node_modules" and "dist" directories. */
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
 }

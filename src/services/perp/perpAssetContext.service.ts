@@ -1,14 +1,16 @@
-import { PerpMarketData } from '../../types/market.types';
+import { PerpMarketData, PerpMarket, PerpAssetContext } from '../../types/market.types';
 import { HyperliquidPerpClient } from '../../clients/hyperliquid/perp/perp.assetcontext.client';
 import { redisService } from '../../core/redis.service';
 import { logger } from '../../utils/logger';
 import { PerpMarketDataError, PerpCacheError } from '../../errors/perp.errors';
+import { logDeduplicator } from '../../utils/logDeduplicator';
 
 export class PerpAssetContextService {
   private readonly UPDATE_CHANNEL = 'perp:data:updated';
-  private lastUpdate: number = 0;  // Timestamp de la dernière mise à jour des données
-
-  constructor(private hyperliquidClient: HyperliquidPerpClient) {
+  private readonly CACHE_KEY = 'perp:raw_data';
+  private lastUpdate: number = 0;
+  
+  constructor() {
     this.setupSubscriptions();
   }
 
@@ -17,8 +19,8 @@ export class PerpAssetContextService {
       try {
         const { type, timestamp } = JSON.parse(message);
         if (type === 'DATA_UPDATED') {
-          this.lastUpdate = timestamp;  // Mise à jour du timestamp
-          logger.info('Perp data cache updated', { timestamp });
+          this.lastUpdate = timestamp;
+          logDeduplicator.info('Perp data cache updated', { timestamp });
         }
       } catch (error) {
         logger.error('Error processing cache update:', { error });
@@ -36,13 +38,18 @@ export class PerpAssetContextService {
   }
 
   /**
-   * Récupère les données des marchés perpétuels
+   * Récupère les données des marchés perpétuels depuis le cache
    */
   public async getPerpMarketsData(): Promise<PerpMarketData[]> {
     try {
-      const [meta, assetContexts] = await this.hyperliquidClient.getMetaAndAssetCtxsRaw();
+      const cachedData = await redisService.get(this.CACHE_KEY);
+      if (!cachedData) {
+        throw new PerpCacheError('No data available in cache');
+      }
 
-      const marketsData = meta.universe.map((market, index) => {
+      const [meta, assetContexts] = JSON.parse(cachedData) as [{ universe: PerpMarket[] }, PerpAssetContext[]];
+
+      const marketsData = meta.universe.map((market: PerpMarket, index: number) => {
         const assetContext = assetContexts[index];
         const currentPrice = Number(assetContext.markPx);
         const prevDayPrice = Number(assetContext.prevDayPx);
@@ -59,20 +66,15 @@ export class PerpAssetContextService {
         };
       });
 
-      logger.info('Perp markets data retrieved successfully', { 
+      logDeduplicator.info('Perp markets data retrieved from cache', { 
         count: marketsData.length,
         lastUpdate: this.lastUpdate
       });
 
       return marketsData;
     } catch (error) {
-      logger.error('Error fetching perp markets data:', { error });
-      
-      if (error instanceof Error && error.message.includes('timed out')) {
-        throw new PerpMarketDataError('API request timed out');
-      }
-      
-      throw new PerpMarketDataError('Failed to fetch perp market data');
+      logger.error('Error retrieving perp markets data from cache:', { error });
+      throw new PerpMarketDataError('Failed to retrieve market data from cache');
     }
   }
 

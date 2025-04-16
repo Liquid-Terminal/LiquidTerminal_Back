@@ -1,10 +1,11 @@
 import prisma from "../../lib/prisma";
 import { logger } from "../../utils/logger";
 import { WalletAlreadyExistsError, UserNotFoundError } from "../../errors/wallet.errors";
+import { logDeduplicator } from "../../utils/logDeduplicator";
 
 export class WalletService {
   private static instance: WalletService;
-
+  
   private constructor() {}
 
   public static getInstance(): WalletService {
@@ -12,7 +13,7 @@ export class WalletService {
       WalletService.instance = new WalletService();
     }
     return WalletService.instance;
-  }
+  } 
 
   public async addWallet(privyUserId: string, address: string) {
     try {
@@ -47,7 +48,7 @@ export class WalletService {
         },
       });
 
-      logger.info('Wallet added successfully', { address, userId: user.id });
+      logDeduplicator.info('Wallet added successfully', { address, userId: user.id });
       return wallet;
     } catch (error) {
       if (error instanceof WalletAlreadyExistsError || 
@@ -68,7 +69,7 @@ export class WalletService {
         }
       });
 
-      logger.info('Wallets retrieved successfully', { userId, count: wallets.length });
+      logDeduplicator.info('Wallets retrieved successfully', { userId, count: wallets.length });
       return wallets;
     } catch (error) {
       logger.error('Error retrieving wallets:', { error, userId });

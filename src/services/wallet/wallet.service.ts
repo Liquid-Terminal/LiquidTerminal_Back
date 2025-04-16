@@ -1,11 +1,12 @@
 import { WalletService } from './walletDB.service';
 import { logger } from '../../utils/logger';
 import { WalletError } from '../../errors/wallet.errors';
+import { logDeduplicator } from '../../utils/logDeduplicator';
 
 export class PortfolioService {
   private static instance: PortfolioService;
   private walletService: WalletService;
-
+  
   private constructor() {
     this.walletService = WalletService.getInstance();
   }
@@ -21,7 +22,7 @@ export class PortfolioService {
     try {
       const wallets = await this.walletService.getWalletsByUser(userId);
       
-      logger.info('Portfolio data retrieved successfully', { userId, walletCount: wallets.length });
+      logDeduplicator.info('Portfolio data retrieved successfully', { userId, walletCount: wallets.length });
       
       return {
         wallets: wallets,

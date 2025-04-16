@@ -1,0 +1,74 @@
+config:
+  target: "http://localhost:3002"
+  phases:
+    - duration: 300
+      arrivalRate: 50
+      name: "Test intensif 5 minutes"
+
+scenarios:
+  - name: "Test toutes les routes"
+    flow:
+      # Health check
+      - get:
+          url: "/api/health"
+      
+      # Market Spot
+      - get:
+          url: "/market/spot"
+      - get:
+          url: "/market/spot/trending"
+      - get:
+          url: "/pages/market/spot/globalstats"
+      
+      # Market Perp
+      - get:
+          url: "/market/perp"
+      - get:
+          url: "/market/perp/trending"
+      - get:
+          url: "/pages/market/perp/globalstats"
+      
+      # Auction
+      - get:
+          url: "/market/auction"
+      
+      # Wallet (simulation avec un ID)
+      - get:
+          url: "/wallet/user/test-user-id"
+      
+      # Projects
+      - get:
+          url: "/projects"
+      
+      # Categories
+      - get:
+          url: "/categories"
+      
+      # Staking
+      - get:
+          url: "/staking/validators"
+      
+      # Dashboard
+      - get:
+          url: "/dashboard/globalstats"
+
+  # Scénario spécifique pour les routes POST (avec données simulées)
+  - name: "Test routes POST"
+    flow:
+      - post:
+          url: "/auth/verify"
+          json:
+            token: "test-token"
+            username: "test-user"
+      
+      - post:
+          url: "/wallet"
+          json:
+            privyUserId: "test-user-id"
+            address: "0x1234567890123456789012345678901234567890"
+      
+      - post:
+          url: "/projects"
+          json:
+            name: "Test Project"
+            description: "Test Description" 

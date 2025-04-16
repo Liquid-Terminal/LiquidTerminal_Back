@@ -14,6 +14,7 @@ import {
   ProjectAlreadyExistsError,
   CategoryNotFoundError 
 } from '../../errors/project.errors';
+import { logDeduplicator } from '../../utils/logDeduplicator';
 
 const router = express.Router();
 const projectService = new ProjectService();
@@ -25,6 +26,10 @@ router.use(marketRateLimiter);
 router.post("/", validateRequest(projectCreateSchema), (async (req: Request, res: Response) => {
   try {
     const project = await projectService.createProject(req.body);
+    logDeduplicator.info('Project created successfully', { 
+      projectId: project.id,
+      title: project.title
+    });
     res.status(201).json(project);
   } catch (error) {
     if (error instanceof ProjectAlreadyExistsError) {
@@ -42,17 +47,23 @@ router.post("/", validateRequest(projectCreateSchema), (async (req: Request, res
 // Récupérer tous les projets
 router.get("/", validateRequest(projectQuerySchema), async (req, res) => {
   try {
-    const { page, limit, sort, order, search, categoryId } = req.query;
+    const { page, limit, sort, order, search } = req.query;
     
     const result = await projectService.getAllProjects({
       page: page ? parseInt(page as string) : undefined,
       limit: limit ? parseInt(limit as string) : undefined,
       sort: sort as string,
       order: order as 'asc' | 'desc',
-      search: search as string,
-      categoryId: categoryId ? parseInt(categoryId as string) : undefined
+      search: search as string
     });
 
+    logDeduplicator.info('Projects retrieved successfully', { 
+      count: result.data.length,
+      total: result.pagination.total,
+      page: page || 1,
+      limit: limit || 10
+    });
+    
     res.json(result);
   } catch (error) {
     logger.error('Error fetching projects:', { error, query: req.query });
@@ -70,6 +81,11 @@ router.get("/:id", (async (req: Request, res: Response) => {
     }
     
     const project = await projectService.getProjectById(id);
+    logDeduplicator.info('Project retrieved successfully', { 
+      projectId: project.id,
+      title: project.title
+    });
+    
     res.json(project);
   } catch (error) {
     if (error instanceof ProjectNotFoundError) {
@@ -92,6 +108,11 @@ router.put("/:id", validateRequest(projectUpdateSchema), (async (req: Request, r
     }
     
     const project = await projectService.updateProject(id, req.body);
+    logDeduplicator.info('Project updated successfully', { 
+      projectId: project.id,
+      title: project.title
+    });
+    
     res.json(project);
   } catch (error) {
     if (error instanceof ProjectNotFoundError) {
@@ -114,6 +135,8 @@ router.delete("/:id", (async (req: Request, res: Response) => {
     }
     
     await projectService.deleteProject(id);
+    logDeduplicator.info('Project deleted successfully', { projectId: id });
+    
     res.status(204).send();
   } catch (error) {
     if (error instanceof ProjectNotFoundError) {
@@ -140,6 +163,12 @@ router.put("/:id/category", validateRequest(projectCategoryUpdateSchema), (async
       projectId, 
       categoryId
     );
+    
+    logDeduplicator.info('Project category updated successfully', { 
+      projectId: project.id,
+      title: project.title,
+      categoryId: project.categoryId
+    });
     
     res.json(project);
   } catch (error) {
@@ -175,6 +204,11 @@ router.get("/category/:categoryId", (async (req: Request, res: Response) => {
     }
     
     const projects = await projectService.getProjectsByCategory(categoryId);
+    logDeduplicator.info('Projects by category retrieved successfully', { 
+      categoryId,
+      count: projects.length
+    });
+    
     res.json(projects);
   } catch (error) {
     if (error instanceof CategoryNotFoundError) {

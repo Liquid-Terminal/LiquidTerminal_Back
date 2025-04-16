@@ -3,11 +3,16 @@ import prisma from "../../lib/prisma";
 import { PrivyPayload } from "../../types/auth.types";
 import { JWKSError, SigningKeyError, TokenValidationError, UserNotFoundError } from "../../errors/auth.errors";
 import { logger } from "../../utils/logger";
+import { logDeduplicator } from "../../utils/logDeduplicator";
 
 const JWKS_URL = process.env.JWKS_URL!;
 
 export class AuthService {
   private static instance: AuthService;
+  
+  // Système de déduplication des logs
+  private lastLogTimestamp: Record<string, number> = {};
+  private readonly LOG_THROTTLE_MS = 1000;
 
   private constructor() {}
 
@@ -16,6 +21,19 @@ export class AuthService {
       AuthService.instance = new AuthService();
     }
     return AuthService.instance;
+  }
+
+  /**
+   * Log un message une seule fois dans un intervalle de temps défini
+   */
+  private logOnce(message: string, metadata: Record<string, any> = {}): void {
+    const now = Date.now();
+    const key = `${message}:${JSON.stringify(metadata)}`;
+    
+    if (!this.lastLogTimestamp[key] || now - this.lastLogTimestamp[key] > this.LOG_THROTTLE_MS) {
+      logger.info(message, metadata);
+      this.lastLogTimestamp[key] = now;
+    }
   }
 
   private async getSigningKey(header: any): Promise<CryptoKey> {
@@ -75,7 +93,7 @@ export class AuthService {
       });
 
       if (!user) {
-        logger.info('Creating new user', { privyUserId, username });
+        logDeduplicator.info('Creating new user', { privyUserId, username });
         user = await prisma.user.create({
           data: {
             privyUserId,
@@ -83,7 +101,7 @@ export class AuthService {
           },
         });
       } else {
-        logger.info('User found', { privyUserId, username });
+        logDeduplicator.info('User found', { privyUserId, username });
       }
 
       return user;

@@ -3,6 +3,7 @@ import { PerpMarket, PerpAssetContext } from '../../../types/market.types';
 import { CircuitBreakerService } from '../../../core/circuit.breaker.service';
 import { RateLimiterService } from '../../../core/hyperLiquid.ratelimiter.service';
 import { redisService } from '../../../core/redis.service';
+import { logDeduplicator } from '../../../utils/logDeduplicator';
 
 export class HyperliquidPerpClient extends BaseApiService {
   private static instance: HyperliquidPerpClient;
@@ -14,6 +15,7 @@ export class HyperliquidPerpClient extends BaseApiService {
   private readonly UPDATE_CHANNEL = 'perp:data:updated';
   private readonly UPDATE_INTERVAL = 10000; // 10 secondes
   private lastUpdate: number = 0;
+  private pollingInterval: NodeJS.Timeout | null = null;
 
   private circuitBreaker: CircuitBreakerService;
   private rateLimiter: RateLimiterService;
@@ -34,48 +36,84 @@ export class HyperliquidPerpClient extends BaseApiService {
     return HyperliquidPerpClient.instance;
   }
 
+  public startPolling(): void {
+    if (this.pollingInterval) {
+      logDeduplicator.warn('Perp polling already started');
+      return;
+    }
+
+    logDeduplicator.info('Starting perp polling');
+    // Faire une première mise à jour immédiate
+    this.updatePerpData().catch(error => {
+      logDeduplicator.error('Error in initial perp update:', { error });
+    });
+
+    // Démarrer le polling régulier
+    this.pollingInterval = setInterval(() => {
+      this.updatePerpData().catch(error => {
+        logDeduplicator.error('Error in perp polling:', { error });
+      });
+    }, this.UPDATE_INTERVAL);
+  }
+
+  public stopPolling(): void {
+    if (this.pollingInterval) {
+      clearInterval(this.pollingInterval);
+      this.pollingInterval = null;
+      logDeduplicator.info('Perp polling stopped');
+    }
+  }
+
+  private async updatePerpData(): Promise<void> {
+    try {
+      const data = await this.circuitBreaker.execute(() => 
+        this.post<[{ universe: PerpMarket[] }, PerpAssetContext[]]>('', {
+          type: "metaAndAssetCtxs"
+        })
+      );
+      
+      await redisService.set(this.CACHE_KEY, JSON.stringify(data));
+      const now = Date.now();
+      await redisService.publish(this.UPDATE_CHANNEL, JSON.stringify({
+        type: 'DATA_UPDATED',
+        timestamp: now
+      }));
+      this.lastUpdate = now;
+      logDeduplicator.info('Perp data updated successfully', {
+        marketsCount: data[0].universe.length,
+        assetsCount: data[1].length,
+        lastUpdate: this.lastUpdate
+      });
+    } catch (error) {
+      logDeduplicator.error('Failed to update perp data:', { error });
+      throw error;
+    }
+  }
+
   /**
    * Récupère les données brutes de l'API
    */
   public async getMetaAndAssetCtxsRaw(): Promise<[{ universe: PerpMarket[] }, PerpAssetContext[]]> {
-    const now = Date.now();
-    
-    if (now - this.lastUpdate >= this.UPDATE_INTERVAL) {
-      try {
-        const data = await this.circuitBreaker.execute(() => 
-          this.post<[{ universe: PerpMarket[] }, PerpAssetContext[]]>('', {
-            type: "metaAndAssetCtxs"
-          })
-        );
-        await redisService.set(this.CACHE_KEY, JSON.stringify(data));
-        await redisService.publish(this.UPDATE_CHANNEL, JSON.stringify({
-          type: 'DATA_UPDATED',
-          timestamp: now
-        }));
-        this.lastUpdate = now;
-        return data;
-      } catch (error) {
-        const cached = await redisService.get(this.CACHE_KEY);
-        if (cached) return JSON.parse(cached) as [{ universe: PerpMarket[] }, PerpAssetContext[]];
-        throw error;
+    try {
+      const cached = await redisService.get(this.CACHE_KEY);
+      if (cached) {
+        logDeduplicator.info('Retrieved perp data from cache', {
+          lastUpdate: this.lastUpdate
+        });
+        return JSON.parse(cached) as [{ universe: PerpMarket[] }, PerpAssetContext[]];
       }
+
+      logDeduplicator.warn('No perp data in cache, forcing update');
+      await this.updatePerpData();
+      const freshData = await redisService.get(this.CACHE_KEY);
+      if (!freshData) {
+        throw new Error('Failed to get perp data after update');
+      }
+      return JSON.parse(freshData) as [{ universe: PerpMarket[] }, PerpAssetContext[]];
+    } catch (error) {
+      logDeduplicator.error('Error fetching perp data:', { error });
+      throw error;
     }
-
-    const cached = await redisService.get(this.CACHE_KEY);
-    if (cached) return JSON.parse(cached) as [{ universe: PerpMarket[] }, PerpAssetContext[]];
-
-    const data = await this.circuitBreaker.execute(() => 
-      this.post<[{ universe: PerpMarket[] }, PerpAssetContext[]]>('', {
-        type: "metaAndAssetCtxs"
-      })
-    );
-    await redisService.set(this.CACHE_KEY, JSON.stringify(data));
-    await redisService.publish(this.UPDATE_CHANNEL, JSON.stringify({
-      type: 'DATA_UPDATED',
-      timestamp: now
-    }));
-    this.lastUpdate = now;
-    return data;
   }
 
   /**

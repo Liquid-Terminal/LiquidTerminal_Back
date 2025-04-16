@@ -2,24 +2,13 @@ import { PrismaClient } from '@prisma/client';
 import { CategoryCreateInput, CategoryUpdateInput } from '../../types/project.types';
 import { logger } from '../../utils/logger';
 import { CategoryNotFoundError, CategoryAlreadyExistsError } from '../../errors/project.errors';
+import { logDeduplicator } from '../../utils/logDeduplicator';
 
 export class CategoryService {
   private prisma: PrismaClient;
-  private lastLogTimestamp: Record<string, number> = {};
-  private readonly LOG_THROTTLE_MS = 1000;
 
   constructor() {
     this.prisma = new PrismaClient();
-  }
-
-  private logOnce(message: string, metadata: Record<string, any> = {}): void {
-    const now = Date.now();
-    const key = `${message}:${JSON.stringify(metadata)}`;
-    
-    if (!this.lastLogTimestamp[key] || now - this.lastLogTimestamp[key] > this.LOG_THROTTLE_MS) {
-      logger.info(message, metadata);
-      this.lastLogTimestamp[key] = now;
-    }
   }
 
   /**
@@ -63,7 +52,7 @@ export class CategoryService {
         orderBy: { [sort]: order }
       });
 
-      this.logOnce('Categories retrieved successfully', { 
+      logDeduplicator.info('Categories retrieved successfully', { 
         count: categories.length,
         page,
         limit,
@@ -98,7 +87,7 @@ export class CategoryService {
         throw new CategoryNotFoundError();
       }
 
-      this.logOnce('Category retrieved successfully', { categoryId: id });
+      logDeduplicator.info('Category retrieved successfully', { categoryId: id });
       return category;
     } catch (error) {
       if (error instanceof CategoryNotFoundError) {
@@ -132,7 +121,7 @@ export class CategoryService {
         throw new CategoryNotFoundError();
       }
 
-      this.logOnce('Category with projects retrieved successfully', { 
+      logDeduplicator.info('Category with projects retrieved successfully', { 
         categoryId: id,
         projectsCount: category.projects.length
       });
@@ -164,7 +153,7 @@ export class CategoryService {
         data
       });
 
-      this.logOnce('Category created successfully', { categoryId: category.id });
+      logDeduplicator.info('Category created successfully', { categoryId: category.id });
       return category;
     } catch (error) {
       if (error instanceof CategoryAlreadyExistsError) {
@@ -203,7 +192,7 @@ export class CategoryService {
         data
       });
 
-      this.logOnce('Category updated successfully', { categoryId: id });
+      logDeduplicator.info('Category updated successfully', { categoryId: id });
       return updatedCategory;
     } catch (error) {
       if (error instanceof CategoryNotFoundError || error instanceof CategoryAlreadyExistsError) {
@@ -231,7 +220,7 @@ export class CategoryService {
         where: { id }
       });
 
-      this.logOnce('Category deleted successfully', { categoryId: id });
+      logDeduplicator.info('Category deleted successfully', { categoryId: id });
     } catch (error) {
       if (error instanceof CategoryNotFoundError) {
         throw error;
@@ -255,25 +244,28 @@ export class CategoryService {
       }
 
       const projects = await this.prisma.project.findMany({
-        where: {
-          categoryId
+        where: { categoryId },
+        include: {
+          category: {
+            select: {
+              id: true,
+              name: true
+            }
+          }
         }
       });
 
-      this.logOnce('Projects by category retrieved successfully', { 
+      logDeduplicator.info('Projects by category retrieved successfully', { 
         categoryId,
         count: projects.length
       });
-
+      
       return projects;
     } catch (error) {
       if (error instanceof CategoryNotFoundError) {
         throw error;
       }
-      logger.error('Error fetching projects by category:', { 
-        error,
-        categoryId
-      });
+      logger.error('Error fetching projects by category:', { error, categoryId });
       throw error;
     }
   }

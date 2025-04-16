@@ -1,15 +1,16 @@
-import {   FormattedTokenInfo, TokenHolder } from '../../types/market.types';
+import { FormattedTokenInfo, TokenHolder } from '../../types/market.types';
 import { AuctionInfo } from '../../types/auction.types';
-import { HyperliquidTokenInfoClient } from '../../clients/hyperliquid/spot/spot.tokeninfo.client';
 import { redisService } from '../../core/redis.service';
 import { TokenInfoError, TokenNotFoundError } from '../../errors/spot.errors';
 import { logger } from '../../utils/logger';
+import { logDeduplicator } from '../../utils/logDeduplicator';
 
 export class TokenInfoService {
   private readonly UPDATE_CHANNEL = 'token:info:updated';
+  private readonly CACHE_KEY = 'token:info:raw_data';
   private lastUpdate: Record<string, number> = {};
 
-  constructor(private hyperliquidClient: HyperliquidTokenInfoClient) {
+  constructor() {
     this.setupSubscriptions();
   }
 
@@ -19,7 +20,7 @@ export class TokenInfoService {
         const { type, tokenId, timestamp } = JSON.parse(message);
         if (type === 'DATA_UPDATED') {
           this.lastUpdate[tokenId] = timestamp;
-          logger.info('Token info cache updated', { tokenId, timestamp });
+          logDeduplicator.info('Token info cache updated', { tokenId, timestamp });
         }
       } catch (error) {
         logger.error('Error processing cache update:', { error });
@@ -38,55 +39,60 @@ export class TokenInfoService {
   }
 
   /**
-   * Récupère les informations formatées d'un token avec les holders
+   * Récupère les informations formatées d'un token avec les holders depuis le cache
    */
   public async getTokenInfo(tokenId: string): Promise<FormattedTokenInfo> {
     try {
-      const data = await this.hyperliquidClient.getTokenDetailsRaw(tokenId);
-      
-      if (!data) {
-        logger.warn('Token not found', { tokenId });
-        throw new TokenNotFoundError(`Token with ID ${tokenId} not found`);
+      const cachedData = await redisService.get(`${this.CACHE_KEY}:${tokenId}`);
+      if (!cachedData) {
+        logger.warn('Token not found in cache', { tokenId });
+        throw new TokenNotFoundError(`Token with ID ${tokenId} not found in cache`);
       }
+
+      const data = JSON.parse(cachedData);
       
       // Formater les données pour inclure les holders de manière plus lisible
       const holders = this.formatHolders(data.genesis.userBalances);
       const nonCirculatingHolders = this.formatHolders(data.nonCirculatingUserBalances);
 
-      logger.info('Token info retrieved successfully', { 
+      logDeduplicator.info('Token info retrieved from cache', { 
         tokenId,
         holdersCount: holders.length,
         nonCirculatingHoldersCount: nonCirculatingHolders.length
       });
+
       return {
         ...data,
         holders,
         nonCirculatingHolders
       };
     } catch (error) {
-      logger.error('Error formatting token info:', { error, tokenId });
+      logger.error('Error retrieving token info from cache:', { error, tokenId });
       if (error instanceof TokenNotFoundError) {
         throw error;
       }
-      throw new TokenInfoError(error instanceof Error ? error.message : 'Failed to fetch token information');
+      throw new TokenInfoError('Failed to retrieve token information from cache');
     }
   }
 
   /**
-   * Récupère les détails d'un token pour les besoins de l'auction
+   * Récupère les détails d'un token pour les besoins de l'auction depuis le cache
    */
   public async getTokenAuctionDetails(tokenId: string): Promise<AuctionInfo> {
     try {
-      const details = await this.hyperliquidClient.getTokenDetailsRaw(tokenId);
-      if (!details) {
-        logger.warn('Token not found for auction details', { tokenId });
-        throw new TokenNotFoundError(`Token with ID ${tokenId} not found`);
+      const cachedData = await redisService.get(`${this.CACHE_KEY}:${tokenId}`);
+      if (!cachedData) {
+        logger.warn('Token not found in cache for auction details', { tokenId });
+        throw new TokenNotFoundError(`Token with ID ${tokenId} not found in cache`);
       }
 
-      logger.info('Token auction details retrieved successfully', { 
+      const details = JSON.parse(cachedData);
+
+      logDeduplicator.info('Token auction details retrieved from cache', { 
         tokenId,
         deployTime: new Date(details.deployTime).toISOString()
       });
+
       return {
         time: new Date(details.deployTime).getTime(),
         deployer: details.deployer,
@@ -94,18 +100,11 @@ export class TokenInfoService {
         deployGas: details.deployGas
       };
     } catch (error) {
-      logger.error('Error fetching token auction details:', { error, tokenId });
+      logger.error('Error retrieving token auction details from cache:', { error, tokenId });
       if (error instanceof TokenNotFoundError) {
         throw error;
       }
-      throw new TokenInfoError(error instanceof Error ? error.message : 'Failed to fetch token auction details');
+      throw new TokenInfoError('Failed to retrieve token auction details from cache');
     }
-  }
-
-  /**
-   * Récupère le poids de la requête pour le rate limiting
-   */
-  public getRequestWeight(): number {
-    return HyperliquidTokenInfoClient.getRequestWeight();
   }
 } 

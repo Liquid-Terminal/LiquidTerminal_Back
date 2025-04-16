@@ -1,18 +1,17 @@
 import { Router, Request, Response, RequestHandler } from 'express';
 import { PerpAssetContextService } from '../../services/perp/perpAssetContext.service';
-import { HyperliquidPerpClient } from '../../clients/hyperliquid/perp/perp.assetcontext.client';
 import { marketRateLimiter } from '../../middleware/apiRateLimiter';
-import { validateRequest, sanitizeInput } from '../../middleware/validation';
+import { validateRequest } from '../../middleware/validation';
 import { marketPerpTrendingQuerySchema } from '../../schemas/perp.schemas';
 import { logger } from '../../utils/logger';
 import { PerpTrendingError, PerpMarketDataError } from '../../errors/perp.errors';
+import { logDeduplicator } from '../../utils/logDeduplicator';
 
 const router = Router();
-const perpMarketService = new PerpAssetContextService(HyperliquidPerpClient.getInstance());
+const perpMarketService = new PerpAssetContextService();
 
 // Appliquer le rate limiting et la sanitization
 router.use(marketRateLimiter);
-router.use(sanitizeInput);
 
 router.get('/', validateRequest(marketPerpTrendingQuerySchema), (async (req: Request, res: Response) => {
   try {
@@ -56,10 +55,11 @@ router.get('/', validateRequest(marketPerpTrendingQuerySchema), (async (req: Req
       change24h: sortIndices.change24h.slice(0, limit)
     };
 
-    logger.info('Perp trending tokens retrieved successfully', { 
+    logDeduplicator.info('Perp trending tokens retrieved successfully', { 
       sortBy, 
       limit, 
-      totalTokens: marketsData.length 
+      totalTokens: marketsData.length,
+      trendingCount: trendingTokens.length
     });
 
     res.json({

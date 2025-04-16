@@ -5,9 +5,26 @@ import { logger } from '../../../utils/logger';
 
 export class SpotDeployStateApiService {
   private hyperliquidClient: HyperliquidSpotDeployClient;
+  
+  // Système de déduplication des logs
+  private lastLogTimestamp: Record<string, number> = {};
+  private readonly LOG_THROTTLE_MS = 1000;
 
   constructor() {
     this.hyperliquidClient = HyperliquidSpotDeployClient.getInstance();
+  }
+
+  /**
+   * Log un message une seule fois dans un intervalle de temps défini
+   */
+  private logOnce(message: string, metadata: Record<string, any> = {}): void {
+    const now = Date.now();
+    const key = `${message}:${JSON.stringify(metadata)}`;
+    
+    if (!this.lastLogTimestamp[key] || now - this.lastLogTimestamp[key] > this.LOG_THROTTLE_MS) {
+      logger.info(message, metadata);
+      this.lastLogTimestamp[key] = now;
+    }
   }
 
   /**
@@ -35,7 +52,7 @@ export class SpotDeployStateApiService {
         (Number(gasAuction.endGas) * 2).toString() : 
         "0";
 
-      logger.info('Auction timing retrieved successfully', { 
+      this.logOnce('Auction timing retrieved successfully', { 
         currentStartTime,
         currentEndTime,
         nextStartTime,

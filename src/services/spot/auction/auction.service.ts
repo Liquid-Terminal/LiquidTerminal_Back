@@ -1,21 +1,19 @@
 import { SpotDeployStateApiService } from './auctionTiming.service';
-import { HypurrscanClient } from '../../../clients/hypurrscan/hypurrscan.client';
 import { AuctionInfo, AuctionTimingInfo } from '../../../types/auction.types';
-import { HyperliquidSpotClient } from '../../../clients/hyperliquid/spot/spot.assetcontext.client';
+import { Token } from '../../../types/market.types';
 import { redisService } from '../../../core/redis.service';
 import { AuctionError } from '../../../errors/spot.errors';
 import { logger } from '../../../utils/logger';
+import { logDeduplicator } from '../../../utils/logDeduplicator';
 
 export class AuctionPageService {
-  private hypurrscanClient: HypurrscanClient;
-  private spotClient: HyperliquidSpotClient;
   private readonly UPDATE_CHANNEL = 'hypurrscan:auctions:updated';
+  private readonly CACHE_KEY = 'hypurrscan:auctions';
+  private readonly SPOT_CACHE_KEY = 'spot:raw_data';
 
   constructor(
     private spotDeployStateApi: SpotDeployStateApiService
   ) {
-    this.hypurrscanClient = HypurrscanClient.getInstance();
-    this.spotClient = HyperliquidSpotClient.getInstance();
     this.setupSubscriptions();
   }
 
@@ -24,7 +22,7 @@ export class AuctionPageService {
       try {
         const { type, timestamp } = JSON.parse(message);
         if (type === 'DATA_UPDATED') {
-          logger.info('Hypurrscan cache updated', { timestamp });
+          logDeduplicator.info('Hypurrscan cache updated', { timestamp });
         }
       } catch (error) {
         logger.error('Error processing cache update:', { error });
@@ -34,11 +32,28 @@ export class AuctionPageService {
 
   public async getAllAuctions(): Promise<AuctionInfo[]> {
     try {
-      const auctions = await this.hypurrscanClient.getPastAuctions();
-      const [spotContext] = await this.spotClient.getSpotMetaAndAssetCtxsRaw();
+      const cachedData = await redisService.get(this.CACHE_KEY);
+      if (!cachedData) {
+        logDeduplicator.error('No auction data in cache');
+        throw new AuctionError('No auction data available in cache');
+      }
+
+      const spotCachedData = await redisService.get(this.SPOT_CACHE_KEY);
+      if (!spotCachedData) {
+        logDeduplicator.error('No spot data in cache');
+        throw new AuctionError('No spot data available in cache');
+      }
+
+      const auctions = JSON.parse(cachedData) as AuctionInfo[];
+      const [spotContext] = JSON.parse(spotCachedData);
+
+      if (!spotContext || !spotContext.tokens) {
+        logDeduplicator.error('Invalid spot data format in cache');
+        throw new AuctionError('Invalid spot data format');
+      }
 
       const enrichedAuctions = auctions.map(auction => {
-        const token = spotContext.tokens.find(t => t.name === auction.name);
+        const token = spotContext.tokens.find((t: Token) => t.name === auction.name);
         if (token) {
           return {
             ...auction,
@@ -49,28 +64,32 @@ export class AuctionPageService {
         return auction;
       });
 
-      logger.info('Auctions retrieved successfully', { 
-        count: enrichedAuctions.length 
+      logDeduplicator.info('Auctions retrieved successfully', { 
+        count: enrichedAuctions.length,
+        auctionsWithTokens: enrichedAuctions.filter(a => a.tokenId).length
       });
 
       return enrichedAuctions;
     } catch (error) {
-      logger.error('Error fetching auctions:', { error });
-      throw new AuctionError(error instanceof Error ? error.message : 'Failed to fetch auctions');
+      if (error instanceof AuctionError) {
+        throw error;
+      }
+      logDeduplicator.error('Error retrieving auctions:', { error });
+      throw new AuctionError('Failed to retrieve auctions data');
     }
   }
 
   public async getAuctionTiming(): Promise<AuctionTimingInfo> {
     try {
       const timing = await this.spotDeployStateApi.getAuctionTiming();
-      logger.info('Auction timing retrieved successfully', { 
+      logDeduplicator.info('Auction timing retrieved successfully', { 
         currentStartTime: timing.currentAuction.startTime,
         currentEndTime: timing.currentAuction.endTime,
         nextStartTime: timing.nextAuction.startTime
       });
       return timing;
     } catch (error) {
-      logger.error('Error fetching auction timing:', { error });
+      logDeduplicator.error('Error fetching auction timing:', { error });
       throw new AuctionError(error instanceof Error ? error.message : 'Failed to fetch auction timing');
     }
   }

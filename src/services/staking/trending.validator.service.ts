@@ -1,16 +1,33 @@
-import { ValidatorClient } from '../../clients/hyperliquid/staking/validator';
-import { TrendingValidator } from '../../types/staking.types';
+import { TrendingValidator, ValidatorSummary } from '../../types/staking.types';
+import { redisService } from '../../core/redis.service';
 import { logger } from '../../utils/logger';
 import { TrendingValidatorError } from '../../errors/staking.errors';
+import { logDeduplicator } from '../../utils/logDeduplicator';
 
 export type SortBy = 'stake' | 'apr';
 
 export class TrendingValidatorService {
   private static instance: TrendingValidatorService;
-  private readonly client: ValidatorClient;
+  private readonly CACHE_KEY = 'staking:validators:raw_data';
+  private readonly UPDATE_CHANNEL = 'staking:validators:updated';
+  private lastUpdate: number = 0;
 
   private constructor() {
-    this.client = ValidatorClient.getInstance();
+    this.setupSubscriptions();
+  }
+
+  private setupSubscriptions(): void {
+    redisService.subscribe(this.UPDATE_CHANNEL, async (message) => {
+      try {
+        const { type, timestamp } = JSON.parse(message);
+        if (type === 'DATA_UPDATED') {
+          this.lastUpdate = timestamp;
+          logDeduplicator.info('Validator data updated', { timestamp });
+        }
+      } catch (error) {
+        logger.error('Error processing cache update:', { error });
+      }
+    });
   }
 
   public static getInstance(): TrendingValidatorService {
@@ -21,14 +38,19 @@ export class TrendingValidatorService {
   }
 
   /**
-   * Récupère le top 5 des validateurs classés par nombre de tokens stake ou APR
+   * Récupère le top 5 des validateurs classés par nombre de tokens stake ou APR depuis le cache
    */
   public async getTrendingValidators(sortBy: SortBy = 'stake'): Promise<TrendingValidator[]> {
     try {
-      const validators = await this.client.getValidatorSummariesRaw();
+      const cachedData = await redisService.get(this.CACHE_KEY);
+      if (!cachedData) {
+        throw new TrendingValidatorError('No validator data available in cache');
+      }
+
+      const validators = JSON.parse(cachedData) as ValidatorSummary[];
       
       // Convertir les stakes (diviser par 10^8) et trier par ordre décroissant
-      const formattedValidators = validators.map(validator => {
+      const formattedValidators = validators.map((validator: ValidatorSummary) => {
         // Vérifier si stats existe et contient les données nécessaires
         const predictedApr = validator.stats && validator.stats.length > 0 && validator.stats[0][1] 
           ? parseFloat(validator.stats[0][1].predictedApr) * 100 
@@ -42,13 +64,13 @@ export class TrendingValidatorService {
       });
 
       // Agréger les validateurs de Hyper Foundation
-      const hyperFoundationValidators = formattedValidators.filter(v => v.name.startsWith('Hyper Foundation'));
-      const otherValidators = formattedValidators.filter(v => !v.name.startsWith('Hyper Foundation'));
+      const hyperFoundationValidators = formattedValidators.filter((v: TrendingValidator) => v.name.startsWith('Hyper Foundation'));
+      const otherValidators = formattedValidators.filter((v: TrendingValidator) => !v.name.startsWith('Hyper Foundation'));
 
       // Créer l'entrée agrégée pour Hyper Foundation
       const hyperFoundationAggregate: TrendingValidator = {
         name: 'Hyper Foundation (All)',
-        stake: hyperFoundationValidators.reduce((sum, v) => sum + v.stake, 0),
+        stake: hyperFoundationValidators.reduce((sum: number, v: TrendingValidator) => sum + v.stake, 0),
         apr: hyperFoundationValidators[0]?.apr || 0 // Tous les APR sont identiques
       };
 
@@ -59,16 +81,17 @@ export class TrendingValidatorService {
       ].sort((a, b) => sortBy === 'stake' ? b.stake - a.stake : b.apr - a.apr)
         .slice(0, 5);
       
-      logger.info('Trending validators retrieved successfully', { 
+      logDeduplicator.info('Trending validators retrieved from cache', { 
         count: allValidators.length,
         sortBy,
-        hyperFoundationStake: hyperFoundationAggregate.stake
+        hyperFoundationStake: hyperFoundationAggregate.stake,
+        lastUpdate: this.lastUpdate
       });
 
       return allValidators;
     } catch (error) {
-      logger.error('Error fetching trending validators:', { error, sortBy });
-      throw new TrendingValidatorError('Failed to fetch trending validators');
+      logger.error('Error fetching trending validators from cache:', { error, sortBy });
+      throw new TrendingValidatorError('Failed to fetch trending validators from cache');
     }
   }
 } 

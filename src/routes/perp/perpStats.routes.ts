@@ -1,22 +1,26 @@
 import { Router, Request, Response, RequestHandler } from 'express';
-import { DashboardGlobalStatsService } from '../../services/globalStatsLiquid.service';
+import { PerpGlobalStatsService } from '../../services/perp/perpStats.service';
 import { marketRateLimiter } from '../../middleware/apiRateLimiter';
-import { validateRequest, sanitizeInput } from '../../middleware/validation';
+import { validateRequest } from '../../middleware/validation';
 import { globalPerpStatsQuerySchema } from '../../schemas/perp.schemas';
 import { logger } from '../../utils/logger';
 import { PerpGlobalStatsError } from '../../errors/perp.errors';
+import { logDeduplicator } from '../../utils/logDeduplicator';
 
 const router = Router();
-const dashboardGlobalStatsService = new DashboardGlobalStatsService();
+const perpGlobalStatsService = new PerpGlobalStatsService();
 
 // Appliquer le rate limiting et la sanitization
 router.use(marketRateLimiter);
-router.use(sanitizeInput);
 
 router.get('/', validateRequest(globalPerpStatsQuerySchema), (async (_req: Request, res: Response) => {
   try {
-    const stats = await dashboardGlobalStatsService.getPerpGlobalStats();
-    logger.info('Perp global stats retrieved successfully');
+    const stats = await perpGlobalStatsService.getPerpGlobalStats();
+    logDeduplicator.info('Perp global stats retrieved successfully', { 
+      totalOpenInterest: stats.totalOpenInterest,
+      totalVolume24h: stats.totalVolume24h,
+      totalPairs: stats.totalPairs
+    });
     res.json(stats);
   } catch (error) {
     logger.error('Error fetching perp global stats:', { error });

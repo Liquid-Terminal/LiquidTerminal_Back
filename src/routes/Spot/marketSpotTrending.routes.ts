@@ -1,20 +1,14 @@
 import { Router, Request, Response } from 'express';
 import { SpotAssetContextService } from '../../services/spot/marketData.service';
 import { marketRateLimiter } from '../../middleware/apiRateLimiter';
-import { validateRequest } from '../../middleware/validation';
-import { marketSpotTrendingQuerySchema } from '../../schemas/spot.schemas';
-import { logger } from '../../utils/logger';
-import { MarketDataError } from '../../errors/spot.errors';
-import { logDeduplicator } from '../../utils/logDeduplicator';
 
 const router = Router();
 const marketService = new SpotAssetContextService();
 
-// Appliquer le rate limiting et la sanitization
+// Appliquer le rate limiting
 router.use(marketRateLimiter);
 
-// Appliquer la validation des requêtes
-router.get('/', validateRequest(marketSpotTrendingQuerySchema), async (req: Request, res: Response) => {
+router.get('/', async (req: Request, res: Response) => {
   try {
     const marketsData = await marketService.getMarketsData();
     
@@ -33,9 +27,9 @@ router.get('/', validateRequest(marketSpotTrendingQuerySchema), async (req: Requ
         .sort((a, b) => marketsData[b].change24h - marketsData[a].change24h)
     };
 
-    // Récupérer les paramètres de la requête (déjà validés par le middleware)
+    // Récupérer les paramètres de la requête
     const sortBy = (req.query.sortBy as keyof typeof sortIndices) || 'volume';
-    const limit = Number(req.query.limit) || 5;
+    const limit = Math.min(Number(req.query.limit) || 5, 100);
 
     // Obtenir les indices des tokens triés
     const trendingIndices = sortIndices[sortBy].slice(0, limit);
@@ -50,30 +44,12 @@ router.get('/', validateRequest(marketSpotTrendingQuerySchema), async (req: Requ
       change24h: sortIndices.change24h.slice(0, limit)
     };
 
-    logDeduplicator.info('Trending spot tokens retrieved successfully', { 
-      sortBy, 
-      limit, 
-      totalTokens: marketsData.length,
-      trendingCount: trendingTokens.length
-    });
-
     res.json({
       tokens: trendingTokens,
       sortIndices: relevantIndices,
       total: marketsData.length
     });
   } catch (error) {
-    logger.error('Error fetching trending spot tokens:', { error });
-    
-    if (error instanceof MarketDataError) {
-      res.status(error.statusCode).json({
-        success: false,
-        message: error.message,
-        code: error.code
-      });
-      return;
-    }
-    
     res.status(500).json({
       error: 'Failed to fetch trending spot tokens',
       message: error instanceof Error ? error.message : 'Unknown error'

@@ -1,0 +1,127 @@
+config:
+  target: "http://localhost:3002"
+  phases:
+    # Phase 1: Charge normale (5 minutes)
+    - duration: 300
+      arrivalRate: 20
+      name: "Charge normale"
+
+    # Phase 2: Montée progressive (10 minutes)
+    - duration: 600
+      arrivalRate: 20
+      rampTo: 50
+      name: "Montée en charge"
+
+    # Phase 3: Charge soutenue (10 minutes)
+    - duration: 600
+      arrivalRate: 50
+      name: "Charge soutenue"
+
+    # Phase 4: Pic de charge (2 minutes)
+    - duration: 120
+      arrivalRate: 100
+      name: "Pic de charge"
+
+    # Phase 5: Retour à la normale (3 minutes)
+    - duration: 180
+      arrivalRate: 20
+      name: "Récupération"
+
+  plugins:
+    metrics-by-endpoint: {}
+    expect: {}
+
+  defaults:
+    timeout: 10000
+    headers:
+      Content-Type: "application/json"
+
+scenarios:
+  - name: "Test de résilience"
+    flow:
+      # Market Spot Routes
+      - get:
+          url: "/market/spot"
+          expect:
+            - statusCode: 200
+            - contentType: "application/json"
+
+      - get:
+          url: "/market/spot/trending"
+          expect:
+            - statusCode: 200
+            - contentType: "application/json"
+
+      # Market Perp Routes
+      - get:
+          url: "/market/perp"
+          expect:
+            - statusCode: 200
+            - contentType: "application/json"
+
+      - get:
+          url: "/market/perp/trending"
+          expect:
+            - statusCode: 200
+            - contentType: "application/json"
+
+      # Auction Routes
+      - get:
+          url: "/market/auction"
+          expect:
+            - statusCode: 200
+            - contentType: "application/json"
+
+      # Wallet Routes
+      - get:
+          url: "/wallet"
+          expect:
+            - statusCode: 200
+            - contentType: "application/json"
+
+      # Project Routes
+      - get:
+          url: "/projects"
+          expect:
+            - statusCode: 200
+            - contentType: "application/json"
+
+      # Category Routes
+      - get:
+          url: "/categories"
+          expect:
+            - statusCode: 200
+            - contentType: "application/json"
+
+      # Validator Routes
+      - get:
+          url: "/staking/validators"
+          expect:
+            - statusCode: 200
+            - contentType: "application/json"
+
+      # Global Stats Routes
+      - get:
+          url: "/dashboard/globalstats"
+          expect:
+            - statusCode: 200
+            - contentType: "application/json"
+
+      - get:
+          url: "/pages/market/spot/globalstats"
+          expect:
+            - statusCode: 200
+            - contentType: "application/json"
+
+      - get:
+          url: "/pages/market/perp/globalstats"
+          expect:
+            - statusCode: 200
+            - contentType: "application/json"
+
+      # Health Check
+      - get:
+          url: "/api/health"
+          expect:
+            - statusCode: 200
+            - contentType: "application/json" 

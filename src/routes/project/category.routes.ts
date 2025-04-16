@@ -6,6 +6,7 @@ import { categoryQuerySchema, categoryCreateSchema, categoryUpdateSchema } from 
 import { marketRateLimiter } from '../../middleware/apiRateLimiter';
 import { logger } from '../../utils/logger';
 import { CategoryNotFoundError, CategoryAlreadyExistsError } from '../../errors/project.errors';
+import { logDeduplicator } from '../../utils/logDeduplicator';
 
 const router = Router();
 const categoryService = new CategoryService();
@@ -26,6 +27,13 @@ router.get('/', validateRequest(categoryQuerySchema), async (req, res) => {
       search: search as string
     });
 
+    logDeduplicator.info('Categories retrieved successfully', { 
+      count: result.data.length,
+      total: result.pagination.total,
+      page: page || 1,
+      limit: limit || 10
+    });
+    
     res.json(result);
   } catch (error) {
     logger.error('Error fetching categories:', { error, query: req.query });
@@ -44,6 +52,11 @@ router.get('/:id', (async (req: Request, res: Response) => {
     }
     
     const category = await categoryService.getCategoryById(id);
+    logDeduplicator.info('Category retrieved successfully', { 
+      categoryId: category.id,
+      name: category.name
+    });
+    
     res.json(category);
   } catch (error) {
     if (error instanceof CategoryNotFoundError) {
@@ -67,6 +80,12 @@ router.get('/:id/projects', (async (req: Request, res: Response) => {
     }
     
     const categoryWithProjects = await categoryService.getCategoryWithProjects(id);
+    logDeduplicator.info('Category with projects retrieved successfully', { 
+      categoryId: categoryWithProjects.id,
+      name: categoryWithProjects.name,
+      projectCount: categoryWithProjects.projects.length
+    });
+    
     res.json(categoryWithProjects);
   } catch (error) {
     if (error instanceof CategoryNotFoundError) {
@@ -90,6 +109,11 @@ router.post('/', validateRequest(categoryCreateSchema), (async (req: Request, re
     }
     
     const newCategory = await categoryService.createCategory({ name, description });
+    logDeduplicator.info('Category created successfully', { 
+      categoryId: newCategory.id,
+      name: newCategory.name
+    });
+    
     res.status(201).json(newCategory);
   } catch (error) {
     if (error instanceof CategoryAlreadyExistsError) {
@@ -125,6 +149,11 @@ router.put('/:id', validateRequest(categoryUpdateSchema), (async (req: Request, 
     }
     
     const updatedCategory = await categoryService.updateCategory(id, { name, description });
+    logDeduplicator.info('Category updated successfully', { 
+      categoryId: updatedCategory.id,
+      name: updatedCategory.name
+    });
+    
     res.json(updatedCategory);
   } catch (error) {
     if (error instanceof CategoryNotFoundError) {
@@ -156,6 +185,8 @@ router.delete('/:id', (async (req: Request, res: Response) => {
     }
     
     await categoryService.deleteCategory(id);
+    logDeduplicator.info('Category deleted successfully', { categoryId: id });
+    
     res.status(204).send();
   } catch (error) {
     if (error instanceof CategoryNotFoundError) {

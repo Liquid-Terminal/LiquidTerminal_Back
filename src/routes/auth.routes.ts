@@ -3,9 +3,10 @@ import { AuthService } from "../services/auth/auth.service";
 import { validatePrivyToken } from "../middleware/authMiddleware";
 import { validateLogin, validateUserParams } from "../middleware/validation/authValidation.middleware";
 import { marketRateLimiter } from "../middleware/apiRateLimiter";
-import { UserNotFoundError, UnauthorizedError } from "../errors/auth.errors";
+import { UserNotFoundError } from "../errors/auth.errors";
 import { PrismaClient } from "@prisma/client";
 import { logger } from "../utils/logger";
+import { logDeduplicator } from "../utils/logDeduplicator";
 
 const router = Router();
 const authService = AuthService.getInstance();
@@ -44,7 +45,7 @@ router.post("/login", validatePrivyToken, validateLogin, (req: Request, res: Res
 
   authService.findOrCreateUser(req.user, name)
     .then(user => {
-      logger.info('User authenticated successfully', { privyUserId, name });
+      logDeduplicator.info('User authenticated successfully', { privyUserId, name });
       res.status(200).json({ 
         success: true,
         message: "User authenticated successfully", 
@@ -100,7 +101,7 @@ router.get("/user/:privyUserId", validatePrivyToken, validateUserParams, (req: R
         return;
       }
       
-      logger.info('User retrieved successfully', { privyUserId: req.params.privyUserId });
+      logDeduplicator.info('User retrieved successfully', { privyUserId: req.params.privyUserId });
       res.status(200).json({ 
         success: true,
         message: "User retrieved successfully",

@@ -1,23 +1,28 @@
 import express, { Request, Response, RequestHandler } from 'express';
 import { AuctionPageService } from '../../services/spot/auction/auction.service';
 import { SpotDeployStateApiService } from '../../services/spot/auction/auctionTiming.service';
-import { validateRequest, sanitizeInput } from '../../middleware/validation';
-import { auctionQuerySchema, createAuctionSchema } from '../../schemas/spot.schemas';
+import { validateRequest } from '../../middleware/validation';
+import { auctionQuerySchema } from '../../schemas/spot.schemas';
 import { AuctionError, InvalidAuctionDataError } from '../../errors/spot.errors';
 import { logger } from '../../utils/logger';
+import { logDeduplicator } from '../../utils/logDeduplicator';
 
 const router = express.Router();
 const spotDeployStateApi = new SpotDeployStateApiService();
 const auctionService = new AuctionPageService(spotDeployStateApi);
 
-// Appliquer la sanitization
-router.use(sanitizeInput);
+// Appliquer le rate limiting et la sanitization
 
 // Appliquer la validation des requêtes
 router.get('/', validateRequest(auctionQuerySchema), (async (_req: Request, res: Response) => {
   try {
     const auctions = await auctionService.getAllAuctions();
-    logger.info('Auctions retrieved successfully', { count: auctions.length });
+    logDeduplicator.info('Auctions retrieved successfully', { 
+      count: auctions.length,
+      total: auctions.length,
+      page: 1,
+      limit: auctions.length
+    });
     res.json(auctions);
   } catch (error) {
     logger.error('Error fetching auctions:', { error });
@@ -46,7 +51,11 @@ router.get('/', validateRequest(auctionQuerySchema), (async (_req: Request, res:
 router.get('/timing', validateRequest(auctionQuerySchema), (async (_req: Request, res: Response) => {
   try {
     const timing = await auctionService.getAuctionTiming();
-    logger.info('Auction timing retrieved successfully');
+    logDeduplicator.info('Auction timing retrieved successfully', { 
+      currentStartTime: timing.currentAuction.startTime,
+      currentEndTime: timing.currentAuction.endTime,
+      nextStartTime: timing.nextAuction.startTime
+    });
     res.json(timing);
   } catch (error) {
     logger.error('Error fetching auction timing:', { error });

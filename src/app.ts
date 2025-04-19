@@ -10,13 +10,10 @@ import { ClientInitializerService } from './core/client.initializer.service';
 import authRoutes from './routes/auth.routes';
 
 import marketSpotRoutes from './routes/spot/marketSpot.routes';
-import marketSpotTrendingRoutes from './routes/spot/marketSpotTrending.routes';
 import marketPerpRoutes from './routes/perp/marketPerp.routes';
-import marketPerpTrendingRoutes from './routes/perp/marketPerpTrending.routes';
 import globalSpotStatsRoutes from './routes/spot/spotStats.routes';
 import globalPerpStatsRoutes from './routes/perp/perpStats.routes';
 import auctionRoutes from './routes/spot/auction.routes';
-
 
 import walletRoutes from './routes/wallet/wallet.routes';
 import projectRoutes from './routes/project/project.routes';
@@ -25,7 +22,6 @@ import categoryRoutes from './routes/project/category.routes';
 import validatorRoutes from './routes/staking/validator.routes';
 import trendingValidatorRoutes from './routes/staking/trendingValidator.routes';
 import dashboardGlobalStatsRoutes from './routes/globalStats.routes';
-
 
 import healthRoutes from './routes/health.routes';
 
@@ -62,9 +58,7 @@ app.use(sanitizeInput);
 // Routes Pages
 app.use('/auth', authRoutes);
 app.use('/market/spot', marketSpotRoutes);
-app.use('/market/spot/trending', marketSpotTrendingRoutes);
 app.use('/market/perp', marketPerpRoutes);
-app.use('/market/perp/trending', marketPerpTrendingRoutes);
 app.use('/market/auction', auctionRoutes);
 app.use('/wallet', walletRoutes);
 app.use('/projects', projectRoutes);

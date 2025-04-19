@@ -207,3 +207,31 @@ export interface WebSocketMarketData {
   };
   error?: string;
 }
+
+export interface MarketQueryParams {
+  sortBy?: 'volume' | 'marketCap' | 'change24h';
+  sortOrder?: 'asc' | 'desc';
+  limit?: number;
+  page?: number;
+  token?: string;
+  pair?: string;
+}
+
+export interface PaginatedResponse<T> {
+  data: T[];
+  pagination: {
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+  };
+}
+
+export interface PerpMarketQueryParams {
+  sortBy?: 'volume' | 'openInterest' | 'change24h';
+  sortOrder?: 'asc' | 'desc';
+  limit?: number;
+  page?: number;
+  token?: string;
+  pair?: string;
+}

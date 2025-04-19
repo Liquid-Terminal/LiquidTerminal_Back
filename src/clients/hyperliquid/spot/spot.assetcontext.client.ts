@@ -1,5 +1,5 @@
 import { BaseApiService } from '../../../core/base.api.service';
-import {  SpotContext, AssetContext } from '../../../types/market.types';
+import { SpotContext, AssetContext, Market, Token, MarketData } from '../../../types/market.types';
 import { CircuitBreakerService } from '../../../core/circuit.breaker.service';
 import { RateLimiterService } from '../../../core/hyperLiquid.ratelimiter.service';
 import { redisService } from '../../../core/redis.service';
@@ -8,13 +8,14 @@ import { logDeduplicator } from '../../../utils/logDeduplicator';
 export class HyperliquidSpotClient extends BaseApiService {
   private static instance: HyperliquidSpotClient;
   private static readonly API_URL = 'https://api.hyperliquid.xyz/info';
-  private static readonly REQUEST_WEIGHT = 20; // Poids standard pour les requêtes info
+  private static readonly REQUEST_WEIGHT = 20;
   private static readonly MAX_WEIGHT_PER_MINUTE = 1200;
 
-  private readonly CACHE_KEY = 'spot:raw_data';
+  private readonly CACHE_KEY_RAW = 'spot:raw_data';
+  private readonly CACHE_KEY_MARKETS = 'spot:markets';
+  private readonly CACHE_KEY_TOKENS = 'spot:tokens:without_pairs';
   private readonly UPDATE_CHANNEL = 'spot:data:updated';
-  private readonly UPDATE_INTERVAL = 10000; // 10 secondes
-  private lastUpdate: number = 0;
+  private readonly UPDATE_INTERVAL = 10000;
   private pollingInterval: NodeJS.Timeout | null = null;
 
   private circuitBreaker: CircuitBreakerService;
@@ -25,7 +26,7 @@ export class HyperliquidSpotClient extends BaseApiService {
     this.circuitBreaker = CircuitBreakerService.getInstance('spot');
     this.rateLimiter = RateLimiterService.getInstance('spot', {
       maxWeightPerMinute: HyperliquidSpotClient.MAX_WEIGHT_PER_MINUTE,
-      requestWeight: HyperliquidSpotClient.REQUEST_WEIGHT
+      requestWeight: HyperliquidSpotClient.REQUEST_WEIGHT,
     });
   }
 
@@ -43,76 +44,83 @@ export class HyperliquidSpotClient extends BaseApiService {
     }
 
     logDeduplicator.info('Starting spot polling');
-    // Faire une première mise à jour immédiate
-    this.updateSpotData().catch(error => {
-      logDeduplicator.error('Error in initial spot update:', { error });
-    });
+    this.updateSpotData().catch(err =>
+      logDeduplicator.error('Error in initial spot update:', { error: err })
+    );
 
-    // Démarrer le polling régulier
     this.pollingInterval = setInterval(() => {
-      this.updateSpotData().catch(error => {
-        logDeduplicator.error('Error in spot polling:', { error });
-      });
+      this.updateSpotData().catch(err =>
+        logDeduplicator.error('Error in spot polling:', { error: err })
+      );
     }, this.UPDATE_INTERVAL);
-  }
-
-  public stopPolling(): void {
-    if (this.pollingInterval) {
-      clearInterval(this.pollingInterval);
-      this.pollingInterval = null;
-      logDeduplicator.info('Spot polling stopped');
-    }
   }
 
   private async updateSpotData(): Promise<void> {
     try {
-      const data = await this.circuitBreaker.execute(() => 
+      const [spotContext, assetContexts] = await this.circuitBreaker.execute(() =>
         this.post<[SpotContext, AssetContext[]]>('', {
-          type: "spotMetaAndAssetCtxs"
+          type: 'spotMetaAndAssetCtxs',
         })
       );
-      
-      await redisService.set(this.CACHE_KEY, JSON.stringify(data));
-      const now = Date.now();
+
+      const tokenMap = spotContext.tokens.reduce((acc, token) => {
+        acc[token.index] = token;
+        return acc;
+      }, {} as Record<number, Token>);
+
+      const markets: MarketData[] = spotContext.universe.map((market: Market) => {
+        const ctx = assetContexts.find((a) => a.coin === market.name);
+        if (!ctx) return null;
+
+        const tokenIndex = market.tokens[0];
+        const token = tokenMap[tokenIndex];
+        if (!token) return null;
+
+        const current = Number(ctx.markPx);
+        const previous = Number(ctx.prevDayPx);
+        const change = previous !== 0 ? Number((((current - previous) / previous) * 100).toFixed(2)) : 0;
+
+        return {
+          name: token.name,
+          logo: `https://app.hyperliquid.xyz/coins/${token.name}_USDC.svg`,
+          price: current,
+          marketCap: current * Number(ctx.circulatingSupply),
+          volume: Number(ctx.dayNtlVlm),
+          change24h: change,
+          liquidity: Number(ctx.midPx),
+          supply: Number(ctx.circulatingSupply),
+        };
+      }).filter(Boolean) as MarketData[];
+
+      // Trier les marchés par volume décroissant
+      markets.sort((a, b) => b.volume - a.volume);
+
+      const tokensWithoutPairs = spotContext.tokens
+        .filter(token => !spotContext.universe.some(market => market.tokens[0] === token.index))
+        .map(token => token.name);
+
+      await Promise.all([
+        redisService.set(this.CACHE_KEY_RAW, JSON.stringify([spotContext, assetContexts])),
+        redisService.set(this.CACHE_KEY_MARKETS, JSON.stringify(markets)),
+        redisService.set(this.CACHE_KEY_TOKENS, JSON.stringify(tokensWithoutPairs))
+      ]);
+
       await redisService.publish(this.UPDATE_CHANNEL, JSON.stringify({
         type: 'DATA_UPDATED',
-        timestamp: now
+        timestamp: Date.now(),
       }));
-      this.lastUpdate = now;
-      logDeduplicator.info('Spot data updated successfully', {
-        assetsCount: data[1].length,
-        lastUpdate: this.lastUpdate
+
+      logDeduplicator.info('Spot data updated & cached', {
+        markets: markets.length,
+        tokensWithoutPairs: tokensWithoutPairs.length,
       });
     } catch (error) {
       logDeduplicator.error('Failed to update spot data:', { error });
-      throw error;
     }
   }
 
-  /**
-   * Récupère les données brutes de l'API
-   */
-  public async getSpotMetaAndAssetCtxsRaw(): Promise<[SpotContext, AssetContext[]]> {
-    try {
-      const cached = await redisService.get(this.CACHE_KEY);
-      if (cached) {
-        logDeduplicator.info('Retrieved spot data from cache', {
-          lastUpdate: this.lastUpdate
-        });
-        return JSON.parse(cached) as [SpotContext, AssetContext[]];
-      }
-
-      logDeduplicator.warn('No spot data in cache, forcing update');
-      await this.updateSpotData();
-      const freshData = await redisService.get(this.CACHE_KEY);
-      if (!freshData) {
-        throw new Error('Failed to get spot data after update');
-      }
-      return JSON.parse(freshData) as [SpotContext, AssetContext[]];
-    } catch (error) {
-      logDeduplicator.error('Error fetching spot data:', { error });
-      throw error;
-    }
+  public static getRequestWeight(): number {
+    return HyperliquidSpotClient.REQUEST_WEIGHT;
   }
 
   /**
@@ -122,11 +130,4 @@ export class HyperliquidSpotClient extends BaseApiService {
   public checkRateLimit(ip: string): boolean {
     return this.rateLimiter.checkRateLimit(ip);
   }
-
-  /**
-   * Retourne le poids de la requête pour le rate limiting
-   */
-  public static getRequestWeight(): number {
-    return HyperliquidSpotClient.REQUEST_WEIGHT;
-  }
-} 
+}

@@ -1,4 +1,4 @@
-import { MarketData, SpotContext, AssetContext, Token, Market } from '../../types/market.types';
+import { MarketData, SpotContext, AssetContext, Token, Market, MarketQueryParams, PaginatedResponse } from '../../types/market.types';
 import { redisService } from '../../core/redis.service';
 import { MarketDataError } from '../../errors/spot.errors';
 import { logger, measureExecutionTime } from '../../utils/logger';
@@ -8,6 +8,7 @@ export class SpotAssetContextService {
   private readonly UPDATE_CHANNEL = 'spot:data:updated';
   private readonly CACHE_KEY = 'spot:raw_data';
   private lastUpdate: number = 0;
+  private readonly MARKET_CACHE_KEY = 'spot:markets';
 
   constructor() {
     this.setupSubscriptions();
@@ -38,75 +39,75 @@ export class SpotAssetContextService {
   /**
    * Récupère les données de marché depuis le cache
    */
-  public async getMarketsData(): Promise<MarketData[]> {
-    return measureExecutionTime(async () => {
-      try {
-        const cachedData = await redisService.get(this.CACHE_KEY);
-        if (!cachedData) {
-          throw new MarketDataError('No data available in cache');
-        }
-
-        const [spotData, assetContexts] = JSON.parse(cachedData) as [SpotContext, AssetContext[]];
-        
-        const tokenMap = spotData.tokens.reduce((acc: Record<number, Token>, token: Token) => {
-          acc[token.index] = token;
-          return acc;
-        }, {} as Record<number, Token>);
-
-        const marketsData = await Promise.all(
-          spotData.universe.map(async (market: Market) => {
-            try {
-              const assetContext = assetContexts.find((ctx: AssetContext) => ctx.coin === market.name);
-              if (!assetContext) {
-                logDeduplicator.info('No asset context found', { market: market.name });
-                return null;
-              }
-
-              const tokenIndex = market.tokens[0];
-              const token = tokenMap[tokenIndex];
-              if (!token) {
-                logDeduplicator.info('No token found', { index: tokenIndex });
-                return null;
-              }
-
-              const currentPrice = Number(assetContext.markPx);
-              const prevDayPrice = Number(assetContext.prevDayPx);
-              const circulatingSupply = Number(assetContext.circulatingSupply);
-              const volume = Number(assetContext.dayNtlVlm);
-              const marketCap = currentPrice * circulatingSupply;
-
-              return {
-                name: token.name,
-                logo: null,
-                price: currentPrice,
-                marketCap: marketCap,
-                volume: volume,
-                change24h: this.calculatePriceChange(currentPrice, prevDayPrice),
-                liquidity: Number(assetContext.midPx),
-                supply: circulatingSupply
-              };
-            } catch (error) {
-              logger.error('Error processing market:', { error, market: market.name });
-              return null;
-            }
-          })
-        );
-
-        const validMarketsData = marketsData
-          .filter(Boolean)
-          .sort((a, b) => b!.marketCap - a!.marketCap) as MarketData[];
-
-        logDeduplicator.info('Market data retrieved from cache', { 
-          count: validMarketsData.length,
-          lastUpdate: this.lastUpdate
-        });
-
-        return validMarketsData;
-      } catch (error) {
-        logger.error('Error retrieving market data from cache:', { error });
-        throw new MarketDataError('Failed to retrieve market data from cache');
+  public async getMarketsData(params: MarketQueryParams = {}): Promise<PaginatedResponse<MarketData>> {
+    try {
+      const raw = await redisService.get(this.MARKET_CACHE_KEY);
+      if (!raw) {
+        throw new MarketDataError('No market data available');
       }
-    }, 'getMarketsData');
+      
+      let markets = JSON.parse(raw) as MarketData[];
+
+      // Appliquer les filtres
+      if (params.token) {
+        markets = markets.filter(market => 
+          market.name.toLowerCase().includes(params.token!.toLowerCase())
+        );
+      }
+      if (params.pair) {
+        markets = markets.filter(market => 
+          market.name.toLowerCase().includes(params.pair!.toLowerCase())
+        );
+      }
+
+      // Appliquer le tri
+      const sortBy = params.sortBy || 'volume';
+      const sortOrder = params.sortOrder || 'desc';
+      markets.sort((a, b) => {
+        const multiplier = sortOrder === 'desc' ? -1 : 1;
+        const valueA = a[sortBy];
+        const valueB = b[sortBy];
+        
+        // Gérer les cas où les valeurs sont undefined ou null
+        if (valueA === undefined || valueA === null) return 1;
+        if (valueB === undefined || valueB === null) return -1;
+        
+        // Pour les nombres, utiliser une comparaison numérique
+        if (typeof valueA === 'number' && typeof valueB === 'number') {
+          return multiplier * (valueA - valueB);
+        }
+        
+        // Pour les chaînes, utiliser une comparaison de chaînes
+        return multiplier * String(valueA).localeCompare(String(valueB));
+      });
+
+      // Appliquer la pagination
+      const limit = params.limit || 20;
+      const page = params.page || 0;
+      const start = page * limit;
+      const end = start + limit;
+      const paginatedMarkets = markets.slice(start, end);
+
+      logDeduplicator.info('Market data retrieved successfully', { 
+        count: paginatedMarkets.length,
+        total: markets.length,
+        page,
+        limit
+      });
+
+      return {
+        data: paginatedMarkets,
+        pagination: {
+          total: markets.length,
+          page,
+          limit,
+          totalPages: Math.ceil(markets.length / limit)
+        }
+      };
+    } catch (error) {
+      logger.error('Error retrieving market data:', error);
+      throw error;
+    }
   }
 
   /**

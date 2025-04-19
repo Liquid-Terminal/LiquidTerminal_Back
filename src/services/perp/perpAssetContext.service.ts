@@ -1,4 +1,4 @@
-import { PerpMarketData, PerpMarket, PerpAssetContext } from '../../types/market.types';
+import { PerpMarketData, PerpMarket, PerpAssetContext, PerpMarketQueryParams, PaginatedResponse } from '../../types/market.types';
 import { HyperliquidPerpClient } from '../../clients/hyperliquid/perp/perp.assetcontext.client';
 import { redisService } from '../../core/redis.service';
 import { logger } from '../../utils/logger';
@@ -9,6 +9,7 @@ export class PerpAssetContextService {
   private readonly UPDATE_CHANNEL = 'perp:data:updated';
   private readonly CACHE_KEY = 'perp:raw_data';
   private lastUpdate: number = 0;
+  private readonly MARKET_CACHE_KEY = 'perp:markets';
   
   constructor() {
     this.setupSubscriptions();
@@ -40,41 +41,74 @@ export class PerpAssetContextService {
   /**
    * Récupère les données des marchés perpétuels depuis le cache
    */
-  public async getPerpMarketsData(): Promise<PerpMarketData[]> {
+  public async getPerpMarketsData(params: PerpMarketQueryParams = {}): Promise<PaginatedResponse<PerpMarketData>> {
     try {
-      const cachedData = await redisService.get(this.CACHE_KEY);
-      if (!cachedData) {
-        throw new PerpCacheError('No data available in cache');
+      const raw = await redisService.get(this.MARKET_CACHE_KEY);
+      if (!raw) {
+        throw new PerpMarketDataError('No perp market data available');
+      }
+      
+      let markets = JSON.parse(raw) as PerpMarketData[];
+
+      // Appliquer les filtres
+      if (params.token) {
+        markets = markets.filter(market => 
+          market.name.toLowerCase().includes(params.token!.toLowerCase())
+        );
+      }
+      if (params.pair) {
+        markets = markets.filter(market => 
+          market.name.toLowerCase().includes(params.pair!.toLowerCase())
+        );
       }
 
-      const [meta, assetContexts] = JSON.parse(cachedData) as [{ universe: PerpMarket[] }, PerpAssetContext[]];
-
-      const marketsData = meta.universe.map((market: PerpMarket, index: number) => {
-        const assetContext = assetContexts[index];
-        const currentPrice = Number(assetContext.markPx);
-        const prevDayPrice = Number(assetContext.prevDayPx);
-
-        return {
-          name: market.name,
-          price: currentPrice,
-          change24h: this.calculatePriceChange(currentPrice, prevDayPrice),
-          volume: Number(assetContext.dayNtlVlm),
-          openInterest: Number(assetContext.openInterest),
-          funding: Number(assetContext.funding),
-          maxLeverage: market.maxLeverage,
-          onlyIsolated: market.onlyIsolated || false
-        };
+      // Appliquer le tri
+      const sortBy = params.sortBy || 'volume';
+      const sortOrder = params.sortOrder || 'desc';
+      markets.sort((a, b) => {
+        const multiplier = sortOrder === 'desc' ? -1 : 1;
+        const valueA = a[sortBy];
+        const valueB = b[sortBy];
+        
+        // Gérer les cas où les valeurs sont undefined ou null
+        if (valueA === undefined || valueA === null) return 1;
+        if (valueB === undefined || valueB === null) return -1;
+        
+        // Pour les nombres, utiliser une comparaison numérique
+        if (typeof valueA === 'number' && typeof valueB === 'number') {
+          return multiplier * (valueA - valueB);
+        }
+        
+        // Pour les chaînes, utiliser une comparaison de chaînes
+        return multiplier * String(valueA).localeCompare(String(valueB));
       });
 
-      logDeduplicator.info('Perp markets data retrieved from cache', { 
-        count: marketsData.length,
-        lastUpdate: this.lastUpdate
+      // Appliquer la pagination
+      const limit = params.limit || 20;
+      const page = params.page || 0;
+      const start = page * limit;
+      const end = start + limit;
+      const paginatedMarkets = markets.slice(start, end);
+
+      logDeduplicator.info('Perp market data retrieved successfully', { 
+        count: paginatedMarkets.length,
+        total: markets.length,
+        page,
+        limit
       });
 
-      return marketsData;
+      return {
+        data: paginatedMarkets,
+        pagination: {
+          total: markets.length,
+          page,
+          limit,
+          totalPages: Math.ceil(markets.length / limit)
+        }
+      };
     } catch (error) {
-      logger.error('Error retrieving perp markets data from cache:', { error });
-      throw new PerpMarketDataError('Failed to retrieve market data from cache');
+      logger.error('Error retrieving perp market data:', error);
+      throw error;
     }
   }
 

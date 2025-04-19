@@ -6,6 +6,7 @@ import { ValidatorClient } from '../clients/hyperliquid/staking/validator';
 import { HyperliquidVaultClient } from '../clients/hyperliquid/vault/vault.client';
 import { HypurrscanClient } from '../clients/hypurrscan/auction.client';
 import { SpotUSDCClient } from '../clients/hypurrscan/spotUSDC.client';
+import { HyperliquidSpotStatsClient } from '../clients/hyperliquid/spot/spot.stats.client';
 import { logger } from '../utils/logger';
 
 export class ClientInitializerService {
@@ -46,6 +47,10 @@ export class ClientInitializerService {
       // Initialiser le client Vault
       const vaultClient = HyperliquidVaultClient.getInstance();
       this.clients.set('vault', vaultClient);
+
+      // Initialiser le client Spot Stats
+      const spotStatsClient = HyperliquidSpotStatsClient.getInstance();
+      this.clients.set('spotStats', spotStatsClient);
 
       // Initialiser les clients Hypurrscan
       const hypurrscanClient = HypurrscanClient.getInstance();

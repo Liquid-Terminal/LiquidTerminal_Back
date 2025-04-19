@@ -17,12 +17,35 @@ router.use(marketRateLimiter);
 // Appliquer la validation des requêtes
 router.get('/', validateRequest(marketSpotQuerySchema), async (req: Request, res: Response): Promise<void> => {
   try {
-    const markets = await marketService.getMarketsData();
-    logDeduplicator.info('Market data retrieved successfully', { count: markets.length });
+    const { 
+      sortBy, 
+      sortOrder, 
+      limit, 
+      page,
+      token,
+      pair 
+    } = req.query;
+
+    const result = await marketService.getMarketsData({
+      sortBy: sortBy as 'volume' | 'marketCap' | 'change24h',
+      sortOrder: sortOrder as 'asc' | 'desc',
+      limit: limit ? Number(limit) : undefined,
+      page: page ? Number(page) : undefined,
+      token: token as string,
+      pair: pair as string
+    });
+
+    logDeduplicator.info('Market data retrieved successfully', { 
+      count: result.data.length,
+      page: result.pagination.page,
+      totalPages: result.pagination.totalPages
+    });
+
     res.status(200).json({
       success: true,
       message: 'Market data retrieved successfully',
-      data: markets
+      data: result.data,
+      pagination: result.pagination
     });
   } catch (error) {
     logger.error('Error retrieving market data:', { error });

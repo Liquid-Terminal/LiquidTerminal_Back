@@ -1,5 +1,5 @@
 import { BaseApiService } from '../../../core/base.api.service';
-import { PerpMarket, PerpAssetContext } from '../../../types/market.types';
+import { PerpMarket, PerpAssetContext, PerpMarketData } from '../../../types/market.types';
 import { CircuitBreakerService } from '../../../core/circuit.breaker.service';
 import { RateLimiterService } from '../../../core/hyperLiquid.ratelimiter.service';
 import { redisService } from '../../../core/redis.service';
@@ -11,7 +11,8 @@ export class HyperliquidPerpClient extends BaseApiService {
   private static readonly REQUEST_WEIGHT = 20; // Poids standard pour les requêtes info
   private static readonly MAX_WEIGHT_PER_MINUTE = 1200;
 
-  private readonly CACHE_KEY = 'perp:raw_data';
+  private readonly CACHE_KEY_RAW = 'perp:raw_data';
+  private readonly CACHE_KEY_MARKETS = 'perp:markets';
   private readonly UPDATE_CHANNEL = 'perp:data:updated';
   private readonly UPDATE_INTERVAL = 10000; // 10 secondes
   private lastUpdate: number = 0;
@@ -66,23 +67,43 @@ export class HyperliquidPerpClient extends BaseApiService {
 
   private async updatePerpData(): Promise<void> {
     try {
-      const data = await this.circuitBreaker.execute(() => 
+      const [meta, assetContexts] = await this.circuitBreaker.execute(() => 
         this.post<[{ universe: PerpMarket[] }, PerpAssetContext[]]>('', {
           type: "metaAndAssetCtxs"
         })
       );
       
-      await redisService.set(this.CACHE_KEY, JSON.stringify(data));
+      const marketsData = meta.universe.map((market: PerpMarket, index: number) => {
+        const assetContext = assetContexts[index];
+        const currentPrice = Number(assetContext.markPx);
+        const prevDayPrice = Number(assetContext.prevDayPx);
+        const change = prevDayPrice !== 0 ? Number((((currentPrice - prevDayPrice) / prevDayPrice) * 100).toFixed(2)) : 0;
+
+        return {
+          name: market.name,
+          price: currentPrice,
+          change24h: change,
+          volume: Number(assetContext.dayNtlVlm),
+          openInterest: Number(assetContext.openInterest),
+          funding: Number(assetContext.funding),
+          maxLeverage: market.maxLeverage,
+          onlyIsolated: market.onlyIsolated || false
+        };
+      });
+
+      await Promise.all([
+        redisService.set(this.CACHE_KEY_RAW, JSON.stringify([meta, assetContexts])),
+        redisService.set(this.CACHE_KEY_MARKETS, JSON.stringify(marketsData))
+      ]);
+
       const now = Date.now();
       await redisService.publish(this.UPDATE_CHANNEL, JSON.stringify({
         type: 'DATA_UPDATED',
         timestamp: now
       }));
       this.lastUpdate = now;
-      logDeduplicator.info('Perp data updated successfully', {
-        marketsCount: data[0].universe.length,
-        assetsCount: data[1].length,
-        lastUpdate: this.lastUpdate
+      logDeduplicator.info('Perp data updated & cached', {
+        markets: marketsData.length
       });
     } catch (error) {
       logDeduplicator.error('Failed to update perp data:', { error });
@@ -95,7 +116,7 @@ export class HyperliquidPerpClient extends BaseApiService {
    */
   public async getMetaAndAssetCtxsRaw(): Promise<[{ universe: PerpMarket[] }, PerpAssetContext[]]> {
     try {
-      const cached = await redisService.get(this.CACHE_KEY);
+      const cached = await redisService.get(this.CACHE_KEY_RAW);
       if (cached) {
         logDeduplicator.info('Retrieved perp data from cache', {
           lastUpdate: this.lastUpdate
@@ -105,7 +126,7 @@ export class HyperliquidPerpClient extends BaseApiService {
 
       logDeduplicator.warn('No perp data in cache, forcing update');
       await this.updatePerpData();
-      const freshData = await redisService.get(this.CACHE_KEY);
+      const freshData = await redisService.get(this.CACHE_KEY_RAW);
       if (!freshData) {
         throw new Error('Failed to get perp data after update');
       }

@@ -9,7 +9,7 @@ import { logDeduplicator } from '../../utils/logDeduplicator';
 
 const router = express.Router();
 const spotDeployStateApi = new SpotDeployStateApiService();
-const auctionService = new AuctionPageService(spotDeployStateApi);
+const auctionService = new AuctionPageService();
 
 // Appliquer le rate limiting et la sanitization
 
@@ -50,7 +50,7 @@ router.get('/', validateRequest(auctionQuerySchema), (async (_req: Request, res:
 
 router.get('/timing', validateRequest(auctionQuerySchema), (async (_req: Request, res: Response) => {
   try {
-    const timing = await auctionService.getAuctionTiming();
+    const timing = await spotDeployStateApi.getAuctionTiming();
     logDeduplicator.info('Auction timing retrieved successfully', { 
       currentStartTime: timing.currentAuction.startTime,
       currentEndTime: timing.currentAuction.endTime,
@@ -59,21 +59,6 @@ router.get('/timing', validateRequest(auctionQuerySchema), (async (_req: Request
     res.json(timing);
   } catch (error) {
     logger.error('Error fetching auction timing:', { error });
-    
-    if (error instanceof AuctionError) {
-      return res.status(error.statusCode).json({
-        error: error.code,
-        message: error.message
-      });
-    }
-    
-    if (error instanceof InvalidAuctionDataError) {
-      return res.status(error.statusCode).json({
-        error: error.code,
-        message: error.message
-      });
-    }
-    
     res.status(500).json({
       error: 'INTERNAL_SERVER_ERROR',
       message: error instanceof Error ? error.message : 'Unknown error'

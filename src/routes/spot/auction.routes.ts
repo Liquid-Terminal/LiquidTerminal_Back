@@ -9,7 +9,7 @@ import { logDeduplicator } from '../../utils/logDeduplicator';
 
 const router = express.Router();
 const spotDeployStateApi = new SpotDeployStateApiService();
-const auctionService = new AuctionPageService();
+const auctionService = new AuctionPageService(spotDeployStateApi);
 
 // Appliquer le rate limiting et la sanitization
 

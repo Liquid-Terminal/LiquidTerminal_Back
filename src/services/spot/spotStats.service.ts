@@ -33,34 +33,33 @@ export class SpotGlobalStatsService {
     try {
       // Récupérer les données en parallèle
       const [marketsData, spotUSDCData] = await Promise.all([
-        this.spotAssetContextService.getMarketsData(),
+        this.spotAssetContextService.getMarketsData({ limit: 1000 }), // Récupérer toutes les données
         this.getSpotUSDCDataFromCache()
       ]);
 
       // Calculer le volume total sur 24h
-      const totalVolume24h = marketsData.reduce((total: number, market: MarketData) => total + market.volume, 0);
+      const totalVolume24h = marketsData.data.reduce((total: number, market: MarketData) => total + market.volume, 0);
       
       // Calculer le nombre total de paires
-      const totalPairs = marketsData.length;
+      const totalPairs = marketsData.data.length;
       
       // Calculer la capitalisation totale du marché
-      const totalMarketCap = marketsData.reduce((total: number, market: MarketData) => total + market.marketCap, 0);
+      const totalMarketCap = marketsData.data.reduce((total: number, market: MarketData) => total + market.marketCap, 0);
       
       // Récupérer les données USDC spot les plus récentes
       const latestSpotUSDCData = spotUSDCData && spotUSDCData.length > 0 
-        ? spotUSDCData[spotUSDCData.length - 1] 
+        ? spotUSDCData[spotUSDCData.length - 1]
         : null;
-      
+
       const totalSpotUSDC = latestSpotUSDCData?.totalSpotUSDC || 0;
-      const totalHIP2 = latestSpotUSDCData?.["HIP-2"] || 0;
+      const totalHIP2 = latestSpotUSDCData?.['HIP-2'] || 0;
 
       logDeduplicator.info('Spot global stats retrieved successfully', { 
         totalVolume24h,
         totalPairs,
         totalMarketCap,
         totalSpotUSDC,
-        totalHIP2,
-        lastSpotUSDCUpdate: this.lastSpotUSDCUpdate
+        totalHIP2
       });
 
       return {
@@ -71,7 +70,7 @@ export class SpotGlobalStatsService {
         totalHIP2
       };
     } catch (error) {
-      logger.error('Error fetching spot global stats:', { error });
+      logger.error('Error retrieving spot global stats:', error);
       throw error;
     }
   }

@@ -1,22 +1,5 @@
 import { BaseResponse } from './common.types';
 
-export interface WalletHolding {
-  coin: string;
-  token: number;
-  hold: string;
-  total: string;
-  entryNtl: string;
-}
-
-export interface WalletState {
-  address: string;
-  holdings: WalletHolding[];
-}
-
-export interface WalletStateResponse extends BaseResponse {
-  data: WalletState;
-}
-
 export interface WalletWatchlist {
   id: number;
   userId: string;
@@ -28,4 +11,29 @@ export interface WalletWatchlist {
 
 export interface WalletWatchlistResponse extends BaseResponse {
   data: WalletWatchlist[];
+}
+
+export interface WalletResponse {
+  id: number;
+  address: string;
+  userId: number;
+  addedAt: Date;
+}
+
+export interface WalletCreateInput {
+  address: string;
+  privyUserId: string;
+}
+
+export interface WalletUpdateInput {
+  address?: string;
+}
+
+export interface WalletQueryParams {
+  page?: number;
+  limit?: number;
+  sort?: string;
+  order?: 'asc' | 'desc';
+  search?: string;
+  userId?: number;
 }

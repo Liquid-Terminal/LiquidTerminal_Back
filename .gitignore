@@ -6,6 +6,8 @@ package-lock.json
 dist/
 build/
 .cursor/rules
+tests/
+scripts/
 
 # Environment variables
 .env

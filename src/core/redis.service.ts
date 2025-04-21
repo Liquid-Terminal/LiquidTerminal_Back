@@ -15,10 +15,19 @@ class RedisService {
     this.client.on('error', (err) => console.error('Redis Client Error', err));
     this.subscriber.on('error', (err) => console.error('Redis Subscriber Error', err));
 
-    Promise.all([
-      this.client.connect(),
-      this.subscriber.connect()
-    ]).catch(console.error);
+    this.connect().catch(console.error);
+  }
+
+  private async connect(): Promise<void> {
+    try {
+      await Promise.all([
+        this.client.connect(),
+        this.subscriber.connect()
+      ]);
+    } catch (error) {
+      console.error('Redis connection error:', error);
+      throw error;
+    }
   }
 
   async get(key: string): Promise<string | null> {
@@ -26,7 +35,7 @@ class RedisService {
       return await this.client.get(key);
     } catch (error) {
       console.error('Redis get error:', error);
-      return null;
+      throw error;
     }
   }
 
@@ -35,6 +44,26 @@ class RedisService {
       await this.client.set(key, value, { EX: expiration });
     } catch (error) {
       console.error('Redis set error:', error);
+      throw error;
+    }
+  }
+
+  async delete(key: string): Promise<boolean> {
+    try {
+      const result = await this.client.del(key);
+      return result > 0;
+    } catch (error) {
+      console.error('Redis delete error:', error);
+      throw error;
+    }
+  }
+
+  async keys(pattern: string): Promise<string[]> {
+    try {
+      return await this.client.keys(pattern);
+    } catch (error) {
+      console.error('Redis keys error:', error);
+      throw error;
     }
   }
 
@@ -43,6 +72,7 @@ class RedisService {
       await this.client.publish(channel, message);
     } catch (error) {
       console.error('Redis publish error:', error);
+      throw error;
     }
   }
 
@@ -53,6 +83,7 @@ class RedisService {
       });
     } catch (error) {
       console.error('Redis subscribe error:', error);
+      throw error;
     }
   }
 
@@ -61,6 +92,40 @@ class RedisService {
       await this.subscriber.unsubscribe(channel);
     } catch (error) {
       console.error('Redis unsubscribe error:', error);
+      throw error;
+    }
+  }
+
+  async flushall(): Promise<void> {
+    try {
+      await this.client.flushAll();
+    } catch (error) {
+      console.error('Redis flushall error:', error);
+      throw error;
+    }
+  }
+
+  async disconnect(): Promise<void> {
+    try {
+      if (this.client.isOpen) {
+        await this.client.disconnect();
+      }
+      if (this.subscriber.isOpen) {
+        await this.subscriber.disconnect();
+      }
+    } catch (error) {
+      console.error('Redis disconnect error:', error);
+      throw error;
+    }
+  }
+
+  async reconnect(): Promise<void> {
+    try {
+      await this.disconnect();
+      await this.connect();
+    } catch (error) {
+      console.error('Redis reconnect error:', error);
+      throw error;
     }
   }
 

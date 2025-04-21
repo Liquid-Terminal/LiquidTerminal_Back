@@ -3,18 +3,9 @@ export interface BaseResponse {
   error?: string;
 }
 
-export interface PaginationParams {
-  page?: number;
-  limit?: number;
-}
-
 export interface TimeRange {
   startTime?: number;
   endTime?: number;
-}
-
-export interface Address {
-  address: string;
 }
 
 export interface TokenAmount {

@@ -3,9 +3,8 @@ import { PerpGlobalStatsService } from '../../services/perp/perpStats.service';
 import { marketRateLimiter } from '../../middleware/apiRateLimiter';
 import { validateRequest } from '../../middleware/validation';
 import { globalPerpStatsQuerySchema } from '../../schemas/perp.schemas';
-import { logger } from '../../utils/logger';
-import { PerpGlobalStatsError } from '../../errors/perp.errors';
 import { logDeduplicator } from '../../utils/logDeduplicator';
+import { PerpGlobalStatsError } from '../../errors/perp.errors';
 
 const router = Router();
 const perpGlobalStatsService = new PerpGlobalStatsService();
@@ -23,7 +22,7 @@ router.get('/', validateRequest(globalPerpStatsQuerySchema), (async (_req: Reque
     });
     res.json(stats);
   } catch (error) {
-    logger.error('Error fetching perp global stats:', { error });
+    logDeduplicator.error('Error fetching perp global stats:', { error });
     
     if (error instanceof PerpGlobalStatsError) {
       return res.status(error.statusCode).json({

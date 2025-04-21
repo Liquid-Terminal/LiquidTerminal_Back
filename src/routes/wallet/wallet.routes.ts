@@ -1,18 +1,17 @@
 import express, { Request, Response, RequestHandler } from "express";
-import { WalletService } from "../../services/wallet/walletDB.service";
+import { WalletService } from "../../services/wallet/wallet.service";
 import prisma from "../../lib/prisma";
 import { marketRateLimiter } from "../../middleware/apiRateLimiter";
-import { logger } from "../../utils/logger";
 import { 
   WalletAlreadyExistsError, 
   UserNotFoundError,
   WalletError 
 } from "../../errors/wallet.errors";
-import { addWalletSchema, getWalletsByUserSchema } from "../../schemas/wallet.schema";
+import { walletCreateSchema, getWalletsByUserSchema } from "../../schemas/wallet.schema";
 import { logDeduplicator } from "../../utils/logDeduplicator";
 
 const router = express.Router();
-const walletService = WalletService.getInstance();
+const walletService = new WalletService();
 
 // Appliquer le rate limiting
 router.use(marketRateLimiter);
@@ -20,10 +19,10 @@ router.use(marketRateLimiter);
 // Endpoint pour ajouter un wallet
 router.post("/", (async (req: Request, res: Response) => {
   try {
-    const result = addWalletSchema.safeParse(req.body);
+    const result = walletCreateSchema.safeParse(req.body);
     
     if (!result.success) {
-      logger.warn('Validation error', { errors: result.error.errors });
+      logDeduplicator.warn('Validation error', { errors: result.error.errors });
       return res.status(400).json({ 
         success: false,
         error: "Données invalides",
@@ -46,7 +45,7 @@ router.post("/", (async (req: Request, res: Response) => {
       wallet 
     });
   } catch (error) {
-    logger.error('Error adding wallet:', { error, body: req.body });
+    logDeduplicator.error('Error adding wallet:', { error, body: req.body });
     
     if (error instanceof WalletAlreadyExistsError ||
         error instanceof UserNotFoundError) {
@@ -71,7 +70,7 @@ router.get("/user/:privyUserId", (async (req: Request, res: Response) => {
     const result = getWalletsByUserSchema.safeParse({ privyUserId: req.params.privyUserId });
     
     if (!result.success) {
-      logger.warn('Validation error', { errors: result.error.errors });
+      logDeduplicator.warn('Validation error', { errors: result.error.errors });
       return res.status(400).json({ 
         success: false,
         error: "Données invalides",
@@ -88,7 +87,7 @@ router.get("/user/:privyUserId", (async (req: Request, res: Response) => {
     });
 
     if (!user) {
-      logger.warn('User not found', { privyUserId });
+      logDeduplicator.warn('User not found', { privyUserId });
       return res.status(404).json({ 
         success: false,
         error: "Utilisateur non trouvé",
@@ -100,15 +99,17 @@ router.get("/user/:privyUserId", (async (req: Request, res: Response) => {
     logDeduplicator.info('Wallets retrieved successfully', { 
       privyUserId, 
       userId: user.id,
-      count: wallets.length 
+      count: wallets.data.length,
+      total: wallets.pagination.total
     });
 
     res.json({
       success: true,
-      data: wallets
+      data: wallets.data,
+      pagination: wallets.pagination
     });
   } catch (error) {
-    logger.error('Error retrieving wallets:', { 
+    logDeduplicator.error('Error retrieving wallets:', { 
       error, 
       privyUserId: req.params.privyUserId 
     });

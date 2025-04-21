@@ -3,9 +3,8 @@ import { PerpAssetContextService } from '../../services/perp/perpAssetContext.se
 import { marketRateLimiter } from '../../middleware/apiRateLimiter';
 import { validateRequest } from '../../middleware/validation';
 import { marketPerpQuerySchema } from '../../schemas/perp.schemas';
-import { logger } from '../../utils/logger';
-import { PerpMarketDataError, PerpTimeoutError } from '../../errors/perp.errors';
 import { logDeduplicator } from '../../utils/logDeduplicator';
+import { PerpMarketDataError, PerpTimeoutError } from '../../errors/perp.errors';
 
 const router = Router();
 const perpMarketService = new PerpAssetContextService();
@@ -52,7 +51,7 @@ router.get('/', validateRequest(marketPerpQuerySchema), async (req: Request, res
       pagination: result.pagination
     });
   } catch (error) {
-    logger.error('Error retrieving perp market data:', { error });
+    logDeduplicator.error('Error retrieving perp market data:', { error });
     
     if (error instanceof PerpMarketDataError) {
       res.status(error.statusCode).json({

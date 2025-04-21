@@ -34,12 +34,12 @@ export const updateProjectSchema = z.object({
 
 // Project query schema
 export const projectQuerySchema = z.object({
-  page: z.string().optional().transform(val => val ? parseInt(val) : 1),
-  limit: z.string().optional().transform(val => val ? parseInt(val) : 10),
+  page: z.number().int().positive().optional().default(1),
+  limit: z.number().int().positive().optional().default(10),
   sort: z.enum(['createdAt', 'title', 'updatedAt']).optional(),
   order: z.enum(['asc', 'desc']).optional(),
   search: z.string().max(100, 'Terme de recherche trop long').optional(),
-  categoryId: z.string().optional().transform(val => val ? parseInt(val) : undefined)
+  categoryId: z.number().int().optional()
 });
 
 // Base category schema
@@ -85,12 +85,14 @@ export const categoryQuerySchema = z.object({
 const urlSchema = z.string()
   .url('URL invalide')
   .max(255, 'URL trop longue')
+  .regex(/^https:\/\//i, 'Seules les URLs HTTPS sont autorisées')
   .optional();
 
 // Schéma de validation pour les images
 const imageUrlSchema = z.string()
   .url('URL d\'image invalide')
   .max(255, 'URL d\'image trop longue')
+  .regex(/^https:\/\//i, 'Seules les URLs HTTPS sont autorisées')
   .regex(/\.(jpg|jpeg|png|gif|webp)$/i, 'Format d\'image non supporté');
 
 // Schéma de validation pour la création de projet

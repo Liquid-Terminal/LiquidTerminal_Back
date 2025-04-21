@@ -6,6 +6,7 @@ import { sanitizeInput } from './middleware/validation';
 import { SECURITY_CONSTANTS } from './constants/security.constants';
 import { securityHeaders } from './middleware/security.middleware';
 import { ClientInitializerService } from './core/client.initializer.service';
+import { prisma } from './core/prisma.service';
 
 import authRoutes from './routes/auth.routes';
 
@@ -27,6 +28,9 @@ import healthRoutes from './routes/health.routes';
 
 const app = express();
 const server = createServer(app);
+
+// Désactiver l'en-tête X-Powered-By pour des raisons de sécurité
+app.disable('x-powered-by');
 
 // Configuration CORS basée sur les constantes de sécurité
 app.use(cors({
@@ -80,13 +84,17 @@ server.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
 
-// Gérer l'arrêt propre des clients
-process.on('SIGTERM', () => {
-  clientInitializer.stopAllPolling();
-  server.close(() => {
-    console.log('Server closed');
-    process.exit(0);
-  });
+// Gestion de l'arrêt propre de l'application
+process.on('SIGINT', async () => {
+  console.log('Received SIGINT. Performing graceful shutdown...');
+  await prisma.$disconnect();
+  process.exit(0);
+});
+
+process.on('SIGTERM', async () => {
+  console.log('Received SIGTERM. Performing graceful shutdown...');
+  await prisma.$disconnect();
+  process.exit(0);
 });
 
 export default app;

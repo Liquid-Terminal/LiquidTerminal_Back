@@ -18,10 +18,11 @@ class LogDeduplicator {
   private logMap: Map<string, LogEntry> = new Map();
   private readonly deduplicationWindow: number = 60000; // 1 minute en millisecondes
   private readonly maxLogs: number = 1000; // Nombre maximum de logs à conserver
+  private cleanupInterval: NodeJS.Timeout | null = null;
 
   private constructor() {
     // Nettoyer périodiquement les anciens logs
-    setInterval(() => this.cleanup(), this.deduplicationWindow);
+    this.cleanupInterval = setInterval(() => this.cleanup(), this.deduplicationWindow);
   }
 
   public static getInstance(): LogDeduplicator {
@@ -29,6 +30,27 @@ class LogDeduplicator {
       LogDeduplicator.instance = new LogDeduplicator();
     }
     return LogDeduplicator.instance;
+  }
+
+  public cleanup(): void {
+    // Nettoyer l'intervalle si nécessaire
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
+      this.cleanupInterval = null;
+    }
+
+    // Nettoyer les logs expirés
+    const now = Date.now();
+    for (const [key, log] of this.logMap.entries()) {
+      if (now - log.timestamp > this.deduplicationWindow) {
+        this.logMap.delete(key);
+      }
+    }
+
+    // Si la map est toujours trop grande, la vider
+    if (this.logMap.size > this.maxLogs) {
+      this.logMap.clear();
+    }
   }
 
   public processLog(level: string, message: string, metadata: Record<string, any> = {}): LogEntry | null {
@@ -64,15 +86,6 @@ class LogDeduplicator {
     }
     
     return newLog;
-  }
-
-  private cleanup(): void {
-    const now = Date.now();
-    for (const [key, log] of this.logMap.entries()) {
-      if (now - log.timestamp > this.deduplicationWindow) {
-        this.logMap.delete(key);
-      }
-    }
   }
 }
 
@@ -185,7 +198,10 @@ export const measureExecutionTime = async <T>(
 export const stream = {
   write: (message: string) => {
     logger.info(message.trim());
-  },
+  }
 };
+
+// Exporter l'instance du LogDeduplicator
+export const logDeduplicator = LogDeduplicator.getInstance();
 
 export { logger }; 

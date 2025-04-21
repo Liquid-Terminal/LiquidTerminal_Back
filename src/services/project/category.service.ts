@@ -1,122 +1,88 @@
-import { PrismaClient } from '@prisma/client';
-import { CategoryCreateInput, CategoryUpdateInput } from '../../types/project.types';
-import { logger } from '../../utils/logger';
-import { CategoryNotFoundError, CategoryAlreadyExistsError } from '../../errors/project.errors';
+import { CategoryCreateInput, CategoryUpdateInput, CategoryResponse } from '../../types/project.types';
+import { 
+  CategoryNotFoundError, 
+  CategoryAlreadyExistsError,
+  CategoryValidationError 
+} from '../../errors/project.errors';
 import { logDeduplicator } from '../../utils/logDeduplicator';
+import {CACHE_PREFIX} from '../../constants/cache.constants';
+import { 
+  categoryCreateSchema, 
+  categoryUpdateSchema, 
+  categoryQuerySchema 
+} from '../../schemas/category.schema';
+import { categoryRepository, projectRepository } from '../../repositories';
+import { BaseService } from '../../core/crudBase.service';
 
-export class CategoryService {
-  private prisma: PrismaClient;
+// Type pour les paramètres de requête
+type CategoryQueryParams = {
+  page?: number;
+  limit?: number;
+  sort?: string;
+  order?: 'asc' | 'desc';
+  search?: string;
+};
 
-  constructor() {
-    this.prisma = new PrismaClient();
+export class CategoryService extends BaseService<CategoryResponse, CategoryCreateInput, CategoryUpdateInput, CategoryQueryParams> {
+  protected repository = categoryRepository;
+  protected cacheKeyPrefix = CACHE_PREFIX.CATEGORY;
+  protected validationSchemas = {
+    create: categoryCreateSchema,
+    update: categoryUpdateSchema,
+    query: categoryQuerySchema
+  };
+  protected errorClasses = {
+    notFound: CategoryNotFoundError,
+    alreadyExists: CategoryAlreadyExistsError,
+    validation: CategoryValidationError
+  };
+
+  /**
+   * Vérifie si une catégorie avec le nom donné existe déjà
+   * @param data Données de la catégorie
+   * @returns true si la catégorie existe déjà, false sinon
+   */
+  protected async checkExists(data: CategoryCreateInput): Promise<boolean> {
+    return await this.repository.existsByName(data.name);
   }
 
   /**
-   * Récupère toutes les catégories
+   * Vérifie si une catégorie avec le nom donné existe déjà (pour la mise à jour)
+   * @param id ID de la catégorie à mettre à jour
+   * @param data Données de mise à jour
+   * @returns true si une autre catégorie avec le même nom existe déjà, false sinon
    */
-  async getAllCategories(query: {
-    page?: number;
-    limit?: number;
-    sort?: string;
-    order?: 'asc' | 'desc';
-    search?: string;
-  } = {}) {
-    try {
-      const {
-        page = 1,
-        limit = 10,
-        sort = 'createdAt',
-        order = 'desc',
-        search
-      } = query;
-
-      const skip = (page - 1) * limit;
-
-      // Build where clause
-      const where: any = {};
-      if (search) {
-        where.OR = [
-          { name: { contains: search, mode: 'insensitive' } },
-          { description: { contains: search, mode: 'insensitive' } }
-        ];
+  protected async checkExistsForUpdate(id: number, data: CategoryUpdateInput): Promise<boolean> {
+    if (data.name) {
+      const category = await this.repository.findById(id);
+      if (category && data.name !== category.name) {
+        return await this.repository.existsByName(data.name);
       }
-
-      // Get total count for pagination
-      const total = await this.prisma.category.count({ where });
-
-      // Get paginated results
-      const categories = await this.prisma.category.findMany({
-        where,
-        skip,
-        take: limit,
-        orderBy: { [sort]: order }
-      });
-
-      logDeduplicator.info('Categories retrieved successfully', { 
-        count: categories.length,
-        page,
-        limit,
-        total
-      });
-
-      return {
-        data: categories,
-        pagination: {
-          total,
-          page,
-          limit,
-          totalPages: Math.ceil(total / limit)
-        }
-      };
-    } catch (error) {
-      logger.error('Error fetching categories:', { error, query });
-      throw error;
     }
+    return false;
   }
 
   /**
-   * Récupère une catégorie par son ID
+   * Vérifie si une catégorie peut être supprimée
+   * @param id ID de la catégorie à supprimer
+   * @throws Erreur si la catégorie ne peut pas être supprimée
    */
-  async getCategoryById(id: number) {
-    try {
-      const category = await this.prisma.category.findUnique({
-        where: { id }
-      });
-
-      if (!category) {
-        throw new CategoryNotFoundError();
-      }
-
-      logDeduplicator.info('Category retrieved successfully', { categoryId: id });
-      return category;
-    } catch (error) {
-      if (error instanceof CategoryNotFoundError) {
-        throw error;
-      }
-      logger.error('Error fetching category:', { error, categoryId: id });
-      throw error;
+  protected async checkCanDelete(id: number): Promise<void> {
+    const projects = await projectRepository.findByCategory(id);
+    if (projects.length > 0) {
+      throw new CategoryValidationError('Cannot delete category with associated projects');
     }
   }
 
   /**
    * Récupère une catégorie avec ses projets
+   * @param id ID de la catégorie
+   * @returns Catégorie avec ses projets
+   * @throws Erreur si la catégorie n'est pas trouvée
    */
   async getCategoryWithProjects(id: number) {
     try {
-      const category = await this.prisma.category.findUnique({
-        where: { id },
-        include: {
-          projects: {
-            select: {
-              id: true,
-              title: true,
-              desc: true,
-              logo: true
-            }
-          }
-        }
-      });
-
+      const category = await this.repository.findByIdWithProjects(id);
       if (!category) {
         throw new CategoryNotFoundError();
       }
@@ -131,129 +97,25 @@ export class CategoryService {
       if (error instanceof CategoryNotFoundError) {
         throw error;
       }
-      logger.error('Error fetching category with projects:', { error, categoryId: id });
-      throw error;
-    }
-  }
-
-  /**
-   * Crée une nouvelle catégorie
-   */
-  async createCategory(data: CategoryCreateInput) {
-    try {
-      const existingCategory = await this.prisma.category.findUnique({
-        where: { name: data.name }
-      });
-
-      if (existingCategory) {
-        throw new CategoryAlreadyExistsError();
-      }
-
-      const category = await this.prisma.category.create({
-        data
-      });
-
-      logDeduplicator.info('Category created successfully', { categoryId: category.id });
-      return category;
-    } catch (error) {
-      if (error instanceof CategoryAlreadyExistsError) {
-        throw error;
-      }
-      logger.error('Error creating category:', { error, data });
-      throw error;
-    }
-  }
-
-  /**
-   * Met à jour une catégorie existante
-   */
-  async updateCategory(id: number, data: CategoryUpdateInput) {
-    try {
-      const category = await this.prisma.category.findUnique({
-        where: { id }
-      });
-
-      if (!category) {
-        throw new CategoryNotFoundError();
-      }
-
-      if (data.name && data.name !== category.name) {
-        const existingCategory = await this.prisma.category.findUnique({
-          where: { name: data.name }
-        });
-
-        if (existingCategory) {
-          throw new CategoryAlreadyExistsError();
-        }
-      }
-
-      const updatedCategory = await this.prisma.category.update({
-        where: { id },
-        data
-      });
-
-      logDeduplicator.info('Category updated successfully', { categoryId: id });
-      return updatedCategory;
-    } catch (error) {
-      if (error instanceof CategoryNotFoundError || error instanceof CategoryAlreadyExistsError) {
-        throw error;
-      }
-      logger.error('Error updating category:', { error, categoryId: id, data });
-      throw error;
-    }
-  }
-
-  /**
-   * Supprime une catégorie
-   */
-  async deleteCategory(id: number) {
-    try {
-      const category = await this.prisma.category.findUnique({
-        where: { id }
-      });
-
-      if (!category) {
-        throw new CategoryNotFoundError();
-      }
-
-      await this.prisma.category.delete({
-        where: { id }
-      });
-
-      logDeduplicator.info('Category deleted successfully', { categoryId: id });
-    } catch (error) {
-      if (error instanceof CategoryNotFoundError) {
-        throw error;
-      }
-      logger.error('Error deleting category:', { error, categoryId: id });
+      logDeduplicator.error('Error fetching category with projects:', { error, categoryId: id });
       throw error;
     }
   }
 
   /**
    * Récupère tous les projets d'une catégorie
+   * @param categoryId ID de la catégorie
+   * @returns Liste des projets de la catégorie
+   * @throws Erreur si la catégorie n'est pas trouvée
    */
   async getProjectsByCategory(categoryId: number) {
     try {
-      const category = await this.prisma.category.findUnique({
-        where: { id: categoryId }
-      });
-
+      const category = await this.repository.findById(categoryId);
       if (!category) {
         throw new CategoryNotFoundError();
       }
 
-      const projects = await this.prisma.project.findMany({
-        where: { categoryId },
-        include: {
-          category: {
-            select: {
-              id: true,
-              name: true
-            }
-          }
-        }
-      });
+      const projects = await projectRepository.findByCategory(categoryId);
 
       logDeduplicator.info('Projects by category retrieved successfully', { 
         categoryId,
@@ -265,7 +127,7 @@ export class CategoryService {
       if (error instanceof CategoryNotFoundError) {
         throw error;
       }
-      logger.error('Error fetching projects by category:', { error, categoryId });
+      logDeduplicator.error('Error fetching projects by category:', { error, categoryId });
       throw error;
     }
   }

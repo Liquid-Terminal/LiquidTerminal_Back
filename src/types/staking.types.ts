@@ -1,6 +1,6 @@
 import { BaseResponse } from './common.types';
 
-
+// Types de base pour les validateurs
 export interface ValidatorSummary {
   validator: string;
   commission: string;
@@ -17,10 +17,20 @@ export interface ValidatorSummary {
 
 export type ValidatorSummaries = ValidatorSummary[];
 
+// Types pour les réponses API
 export interface ValidatorSummariesResponse extends BaseResponse {
   data: ValidatorSummaries;
 }
 
+export interface TrendingValidatorsResponse extends BaseResponse {
+  data: TrendingValidator[];
+}
+
+export interface ValidatorDetailsResponse extends BaseResponse {
+  data: ValidatorDetails[];
+}
+
+// Types pour les données formatées
 export interface TrendingValidator {
   name: string;
   stake: number;
@@ -38,12 +48,4 @@ export interface ValidatorDetails {
 export interface ValidatorStats {
   predictedApr: string;
   uptimeFraction: string;
-}
-
-export interface TrendingValidatorsResponse extends BaseResponse {
-  data: TrendingValidator[];
-}
-
-export interface ValidatorDetailsResponse extends BaseResponse {
-  data: ValidatorDetails[];
 } 

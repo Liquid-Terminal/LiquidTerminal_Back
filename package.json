@@ -7,7 +7,8 @@
     "test": "jest",
     "dev": "tsx watch src/app.ts",
     "build": "tsc",
-    "start": "tsx src/app.ts"
+    "start": "tsx src/app.ts",
+    "test:db": "tsx src/scripts/test-db-connection.ts"
   },
   "keywords": [],
   "author": "",
@@ -36,11 +37,14 @@
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
     "@types/express-rate-limit": "^6.0.2",
+    "@types/jest": "^29.5.14",
     "@types/jsonwebtoken": "^9.0.9",
     "@types/node": "^18.19.84",
     "@types/ws": "^8.5.13",
+    "jest": "^29.7.0",
     "nodemon": "^3.1.9",
     "prisma": "^6.0.1",
+    "ts-jest": "^29.3.2",
     "ts-node": "^10.9.2",
     "tsx": "^4.19.2",
     "typescript": "^4.9.5"

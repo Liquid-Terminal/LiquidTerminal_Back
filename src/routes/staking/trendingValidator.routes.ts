@@ -2,7 +2,6 @@ import { Router, Request, Response } from 'express';
 import { TrendingValidatorService, SortBy } from '../../services/staking/trending.validator.service';
 import { TrendingValidatorsResponse } from '../../types/staking.types';
 import { marketRateLimiter } from '../../middleware/apiRateLimiter';
-import { logger } from '../../utils/logger';
 import { TrendingValidatorError } from '../../errors/staking.errors';
 import { logDeduplicator } from '../../utils/logDeduplicator';
 
@@ -35,7 +34,7 @@ router.get('/', async (req: Request, res: Response) => {
     
     res.json(response);
   } catch (error) {
-    logger.error('Error in /trending route:', { error });
+    logDeduplicator.error('Error in /trending route:', { error });
     
     if (error instanceof TrendingValidatorError) {
       res.status(error.statusCode).json({

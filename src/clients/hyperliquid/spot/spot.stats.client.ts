@@ -1,5 +1,4 @@
 import { redisService } from '../../../core/redis.service';
-import { logger } from '../../../utils/logger';
 import { SpotGlobalStats, MarketData } from '../../../types/market.types';
 import { logDeduplicator } from '../../../utils/logDeduplicator';
 

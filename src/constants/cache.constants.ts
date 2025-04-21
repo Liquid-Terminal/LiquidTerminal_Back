@@ -1,0 +1,29 @@
+// Préfixes pour les clés de cache
+export const CACHE_PREFIX = {
+  PROJECT: 'project',
+  CATEGORY: 'category',
+  MARKET: 'market',
+  STATS: 'stats',
+  WALLET: 'wallet'
+} as const;
+
+// Durées de vie par défaut (en secondes)
+export const CACHE_TTL = {
+  SHORT: 60, // 1 minute
+  MEDIUM: 300, // 5 minutes
+  LONG: 3600 // 1 hour
+} as const;
+
+// Clés spécifiques
+export const CACHE_KEYS = {
+  PROJECT: (id: number) => `${CACHE_PREFIX.PROJECT}:${id}`,
+  PROJECT_LIST: (params: string) => `${CACHE_PREFIX.PROJECT}:list:${params}`,
+  CATEGORY: (id: number) => `${CACHE_PREFIX.CATEGORY}:${id}`,
+  CATEGORY_LIST: (params: string) => `${CACHE_PREFIX.CATEGORY}:list:${params}`,
+  MARKET: (id: string) => `${CACHE_PREFIX.MARKET}:${id}`,
+  MARKET_LIST: (params: string) => `${CACHE_PREFIX.MARKET}:list:${params}`,
+  STATS: (id: string) => `${CACHE_PREFIX.STATS}:${id}`,
+  STATS_LIST: (params: string) => `${CACHE_PREFIX.STATS}:list:${params}`,
+  WALLET: (id: number) => `${CACHE_PREFIX.WALLET}:${id}`,
+  WALLET_LIST: (params: string) => `${CACHE_PREFIX.WALLET}:list:${params}`
+} as const; 

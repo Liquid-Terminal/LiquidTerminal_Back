@@ -1,5 +1,6 @@
-import { BaseResponse, TokenAmount } from './common.types';
+import { BaseResponse } from './common.types';
 
+// Types de base pour les tokens et marchés
 export interface Token {
     name: string;
     szDecimals: number;
@@ -18,6 +19,15 @@ export interface Market {
     isCanonical: boolean;
 }
 
+// Types pour les stablecoins bridgés
+export interface BridgedUsdcData {
+    date: number;
+    totalCirculating: {
+        peggedUSD: number;
+    };
+}
+
+// Types pour le contexte spot
 export interface SpotContext {
     tokens: Token[];
     universe: Market[];
@@ -43,10 +53,13 @@ export interface MarketData {
     supply: number;
 }
 
-export interface TokenDetails {
-    name: string;
-    img: string;
-    desc: string;
+export interface SpotUSDCData {
+    date: number;
+    lastUpdate: number;
+    totalSpotUSDC: number;
+    totalCirculating: {
+        peggedUSD: number;
+    };
 }
 
 // Types pour les marchés perpétuels
@@ -80,36 +93,7 @@ export interface PerpMarketData {
     onlyIsolated: boolean;
 }
 
-// Types pour USDC Spot
-export interface SpotUSDCData {
-    lastUpdate: number;
-    totalSpotUSDC: number;
-    holdersCount: number;
-    "HIP-2": number;
-}
-
-export interface SpotUSDCResponse extends BaseResponse {
-    data: SpotUSDCData;
-}
-
 // Types pour les statistiques globales
-export interface GlobalStats {
-    totalVolume: number;
-    dailyVolume: number;
-    nUsers: number;
-}
-
-export interface GlobalStatsResponse extends BaseResponse {
-    data: GlobalStats;
-}
-
-export interface DashboardGlobalStats {
-    numberOfUsers: number;
-    dailyVolume: number;
-    bridgedUsdc: number;
-    totalHypeStake: number;
-}
-
 export interface SpotGlobalStats {
     totalVolume24h: number;
     totalPairs: number;
@@ -124,22 +108,37 @@ export interface PerpGlobalStats {
     totalPairs: number;
 }
 
-// Types pour USDC Bridged
-export interface UsdAmount {
-    peggedUSD: number;
+export interface GlobalStats {
+    spot: SpotGlobalStats;
+    perp: PerpGlobalStats;
+    bridgedUsdc: {
+        totalCirculating: number;
+    };
+    nUsers: number;
+    dailyVolume: number;
 }
 
-export interface BridgedUsdcData {
-    date: string;
-    totalCirculating: UsdAmount;
-    totalCirculatingUSD: UsdAmount;
-    totalBridgedToUSD: UsdAmount;
-    totalUnreleased?: UsdAmount;
-    totalMintedUSD?: UsdAmount;
+export interface GlobalStatsResponse extends BaseResponse {
+    data: GlobalStats;
 }
 
-export interface BridgedUsdcResponse extends BaseResponse {
-    data: BridgedUsdcData[];
+export interface DashboardGlobalStats {
+    spot?: {
+        totalVolume24h: number;
+        totalPairs: number;
+        totalMarketCap: number;
+        totalSpotUSDC: number;
+        totalHIP2: number;
+    };
+    perp?: {
+        totalOpenInterest: number;
+        totalVolume24h: number;
+        totalPairs: number;
+    };
+    bridgedUsdc: number;
+    numberOfUsers: number;
+    dailyVolume: number;
+    totalHypeStake: number;
 }
 
 // Types pour les informations des tokens
@@ -184,54 +183,55 @@ export interface TokenInfoResponseWrapper extends BaseResponse {
     data: TokenInfoResponse;
 }
 
+// Types pour le tri et la pagination
 export interface SortIndices {
-  volume: number[];
-  marketCap: number[];
-  change24h: number[];
+    volume: number[];
+    marketCap: number[];
+    change24h: number[];
 }
 
 export interface PerpSortIndices {
-  volume: number[];
-  openInterest: number[];
-  change24h: number[];
+    volume: number[];
+    openInterest: number[];
+    change24h: number[];
 }
 
 export interface WebSocketMarketData {
-  spot: {
-    all: MarketData[];
-    sortIndices: SortIndices;
-  };
-  perp: {
-    all: PerpMarketData[];
-    sortIndices: PerpSortIndices;
-  };
-  error?: string;
+    spot: {
+        all: MarketData[];
+        sortIndices: SortIndices;
+    };
+    perp: {
+        all: PerpMarketData[];
+        sortIndices: PerpSortIndices;
+    };
+    error?: string;
 }
 
 export interface MarketQueryParams {
-  sortBy?: 'volume' | 'marketCap' | 'change24h';
-  sortOrder?: 'asc' | 'desc';
-  limit?: number;
-  page?: number;
-  token?: string;
-  pair?: string;
+    sortBy?: 'volume' | 'marketCap' | 'change24h';
+    sortOrder?: 'asc' | 'desc';
+    limit?: number;
+    page?: number;
+    token?: string;
+    pair?: string;
 }
 
 export interface PaginatedResponse<T> {
-  data: T[];
-  pagination: {
-    total: number;
-    page: number;
-    limit: number;
-    totalPages: number;
-  };
+    data: T[];
+    pagination: {
+        total: number;
+        page: number;
+        limit: number;
+        totalPages: number;
+    };
 }
 
 export interface PerpMarketQueryParams {
-  sortBy?: 'volume' | 'openInterest' | 'change24h';
-  sortOrder?: 'asc' | 'desc';
-  limit?: number;
-  page?: number;
-  token?: string;
-  pair?: string;
+    sortBy?: 'volume' | 'openInterest' | 'change24h';
+    sortOrder?: 'asc' | 'desc';
+    limit?: number;
+    page?: number;
+    token?: string;
+    pair?: string;
 }

@@ -44,4 +44,16 @@ export class CategoryAlreadyExistsError extends CategoryError {
   constructor(message: string = 'Category with this name already exists') {
     super(message, 400, 'CATEGORY_ALREADY_EXISTS');
   }
+}
+
+export class ProjectValidationError extends ProjectError {
+  constructor(message: string = 'Invalid project data') {
+    super(message, 400, 'PROJECT_VALIDATION_ERROR');
+  }
+}
+
+export class CategoryValidationError extends CategoryError {
+  constructor(message: string = 'Invalid category data') {
+    super(message, 400, 'CATEGORY_VALIDATION_ERROR');
+  }
 } 

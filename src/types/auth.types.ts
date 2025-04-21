@@ -11,15 +11,4 @@ export interface PrivyPayload extends JWTPayload {
   custom_metadata?: string;
   [key: string]: any;
 }
-
-export interface AuthResponse {
-  success: boolean;
-  token?: string;
-  error?: string;
-  user?: {
-    id: string;
-    email?: string;
-    socialLinks?: SocialLinks;
-  };
-}
   

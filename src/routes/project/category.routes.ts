@@ -1,11 +1,7 @@
 import { Router, Request, Response, RequestHandler } from 'express';
 import { CategoryService } from '../../services/project/category.service';
-import { CategoryCreateInput, CategoryUpdateInput } from '../../types/project.types';
-import { validateRequest } from '../../middleware/validation/validation.middleware';
-import { categoryQuerySchema, categoryCreateSchema, categoryUpdateSchema } from '../../schemas/category.schema';
 import { marketRateLimiter } from '../../middleware/apiRateLimiter';
-import { logger } from '../../utils/logger';
-import { CategoryNotFoundError, CategoryAlreadyExistsError } from '../../errors/project.errors';
+import { CategoryNotFoundError, CategoryError } from '../../errors/project.errors';
 import { logDeduplicator } from '../../utils/logDeduplicator';
 
 const router = Router();
@@ -15,57 +11,66 @@ const categoryService = new CategoryService();
 router.use(marketRateLimiter);
 
 // GET /api/categories
-router.get('/', validateRequest(categoryQuerySchema), async (req, res) => {
+router.get('/', (async (req: Request, res: Response) => {
   try {
-    const { page, limit, sort, order, search } = req.query;
-    
-    const result = await categoryService.getAllCategories({
-      page: page ? parseInt(page as string) : undefined,
-      limit: limit ? parseInt(limit as string) : undefined,
-      sort: sort as string,
-      order: order as 'asc' | 'desc',
-      search: search as string
+    const categories = await categoryService.getAll(req.query);
+    res.json({
+      success: true,
+      data: categories.data,
+      pagination: categories.pagination
     });
-
-    logDeduplicator.info('Categories retrieved successfully', { 
-      count: result.data.length,
-      total: result.pagination.total,
-      page: page || 1,
-      limit: limit || 10
-    });
-    
-    res.json(result);
   } catch (error) {
-    logger.error('Error fetching categories:', { error, query: req.query });
-    res.status(500).json({ message: 'Internal server error' });
+    logDeduplicator.error('Error fetching categories:', { error });
+    
+    if (error instanceof CategoryError) {
+      return res.status(error.statusCode).json({
+        success: false,
+        error: error.message,
+        code: error.code
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+      code: 'INTERNAL_SERVER_ERROR'
+    });
   }
-});
+}) as RequestHandler);
 
 // Récupérer une catégorie par son ID
 router.get('/:id', (async (req: Request, res: Response) => {
   try {
-    const id = parseInt(req.params.id);
-    
+    const id = parseInt(req.params.id, 10);
     if (isNaN(id)) {
-      logger.warn('Invalid category ID provided', { id: req.params.id });
-      return res.status(400).json({ message: 'ID de catégorie invalide' });
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid ID format',
+        code: 'INVALID_ID_FORMAT'
+      });
     }
-    
-    const category = await categoryService.getCategoryById(id);
-    logDeduplicator.info('Category retrieved successfully', { 
-      categoryId: category.id,
-      name: category.name
+
+    const category = await categoryService.getById(id);
+    res.json({
+      success: true,
+      data: category
     });
-    
-    res.json(category);
   } catch (error) {
-    if (error instanceof CategoryNotFoundError) {
-      logger.warn('Category not found', { categoryId: req.params.id });
-      return res.status(404).json({ message: error.message });
-    }
+    logDeduplicator.error('Error fetching category:', { error, id: req.params.id });
     
-    logger.error('Error fetching category:', { error, categoryId: req.params.id });
-    res.status(500).json({ message: 'Internal server error' });
+    if (error instanceof CategoryError) {
+      return res.status(error.statusCode).json({
+        success: false,
+        error: error.message,
+        code: error.code
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+      code: 'INTERNAL_SERVER_ERROR'
+    });
   }
 }) as RequestHandler);
 
@@ -75,7 +80,7 @@ router.get('/:id/projects', (async (req: Request, res: Response) => {
     const id = parseInt(req.params.id);
     
     if (isNaN(id)) {
-      logger.warn('Invalid category ID provided', { id: req.params.id });
+      logDeduplicator.warn('Invalid category ID provided', { id: req.params.id });
       return res.status(400).json({ message: 'ID de catégorie invalide' });
     }
     
@@ -89,113 +94,113 @@ router.get('/:id/projects', (async (req: Request, res: Response) => {
     res.json(categoryWithProjects);
   } catch (error) {
     if (error instanceof CategoryNotFoundError) {
-      logger.warn('Category not found', { categoryId: req.params.id });
+      logDeduplicator.warn('Category not found', { categoryId: req.params.id });
       return res.status(404).json({ message: error.message });
     }
     
-    logger.error('Error fetching category with projects:', { error, categoryId: req.params.id });
+    logDeduplicator.error('Error fetching category with projects:', { error, categoryId: req.params.id });
     res.status(500).json({ message: 'Internal server error' });
   }
 }) as RequestHandler);
 
 // Créer une nouvelle catégorie
-router.post('/', validateRequest(categoryCreateSchema), (async (req: Request, res: Response) => {
+router.post('/', (async (req: Request, res: Response) => {
   try {
-    const { name, description } = req.body as CategoryCreateInput;
-    
-    if (!name) {
-      logger.warn('Category creation failed: Name is required');
-      return res.status(400).json({ message: 'Le nom de la catégorie est requis' });
-    }
-    
-    const newCategory = await categoryService.createCategory({ name, description });
-    logDeduplicator.info('Category created successfully', { 
-      categoryId: newCategory.id,
-      name: newCategory.name
+    const category = await categoryService.create(req.body);
+    res.status(201).json({
+      success: true,
+      message: 'Category created successfully',
+      data: category
     });
-    
-    res.status(201).json(newCategory);
   } catch (error) {
-    if (error instanceof CategoryAlreadyExistsError) {
-      logger.warn('Category creation failed: Category already exists', { 
-        name: req.body.name 
-      });
-      return res.status(400).json({ message: error.message });
-    }
+    logDeduplicator.error('Error creating category:', { error, body: req.body });
     
-    logger.error('Error creating category:', { error, body: req.body });
-    res.status(500).json({ message: 'Internal server error' });
+    if (error instanceof CategoryError) {
+      return res.status(error.statusCode).json({
+        success: false,
+        error: error.message,
+        code: error.code
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+      code: 'INTERNAL_SERVER_ERROR'
+    });
   }
 }) as RequestHandler);
 
 // Mettre à jour une catégorie
-router.put('/:id', validateRequest(categoryUpdateSchema), (async (req: Request, res: Response) => {
+router.put('/:id', (async (req: Request, res: Response) => {
   try {
-    const id = parseInt(req.params.id);
-    
+    const id = parseInt(req.params.id, 10);
     if (isNaN(id)) {
-      logger.warn('Invalid category ID provided', { id: req.params.id });
-      return res.status(400).json({ message: 'ID de catégorie invalide' });
-    }
-    
-    const { name, description } = req.body as CategoryUpdateInput;
-    
-    if (!name && description === undefined) {
-      logger.warn('Category update failed: No data to update', { 
-        categoryId: id,
-        body: req.body
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid ID format',
+        code: 'INVALID_ID_FORMAT'
       });
-      return res.status(400).json({ message: 'Aucune donnée à mettre à jour' });
     }
-    
-    const updatedCategory = await categoryService.updateCategory(id, { name, description });
-    logDeduplicator.info('Category updated successfully', { 
-      categoryId: updatedCategory.id,
-      name: updatedCategory.name
+
+    const category = await categoryService.update(id, req.body);
+    res.json({
+      success: true,
+      message: 'Category updated successfully',
+      data: category
     });
-    
-    res.json(updatedCategory);
   } catch (error) {
-    if (error instanceof CategoryNotFoundError) {
-      logger.warn('Category not found for update', { categoryId: req.params.id });
-      return res.status(404).json({ message: error.message });
-    }
+    logDeduplicator.error('Error updating category:', { error, id: req.params.id, body: req.body });
     
-    if (error instanceof CategoryAlreadyExistsError) {
-      logger.warn('Category update failed: Category already exists', { 
-        categoryId: req.params.id,
-        name: req.body.name
+    if (error instanceof CategoryError) {
+      return res.status(error.statusCode).json({
+        success: false,
+        error: error.message,
+        code: error.code
       });
-      return res.status(400).json({ message: error.message });
     }
-    
-    logger.error('Error updating category:', { error, categoryId: req.params.id, body: req.body });
-    res.status(500).json({ message: 'Internal server error' });
+
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+      code: 'INTERNAL_SERVER_ERROR'
+    });
   }
 }) as RequestHandler);
 
 // Supprimer une catégorie
 router.delete('/:id', (async (req: Request, res: Response) => {
   try {
-    const id = parseInt(req.params.id);
-    
+    const id = parseInt(req.params.id, 10);
     if (isNaN(id)) {
-      logger.warn('Invalid category ID provided', { id: req.params.id });
-      return res.status(400).json({ message: 'ID de catégorie invalide' });
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid ID format',
+        code: 'INVALID_ID_FORMAT'
+      });
     }
-    
-    await categoryService.deleteCategory(id);
-    logDeduplicator.info('Category deleted successfully', { categoryId: id });
-    
-    res.status(204).send();
+
+    await categoryService.delete(id);
+    res.json({
+      success: true,
+      message: 'Category deleted successfully'
+    });
   } catch (error) {
-    if (error instanceof CategoryNotFoundError) {
-      logger.warn('Category not found for deletion', { categoryId: req.params.id });
-      return res.status(404).json({ message: error.message });
-    }
+    logDeduplicator.error('Error deleting category:', { error, id: req.params.id });
     
-    logger.error('Error deleting category:', { error, categoryId: req.params.id });
-    res.status(500).json({ message: 'Internal server error' });
+    if (error instanceof CategoryError) {
+      return res.status(error.statusCode).json({
+        success: false,
+        error: error.message,
+        code: error.code
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+      code: 'INTERNAL_SERVER_ERROR'
+    });
   }
 }) as RequestHandler);
 

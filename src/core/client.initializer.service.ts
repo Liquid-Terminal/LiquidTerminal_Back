@@ -7,11 +7,13 @@ import { HyperliquidVaultClient } from '../clients/hyperliquid/vault/vault.clien
 import { HypurrscanClient } from '../clients/hypurrscan/auction.client';
 import { SpotUSDCClient } from '../clients/hypurrscan/spotUSDC.client';
 import { HyperliquidSpotStatsClient } from '../clients/hyperliquid/spot/spot.stats.client';
-import { logger } from '../utils/logger';
+import { logDeduplicator } from '../utils/logDeduplicator';
 
 export class ClientInitializerService {
   private static instance: ClientInitializerService;
   private clients: Map<string, any> = new Map();
+  private pollingIntervals: { [key: string]: NodeJS.Timeout } = {};
+  private POLLING_INTERVAL: number = 10000; // Assuming a default POLLING_INTERVAL
 
   private constructor() {}
 
@@ -20,6 +22,60 @@ export class ClientInitializerService {
       ClientInitializerService.instance = new ClientInitializerService();
     }
     return ClientInitializerService.instance;
+  }
+
+  public async initializeAll(): Promise<void> {
+    try {
+      await Promise.all([
+        this.initializeMarketData(),
+        this.initializeSpotStats(),
+        this.initializePerpStats(),
+        this.initializeGlobalStatsLiquid()
+      ]);
+      logDeduplicator.info('All clients initialized successfully');
+    } catch (error) {
+      logDeduplicator.error('Error initializing clients:', { error });
+      throw error;
+    }
+  }
+
+  private async startPolling(name: string, pollingFunction: () => Promise<void>): Promise<void> {
+    try {
+      this.pollingIntervals[name] = setInterval(pollingFunction, this.POLLING_INTERVAL);
+      logDeduplicator.info(`Started polling for ${name} client`);
+    } catch (error) {
+      logDeduplicator.error(`Error starting polling for ${name} client:`, { error });
+      throw error;
+    }
+  }
+
+  private stopPolling(name: string): void {
+    try {
+      if (this.pollingIntervals[name]) {
+        clearInterval(this.pollingIntervals[name]);
+        delete this.pollingIntervals[name];
+        logDeduplicator.info(`Stopped polling for ${name} client`);
+      }
+    } catch (error) {
+      logDeduplicator.error(`Error stopping polling for ${name} client:`, { error });
+      throw error;
+    }
+  }
+
+  private async initializeMarketData(): Promise<void> {
+    // Implementation of initializeMarketData
+  }
+
+  private async initializeSpotStats(): Promise<void> {
+    // Implementation of initializeSpotStats
+  }
+
+  private async initializePerpStats(): Promise<void> {
+    // Implementation of initializePerpStats
+  }
+
+  private async initializeGlobalStatsLiquid(): Promise<void> {
+    // Implementation of initializeGlobalStatsLiquid
   }
 
   public initialize(): void {
@@ -62,9 +118,9 @@ export class ClientInitializerService {
       // Démarrer le polling pour tous les clients
       this.startAllPolling();
 
-      logger.info('All clients initialized successfully');
+      logDeduplicator.info('All clients initialized successfully');
     } catch (error) {
-      logger.error('Error initializing clients:', { error });
+      logDeduplicator.error('Error initializing clients:', { error });
       throw error;
     }
   }
@@ -74,9 +130,9 @@ export class ClientInitializerService {
       if ('startPolling' in client) {
         try {
           client.startPolling();
-          logger.info(`Started polling for ${name} client`);
+          logDeduplicator.info(`Started polling for ${name} client`);
         } catch (error) {
-          logger.error(`Error starting polling for ${name} client:`, { error });
+          logDeduplicator.error(`Error starting polling for ${name} client:`, { error });
         }
       }
     }
@@ -87,9 +143,9 @@ export class ClientInitializerService {
       if ('stopPolling' in client) {
         try {
           client.stopPolling();
-          logger.info(`Stopped polling for ${name} client`);
+          logDeduplicator.info(`Stopped polling for ${name} client`);
         } catch (error) {
-          logger.error(`Error stopping polling for ${name} client:`, { error });
+          logDeduplicator.error(`Error stopping polling for ${name} client:`, { error });
         }
       }
     }

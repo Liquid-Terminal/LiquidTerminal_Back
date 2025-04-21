@@ -1,5 +1,6 @@
 import { BaseResponse, TimeRange } from './common.types';
 
+// Types pour les données de portfolio
 export interface VaultPortfolioData {
   accountValueHistory: [number, string][];
   pnlHistory: [number, string][];
@@ -17,16 +18,7 @@ export interface VaultPortfolio {
   perpAllTime: VaultPortfolioData;
 }
 
-export interface VaultFollower {
-  user: string;
-  vaultEquity: string;
-  pnl: string;
-  allTimePnl: string;
-  daysFollowing: number;
-  vaultEntryTime: number;
-  lockupUntil: number;
-}
-
+// Types pour les relations et états
 export interface VaultRelationship {
   type: string;
   data: {
@@ -45,6 +37,18 @@ export interface FollowerState {
   withdrawalTime?: number;
 }
 
+// Types pour les followers
+export interface VaultFollower {
+  user: string;
+  vaultEquity: string;
+  pnl: string;
+  allTimePnl: string;
+  daysFollowing: number;
+  vaultEntryTime: number;
+  lockupUntil: number;
+}
+
+// Types pour les détails du vault
 export interface VaultDetails {
   name: string;
   vaultAddress: string;
@@ -64,6 +68,7 @@ export interface VaultDetails {
   alwaysCloseOnWithdraw: boolean;
 }
 
+// Types pour les requêtes et réponses API
 export interface VaultDetailsRequest extends TimeRange {
   type: string;
   vaultAddress: string;

@@ -2,7 +2,6 @@ import { Router, Request, Response } from 'express';
 import { ValidatorSummariesService, SortBy } from '../../services/staking/validator.service';
 import { ValidatorDetailsResponse } from '../../types/staking.types';
 import { marketRateLimiter } from '../../middleware/apiRateLimiter';
-import { logger } from '../../utils/logger';
 import { ValidatorError } from '../../errors/staking.errors';
 import { logDeduplicator } from '../../utils/logDeduplicator';
 
@@ -35,7 +34,7 @@ router.get('/', async (req: Request, res: Response) => {
     
     res.json(response);
   } catch (error) {
-    logger.error('Error in /validators route:', { error });
+    logDeduplicator.error('Error in /validators route:', { error });
     
     if (error instanceof ValidatorError) {
       res.status(error.statusCode).json({

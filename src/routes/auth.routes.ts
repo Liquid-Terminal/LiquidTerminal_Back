@@ -5,7 +5,6 @@ import { validateLogin, validateUserParams } from "../middleware/validation/auth
 import { marketRateLimiter } from "../middleware/apiRateLimiter";
 import { UserNotFoundError } from "../errors/auth.errors";
 import { PrismaClient } from "@prisma/client";
-import { logger } from "../utils/logger";
 import { logDeduplicator } from "../utils/logDeduplicator";
 
 const router = Router();
@@ -20,7 +19,7 @@ router.post("/login", validatePrivyToken, validateLogin, (req: Request, res: Res
   const { privyUserId, name } = req.body;
 
   if (!req.user) {
-    logger.warn('Login attempt without authentication', { privyUserId, name });
+    logDeduplicator.warn('Login attempt without authentication', { privyUserId, name });
     res.status(401).json({ 
       success: false,
       message: "Not authenticated",
@@ -30,7 +29,7 @@ router.post("/login", validatePrivyToken, validateLogin, (req: Request, res: Res
   }
 
   if (req.user.sub !== privyUserId) {
-    logger.warn('Login attempt with invalid Privy User ID', { 
+    logDeduplicator.warn('Login attempt with invalid Privy User ID', { 
       tokenSub: req.user.sub, 
       providedSub: privyUserId, 
       name 
@@ -53,7 +52,7 @@ router.post("/login", validatePrivyToken, validateLogin, (req: Request, res: Res
       });
     })
     .catch(error => {
-      logger.error("Authentication error:", { error, privyUserId, name });
+      logDeduplicator.error("Authentication error:", { error, privyUserId, name });
       
       if (error instanceof UserNotFoundError) {
         res.status(error.statusCode).json({ 
@@ -75,7 +74,7 @@ router.post("/login", validatePrivyToken, validateLogin, (req: Request, res: Res
 // Route pour récupérer les informations d'un utilisateur
 router.get("/user/:privyUserId", validatePrivyToken, validateUserParams, (req: Request, res: Response): void => {
   if (req.user?.sub !== req.params.privyUserId) {
-    logger.warn('Unauthorized access attempt', { 
+    logDeduplicator.warn('Unauthorized access attempt', { 
       tokenSub: req.user?.sub, 
       requestedSub: req.params.privyUserId 
     });
@@ -92,7 +91,7 @@ router.get("/user/:privyUserId", validatePrivyToken, validateUserParams, (req: R
   })
     .then(user => {
       if (!user) {
-        logger.warn('User not found', { privyUserId: req.params.privyUserId });
+        logDeduplicator.warn('User not found', { privyUserId: req.params.privyUserId });
         res.status(404).json({ 
           success: false,
           message: "User not found",
@@ -109,7 +108,7 @@ router.get("/user/:privyUserId", validatePrivyToken, validateUserParams, (req: R
       });
     })
     .catch(error => {
-      logger.error("Error retrieving user:", { error, privyUserId: req.params.privyUserId });
+      logDeduplicator.error("Error retrieving user:", { error, privyUserId: req.params.privyUserId });
       
       if (error instanceof UserNotFoundError) {
         res.status(error.statusCode).json({ 

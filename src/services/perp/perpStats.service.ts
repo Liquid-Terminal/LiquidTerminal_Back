@@ -1,6 +1,5 @@
 import { PerpGlobalStats, PerpMarketData } from '../../types/market.types';
 import { PerpAssetContextService } from './perpAssetContext.service';
-import { logger } from '../../utils/logger';
 import { logDeduplicator } from '../../utils/logDeduplicator';
 
 export class PerpGlobalStatsService {
@@ -36,7 +35,9 @@ export class PerpGlobalStatsService {
         totalPairs
       };
     } catch (error) {
-      logger.error('Error retrieving perp global stats:', error);
+      logDeduplicator.error('Error retrieving perp global stats:', { 
+        error: error instanceof Error ? error.message : String(error) 
+      });
       throw error;
     }
   }

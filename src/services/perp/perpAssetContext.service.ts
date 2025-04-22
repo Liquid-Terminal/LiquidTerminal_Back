@@ -1,16 +1,14 @@
 import { PerpMarketData, PerpMarketQueryParams, PaginatedResponse } from '../../types/market.types';
 import { HyperliquidPerpClient } from '../../clients/hyperliquid/perp/perp.assetcontext.client';
 import { redisService } from '../../core/redis.service';
-import { logger } from '../../utils/logger';
-import { PerpMarketDataError, PerpCacheError } from '../../errors/perp.errors';
+import { PerpMarketDataError } from '../../errors/perp.errors';
 import { logDeduplicator } from '../../utils/logDeduplicator';
 
 export class PerpAssetContextService {
   private readonly UPDATE_CHANNEL = 'perp:data:updated';
-  private readonly CACHE_KEY = 'perp:raw_data';
-  private lastUpdate: number = 0;
   private readonly MARKET_CACHE_KEY = 'perp:markets';
-  
+  private lastUpdate: Record<string, number> = {};
+
   constructor() {
     this.setupSubscriptions();
   }
@@ -18,24 +16,20 @@ export class PerpAssetContextService {
   private setupSubscriptions(): void {
     redisService.subscribe(this.UPDATE_CHANNEL, async (message) => {
       try {
-        const { type, timestamp } = JSON.parse(message);
+        const { type, marketName, timestamp } = JSON.parse(message);
         if (type === 'DATA_UPDATED') {
-          this.lastUpdate = timestamp;
-          logDeduplicator.info('Perp data cache updated', { timestamp });
+          this.lastUpdate[marketName] = timestamp;
+          logDeduplicator.info('Perp market data cache updated', { 
+            marketName, 
+            timestamp 
+          });
         }
       } catch (error) {
-        logger.error('Error processing cache update:', { error });
-        throw new PerpCacheError('Failed to process cache update message');
+        logDeduplicator.error('Error processing cache update:', { 
+          error: error instanceof Error ? error.message : String(error) 
+        });
       }
     });
-  }
-
-  /**
-   * Calcule la variation en pourcentage entre deux prix
-   */
-  private calculatePriceChange(currentPrice: number, previousPrice: number): number {
-    if (previousPrice === 0) return 0;
-    return Number(((currentPrice - previousPrice) / previousPrice * 100).toFixed(2));
   }
 
   /**
@@ -67,19 +61,16 @@ export class PerpAssetContextService {
       const sortOrder = params.sortOrder || 'desc';
       markets.sort((a, b) => {
         const multiplier = sortOrder === 'desc' ? -1 : 1;
-        const valueA = a[sortBy];
-        const valueB = b[sortBy];
+        const valueA = a[sortBy as keyof PerpMarketData];
+        const valueB = b[sortBy as keyof PerpMarketData];
         
-        // Gérer les cas où les valeurs sont undefined ou null
         if (valueA === undefined || valueA === null) return 1;
         if (valueB === undefined || valueB === null) return -1;
         
-        // Pour les nombres, utiliser une comparaison numérique
         if (typeof valueA === 'number' && typeof valueB === 'number') {
           return multiplier * (valueA - valueB);
         }
         
-        // Pour les chaînes, utiliser une comparaison de chaînes
         return multiplier * String(valueA).localeCompare(String(valueB));
       });
 
@@ -107,7 +98,9 @@ export class PerpAssetContextService {
         }
       };
     } catch (error) {
-      logger.error('Error retrieving perp market data:', error);
+      logDeduplicator.error('Error retrieving perp market data:', { 
+        error: error instanceof Error ? error.message : String(error) 
+      });
       throw error;
     }
   }

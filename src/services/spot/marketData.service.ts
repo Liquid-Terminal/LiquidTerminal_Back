@@ -1,13 +1,12 @@
 import { MarketData, SpotContext, AssetContext, Token, Market, MarketQueryParams, PaginatedResponse } from '../../types/market.types';
 import { redisService } from '../../core/redis.service';
 import { MarketDataError } from '../../errors/spot.errors';
-import { logger, measureExecutionTime } from '../../utils/logger';
 import { logDeduplicator } from '../../utils/logDeduplicator';
 
 export class SpotAssetContextService {
   private readonly UPDATE_CHANNEL = 'spot:data:updated';
   private readonly CACHE_KEY = 'spot:raw_data';
-  private lastUpdate: number = 0;
+  private lastUpdate: Record<string, number> = {};
   private readonly MARKET_CACHE_KEY = 'spot:markets';
 
   constructor() {
@@ -17,23 +16,20 @@ export class SpotAssetContextService {
   private setupSubscriptions(): void {
     redisService.subscribe(this.UPDATE_CHANNEL, async (message) => {
       try {
-        const { type, timestamp } = JSON.parse(message);
+        const { type, marketName, timestamp } = JSON.parse(message);
         if (type === 'DATA_UPDATED') {
-          this.lastUpdate = timestamp;
-          logDeduplicator.info('Spot data cache updated', { timestamp });
+          this.lastUpdate[marketName] = timestamp;
+          logDeduplicator.info('Spot market data cache updated', { 
+            marketName, 
+            timestamp 
+          });
         }
       } catch (error) {
-        logger.error('Error processing cache update:', { error });
+        logDeduplicator.error('Error processing cache update:', { 
+          error: error instanceof Error ? error.message : String(error) 
+        });
       }
     });
-  }
-
-  /**
-   * Calcule la variation en pourcentage entre deux prix
-   */
-  private calculatePriceChange(currentPrice: number, previousPrice: number): number {
-    if (previousPrice === 0) return 0;
-    return Number(((currentPrice - previousPrice) / previousPrice * 100).toFixed(2));
   }
 
   /**
@@ -68,16 +64,13 @@ export class SpotAssetContextService {
         const valueA = a[sortBy];
         const valueB = b[sortBy];
         
-        // Gérer les cas où les valeurs sont undefined ou null
         if (valueA === undefined || valueA === null) return 1;
         if (valueB === undefined || valueB === null) return -1;
         
-        // Pour les nombres, utiliser une comparaison numérique
         if (typeof valueA === 'number' && typeof valueB === 'number') {
           return multiplier * (valueA - valueB);
         }
         
-        // Pour les chaînes, utiliser une comparaison de chaînes
         return multiplier * String(valueA).localeCompare(String(valueB));
       });
 
@@ -105,7 +98,9 @@ export class SpotAssetContextService {
         }
       };
     } catch (error) {
-      logger.error('Error retrieving market data:', error);
+      logDeduplicator.error('Error retrieving market data:', { 
+        error: error instanceof Error ? error.message : String(error) 
+      });
       throw error;
     }
   }
@@ -134,7 +129,9 @@ export class SpotAssetContextService {
 
       return tokens;
     } catch (error) {
-      logger.error('Error retrieving tokens without pairs from cache:', { error });
+      logDeduplicator.error('Error retrieving tokens without pairs from cache:', { 
+        error: error instanceof Error ? error.message : String(error) 
+      });
       throw new MarketDataError('Failed to retrieve tokens without pairs from cache');
     }
   }
@@ -160,7 +157,9 @@ export class SpotAssetContextService {
 
       return tokenIds;
     } catch (error) {
-      logger.error('Error retrieving token IDs from cache:', { error });
+      logDeduplicator.error('Error retrieving token IDs from cache:', { 
+        error: error instanceof Error ? error.message : String(error) 
+      });
       throw new MarketDataError('Failed to retrieve token IDs from cache');
     }
   }

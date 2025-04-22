@@ -1,8 +1,7 @@
 import { importJWK, jwtVerify } from "jose";
-import prisma from "../../lib/prisma";
+import { prisma } from "../../core/prisma.service";
 import { PrivyPayload } from "../../types/auth.types";
 import { JWKSError, SigningKeyError, TokenValidationError, UserNotFoundError } from "../../errors/auth.errors";
-import { logger } from "../../utils/logger";
 import { logDeduplicator } from "../../utils/logDeduplicator";
 
 const JWKS_URL = process.env.JWKS_URL!;
@@ -31,24 +30,27 @@ export class AuthService {
     const key = `${message}:${JSON.stringify(metadata)}`;
     
     if (!this.lastLogTimestamp[key] || now - this.lastLogTimestamp[key] > this.LOG_THROTTLE_MS) {
-      logger.info(message, metadata);
+      logDeduplicator.info(message, metadata);
       this.lastLogTimestamp[key] = now;
     }
   }
 
-  private async getSigningKey(header: any): Promise<CryptoKey> {
+  /**
+   * Récupère la clé de signature pour la vérification du token
+   */
+  private async getSigningKey(header: { kid: string }): Promise<CryptoKey> {
     try {
       const response = await fetch(JWKS_URL);
       if (!response.ok) {
-        logger.error('Error fetching JWKS', { status: response.status, statusText: response.statusText });
+        logDeduplicator.error('Error fetching JWKS', { status: response.status, statusText: response.statusText });
         throw new JWKSError("Error fetching JWKS");
       }
 
       const jwks = await response.json();
-      const signingKey = jwks.keys.find((key: any) => key.kid === header.kid);
+      const signingKey = jwks.keys.find((key: { kid: string }) => key.kid === header.kid);
 
       if (!signingKey) {
-        logger.error('Signing key not found', { kid: header.kid });
+        logDeduplicator.error('Signing key not found', { kid: header.kid });
         throw new SigningKeyError("Signing key not found");
       }
 
@@ -57,11 +59,14 @@ export class AuthService {
       if (error instanceof JWKSError || error instanceof SigningKeyError) {
         throw error;
       }
-      logger.error('Unexpected error during JWKS retrieval', { error });
+      logDeduplicator.error('Unexpected error during JWKS retrieval', { error });
       throw new JWKSError("Unexpected error during JWKS retrieval");
     }
   }
 
+  /**
+   * Vérifie la validité d'un token JWT
+   */
   public async verifyToken(token: string): Promise<PrivyPayload> {
     try {
       const decodedHeader = JSON.parse(Buffer.from(token.split(".")[0], "base64").toString());
@@ -74,16 +79,19 @@ export class AuthService {
 
       return payload as PrivyPayload;
     } catch (error) {
-      logger.error('Token validation error', { error });
+      logDeduplicator.error('Token validation error', { error });
       throw new TokenValidationError("Invalid or expired token");
     }
   }
 
+  /**
+   * Trouve un utilisateur existant ou en crée un nouveau
+   */
   public async findOrCreateUser(payload: PrivyPayload, username: string) {
     const privyUserId = payload.sub;
 
     if (!privyUserId) {
-      logger.error('Missing Privy User ID in token');
+      logDeduplicator.error('Missing Privy User ID in token');
       throw new TokenValidationError("Missing Privy User ID in token");
     }
 
@@ -106,7 +114,7 @@ export class AuthService {
 
       return user;
     } catch (error) {
-      logger.error('Error finding or creating user', { error, privyUserId, username });
+      logDeduplicator.error('Error finding or creating user', { error, privyUserId, username });
       throw new UserNotFoundError("Error finding or creating user");
     }
   }

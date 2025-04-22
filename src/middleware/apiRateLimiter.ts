@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { redisService } from '../core/redis.service';
+import { logDeduplicator } from '../utils/logDeduplicator';
 
 // Configuration des limites
 const RATE_LIMITS = {
@@ -64,10 +65,15 @@ export const marketRateLimiter = async (req: Request, res: Response, next: NextF
 
     next();
   } catch (error) {
-    console.error('Rate limiter error:', error);
+    logDeduplicator.error('Rate limiter error', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+      path: req.path,
+      method: req.method,
+      ip: req.ip
+    });
     // En cas d'erreur Redis, on laisse passer la requête
-    // mais on log l'erreur pour le monitoring
-    next();
+    return next();
   }
 };
 

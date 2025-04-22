@@ -1,10 +1,10 @@
 import { Router } from 'express';
-import { logger } from '../utils/logger';
+import { logDeduplicator } from '../utils/logDeduplicator';
 
 const router = Router();
 
 router.get('/', (req, res) => {
-  logger.info('Health check called');
+  logDeduplicator.info('Health check called');
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),

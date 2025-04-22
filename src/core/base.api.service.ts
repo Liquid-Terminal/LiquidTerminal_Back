@@ -1,3 +1,5 @@
+import { logDeduplicator } from '../utils/logDeduplicator';
+
 export abstract class BaseApiService {
     private readonly API_TIMEOUT = 5000; // 5 secondes
     private readonly MAX_RETRIES = 3;
@@ -62,10 +64,13 @@ export abstract class BaseApiService {
         } catch (error) {
           lastError = error as Error;
           if (i < maxRetries - 1) {
-            console.warn(
-              `Attempt ${i + 1}/${maxRetries} failed for ${this.constructor.name}:`,
-              error
-            );
+            logDeduplicator.warn('API request retry', {
+              attempt: i + 1,
+              maxRetries,
+              service: this.constructor.name,
+              error: error instanceof Error ? error.message : String(error),
+              stack: error instanceof Error ? error.stack : undefined
+            });
             await this.delay(delay * (i + 1));
           }
         }

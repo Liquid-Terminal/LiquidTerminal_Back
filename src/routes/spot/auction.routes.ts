@@ -4,7 +4,6 @@ import { SpotDeployStateApiService } from '../../services/spot/auction/auctionTi
 import { validateRequest } from '../../middleware/validation';
 import { auctionQuerySchema } from '../../schemas/spot.schemas';
 import { AuctionError, InvalidAuctionDataError } from '../../errors/spot.errors';
-import { logger } from '../../utils/logger';
 import { logDeduplicator } from '../../utils/logDeduplicator';
 
 const router = express.Router();
@@ -25,7 +24,7 @@ router.get('/', validateRequest(auctionQuerySchema), (async (_req: Request, res:
     });
     res.json(auctions);
   } catch (error) {
-    logger.error('Error fetching auctions:', { error });
+    logDeduplicator.error('Error fetching auctions:', { error: error instanceof Error ? error.message : String(error) });
     
     if (error instanceof AuctionError) {
       return res.status(error.statusCode).json({
@@ -58,7 +57,7 @@ router.get('/timing', validateRequest(auctionQuerySchema), (async (_req: Request
     });
     res.json(timing);
   } catch (error) {
-    logger.error('Error fetching auction timing:', { error });
+    logDeduplicator.error('Error fetching auction timing:', { error: error instanceof Error ? error.message : String(error) });
     res.status(500).json({
       error: 'INTERNAL_SERVER_ERROR',
       message: error instanceof Error ? error.message : 'Unknown error'

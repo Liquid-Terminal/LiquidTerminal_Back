@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import { logDeduplicator } from './utils/logDeduplicator';
 
 import { createServer } from 'http';
 import { sanitizeInput } from './middleware/validation';
@@ -54,7 +55,9 @@ app.use(cors({
 // Ajouter les en-têtes de sécurité
 app.use(securityHeaders);
 
+// Parser le body avant la sanitization
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 // Appliquer la sanitization globalement
 app.use(sanitizeInput);
@@ -81,18 +84,18 @@ const clientInitializer = ClientInitializerService.getInstance();
 clientInitializer.initialize();
 
 server.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
+  logDeduplicator.info(`Server is running on port ${PORT}`);
 });
 
 // Gestion de l'arrêt propre de l'application
 process.on('SIGINT', async () => {
-  console.log('Received SIGINT. Performing graceful shutdown...');
+  logDeduplicator.info('Received SIGINT. Performing graceful shutdown...');
   await prisma.$disconnect();
   process.exit(0);
 });
 
 process.on('SIGTERM', async () => {
-  console.log('Received SIGTERM. Performing graceful shutdown...');
+  logDeduplicator.info('Received SIGTERM. Performing graceful shutdown...');
   await prisma.$disconnect();
   process.exit(0);
 });

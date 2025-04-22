@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { AuthService } from '../services/auth/auth.service';
 import { PrivyPayload } from '../types/auth.types';
 import { TokenValidationError } from '../errors/auth.errors';
+import { logDeduplicator } from '../utils/logDeduplicator';
 
 declare global {
   namespace Express {
@@ -39,7 +40,12 @@ export const validatePrivyToken = (req: Request, res: Response, next: NextFuncti
       next();
     })
     .catch(error => {
-      console.error('Token validation error:', error);
+      logDeduplicator.error('Token validation error', {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        path: req.path,
+        method: req.method
+      });
       
       if (error instanceof TokenValidationError) {
         res.status(error.statusCode).json({ 

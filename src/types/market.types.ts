@@ -225,6 +225,11 @@ export interface PaginatedResponse<T> {
         limit: number;
         totalPages: number;
     };
+    metadata?: {
+        lastUpdate: number;
+        isFresh: boolean;
+        timeSinceLastUpdate: number;
+    };
 }
 
 export interface PerpMarketQueryParams {

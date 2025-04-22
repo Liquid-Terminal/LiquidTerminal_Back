@@ -1,6 +1,5 @@
 import { SpotGlobalStats, MarketData } from '../../types/market.types';
 import { SpotAssetContextService } from './marketData.service';
-import { logger } from '../../utils/logger';
 import { logDeduplicator } from '../../utils/logDeduplicator';
 import { redisService } from '../../core/redis.service';
 
@@ -8,7 +7,7 @@ export class SpotGlobalStatsService {
   private spotAssetContextService: SpotAssetContextService;
   private static readonly SPOT_USDC_CACHE_KEY = 'hypurrscan:spotUSDC:data';
   private static readonly SPOT_USDC_UPDATE_CHANNEL = 'hypurrscan:spotUSDC:updated';
-  private lastSpotUSDCUpdate: number = 0;
+  private lastUpdate: Record<string, number> = {};
 
   constructor() {
     this.spotAssetContextService = new SpotAssetContextService();
@@ -18,13 +17,18 @@ export class SpotGlobalStatsService {
   private setupSpotUSDCSubscriptions(): void {
     redisService.subscribe(SpotGlobalStatsService.SPOT_USDC_UPDATE_CHANNEL, async (message) => {
       try {
-        const { type, timestamp } = JSON.parse(message);
+        const { type, dataType, timestamp } = JSON.parse(message);
         if (type === 'DATA_UPDATED') {
-          this.lastSpotUSDCUpdate = timestamp;
-          logDeduplicator.info('SpotUSDC data cache updated', { timestamp });
+          this.lastUpdate[dataType] = timestamp;
+          logDeduplicator.info('Spot stats data cache updated', { 
+            dataType, 
+            timestamp 
+          });
         }
       } catch (error) {
-        logger.error('Error processing SpotUSDC cache update:', { error });
+        logDeduplicator.error('Error processing spot stats cache update:', { 
+          error: error instanceof Error ? error.message : String(error) 
+        });
       }
     });
   }
@@ -70,7 +74,9 @@ export class SpotGlobalStatsService {
         totalHIP2
       };
     } catch (error) {
-      logger.error('Error retrieving spot global stats:', error);
+      logDeduplicator.error('Error retrieving spot global stats:', { 
+        error: error instanceof Error ? error.message : String(error) 
+      });
       throw error;
     }
   }
@@ -80,7 +86,9 @@ export class SpotGlobalStatsService {
       const cachedData = await redisService.get(SpotGlobalStatsService.SPOT_USDC_CACHE_KEY);
       return cachedData ? JSON.parse(cachedData) : null;
     } catch (error) {
-      logger.error('Error retrieving SpotUSDC data from cache:', { error });
+      logDeduplicator.error('Error retrieving SpotUSDC data from cache:', { 
+        error: error instanceof Error ? error.message : String(error) 
+      });
       return null;
     }
   }

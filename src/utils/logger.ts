@@ -1,7 +1,7 @@
-import winston from 'winston';
+import pino from 'pino';
 import path from 'path';
-// @ts-ignore
-import DailyRotateFile from 'winston-daily-rotate-file';
+import { createWriteStream } from 'fs';
+import { mkdir } from 'fs/promises';
 
 // Interface pour le suivi des logs dupliqués
 interface LogEntry {
@@ -21,7 +21,6 @@ class LogDeduplicator {
   private cleanupInterval: NodeJS.Timeout | null = null;
 
   private constructor() {
-    // Nettoyer périodiquement les anciens logs
     this.cleanupInterval = setInterval(() => this.cleanup(), this.deduplicationWindow);
   }
 
@@ -33,13 +32,11 @@ class LogDeduplicator {
   }
 
   public cleanup(): void {
-    // Nettoyer l'intervalle si nécessaire
     if (this.cleanupInterval) {
       clearInterval(this.cleanupInterval);
       this.cleanupInterval = null;
     }
 
-    // Nettoyer les logs expirés
     const now = Date.now();
     for (const [key, log] of this.logMap.entries()) {
       if (now - log.timestamp > this.deduplicationWindow) {
@@ -47,7 +44,6 @@ class LogDeduplicator {
       }
     }
 
-    // Si la map est toujours trop grande, la vider
     if (this.logMap.size > this.maxLogs) {
       this.logMap.clear();
     }
@@ -57,18 +53,15 @@ class LogDeduplicator {
     const key = `${level}:${message}:${JSON.stringify(metadata)}`;
     const now = Date.now();
     
-    // Vérifier si ce log existe déjà dans la fenêtre de déduplication
     if (this.logMap.has(key)) {
       const existingLog = this.logMap.get(key)!;
       
-      // Si le log est dans la fenêtre de déduplication, incrémenter le compteur
       if (now - existingLog.timestamp < this.deduplicationWindow) {
         existingLog.count++;
-        return null; // Ne pas logger à nouveau
+        return null;
       }
     }
     
-    // Créer une nouvelle entrée de log
     const newLog: LogEntry = {
       message,
       level,
@@ -77,10 +70,8 @@ class LogDeduplicator {
       metadata
     };
     
-    // Ajouter le log à la map
     this.logMap.set(key, newLog);
     
-    // Nettoyer si nécessaire
     if (this.logMap.size > this.maxLogs) {
       this.cleanup();
     }
@@ -89,88 +80,110 @@ class LogDeduplicator {
   }
 }
 
-// Format personnalisé pour inclure le compteur de déduplication
-const deduplicationFormat = winston.format((info) => {
-  const deduplicator = LogDeduplicator.getInstance();
-  const level = typeof info.level === 'string' ? info.level : 'info';
-  const message = typeof info.message === 'string' ? info.message : String(info.message);
-  const processedLog = deduplicator.processLog(level, message, info);
-  
-  if (processedLog) {
-    // Premier log ou log après la fenêtre de déduplication
-    if (processedLog.count > 1) {
-      info.message = `${message} (occurred ${processedLog.count} times)`;
-    }
-    return info;
-  }
-  
-  // Log dupliqué, ne pas l'afficher
-  return false;
-});
-
-// Format pour les métriques de performance
-const performanceFormat = winston.format((info) => {
-  if (info.duration) {
-    info.message = `${info.message} (${info.duration}ms)`;
-  }
-  return info;
-});
-
-// Définir les formats de log
-const logFormat = winston.format.combine(
-  winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
-  winston.format.errors({ stack: true }),
-  winston.format.splat(),
-  deduplicationFormat(),
-  performanceFormat(),
-  winston.format.json()
-);
-
-// Format plus lisible pour le développement
-const consoleFormat = winston.format.combine(
-  winston.format.colorize(),
-  winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
-  winston.format.printf(({ timestamp, level, message, ...meta }) => {
-    let metaStr = '';
-    if (Object.keys(meta).length > 0) {
-      metaStr = ` ${JSON.stringify(meta)}`;
-    }
-    return `${timestamp} [${level}]: ${message}${metaStr}`;
-  })
-);
-
-// Créer le logger
-const logger = winston.createLogger({
+// Configuration de base du logger
+const baseConfig = {
   level: process.env.NODE_ENV === 'production' ? 'info' : 'debug',
-  format: logFormat,
-  defaultMeta: { service: 'liquidterminal-api' },
-  transports: [
-    // Écrire les logs d'erreur dans un fichier avec rotation quotidienne
-    new DailyRotateFile({ 
-      filename: path.join(__dirname, '../../logs/error-%DATE%.log'), 
-      datePattern: 'YYYY-MM-DD',
-      level: 'error',
-      maxSize: '10m',
-      maxFiles: '14d',
-      zippedArchive: true
-    }),
-    // Écrire tous les logs dans un fichier avec rotation quotidienne
-    new DailyRotateFile({ 
-      filename: path.join(__dirname, '../../logs/combined-%DATE%.log'),
-      datePattern: 'YYYY-MM-DD',
-      maxSize: '10m',
-      maxFiles: '14d',
-      zippedArchive: true
-    }),
-  ],
-});
+  base: {
+    service: 'liquidterminal-api'
+  },
+  timestamp: pino.stdTimeFunctions.isoTime,
+  formatters: {
+    level: (label: string) => ({ level: label }),
+    bindings: (bindings: Record<string, any>) => ({ pid: bindings.pid, host: bindings.hostname })
+  }
+};
 
-// Si nous ne sommes pas en production, afficher les logs dans la console
-if (process.env.NODE_ENV !== 'production') {
-  logger.add(new winston.transports.Console({
-    format: consoleFormat,
-  }));
+// Initialisation des streams de logs
+let errorStream: NodeJS.WritableStream;
+let combinedStream: NodeJS.WritableStream;
+let logger: pino.Logger;
+let errorLogger: pino.Logger;
+
+// Fonction d'initialisation asynchrone
+async function initializeLogger() {
+  const logsDir = path.join(__dirname, '../../logs');
+  await mkdir(logsDir, { recursive: true });
+
+  errorStream = createWriteStream(path.join(logsDir, 'error.log'));
+  combinedStream = createWriteStream(path.join(logsDir, 'combined.log'));
+
+  // Configuration simplifiée sans transport de fichier
+  logger = pino({
+    ...baseConfig,
+    transport: {
+      target: 'pino-pretty',
+      options: {
+        colorize: true,
+        translateTime: 'SYS:standard',
+        ignore: 'pid,hostname'
+      }
+    }
+  });
+
+  errorLogger = pino({
+    ...baseConfig,
+    level: 'error',
+    transport: {
+      target: 'pino-pretty',
+      options: {
+        colorize: true,
+        translateTime: 'SYS:standard',
+        ignore: 'pid,hostname'
+      }
+    }
+  });
 }
+
+// Initialiser les loggers
+initializeLogger().catch(console.error);
+
+// Wrapper pour la déduplication des logs
+const deduplicatedLogger = {
+  info: (message: string, metadata: Record<string, any> = {}) => {
+    const deduplicator = LogDeduplicator.getInstance();
+    const processedLog = deduplicator.processLog('info', message, metadata);
+    if (processedLog) {
+      if (processedLog.count > 1) {
+        logger?.info({ ...metadata, count: processedLog.count }, `${message} (occurred ${processedLog.count} times)`);
+      } else {
+        logger?.info(metadata, message);
+      }
+    }
+  },
+  error: (message: string, metadata: Record<string, any> = {}) => {
+    const deduplicator = LogDeduplicator.getInstance();
+    const processedLog = deduplicator.processLog('error', message, metadata);
+    if (processedLog) {
+      if (processedLog.count > 1) {
+        errorLogger?.error({ ...metadata, count: processedLog.count }, `${message} (occurred ${processedLog.count} times)`);
+      } else {
+        errorLogger?.error(metadata, message);
+      }
+    }
+  },
+  debug: (message: string, metadata: Record<string, any> = {}) => {
+    const deduplicator = LogDeduplicator.getInstance();
+    const processedLog = deduplicator.processLog('debug', message, metadata);
+    if (processedLog) {
+      if (processedLog.count > 1) {
+        logger?.debug({ ...metadata, count: processedLog.count }, `${message} (occurred ${processedLog.count} times)`);
+      } else {
+        logger?.debug(metadata, message);
+      }
+    }
+  },
+  warn: (message: string, metadata: Record<string, any> = {}) => {
+    const deduplicator = LogDeduplicator.getInstance();
+    const processedLog = deduplicator.processLog('warn', message, metadata);
+    if (processedLog) {
+      if (processedLog.count > 1) {
+        logger?.warn({ ...metadata, count: processedLog.count }, `${message} (occurred ${processedLog.count} times)`);
+      } else {
+        logger?.warn(metadata, message);
+      }
+    }
+  }
+};
 
 // Fonction utilitaire pour mesurer le temps d'exécution
 export const measureExecutionTime = async <T>(
@@ -181,11 +194,11 @@ export const measureExecutionTime = async <T>(
   try {
     const result = await operation();
     const duration = Date.now() - start;
-    logger.info(`Operation completed: ${operationName}`, { duration, operationName });
+    deduplicatedLogger.info(`Operation completed: ${operationName}`, { duration, operationName });
     return result;
   } catch (error) {
     const duration = Date.now() - start;
-    logger.error(`Operation failed: ${operationName}`, { 
+    deduplicatedLogger.error(`Operation failed: ${operationName}`, { 
       duration, 
       operationName, 
       error: error instanceof Error ? error.message : String(error) 
@@ -194,14 +207,11 @@ export const measureExecutionTime = async <T>(
   }
 };
 
-// Créer un stream pour Morgan (middleware de logging HTTP)
+// Stream pour Morgan
 export const stream = {
   write: (message: string) => {
-    logger.info(message.trim());
+    deduplicatedLogger.info(message.trim());
   }
 };
 
-// Exporter l'instance du LogDeduplicator
-export const logDeduplicator = LogDeduplicator.getInstance();
-
-export { logger }; 
+export default deduplicatedLogger; 

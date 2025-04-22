@@ -1,6 +1,5 @@
 import { TrendingValidator, ValidatorSummary } from '../../types/staking.types';
 import { redisService } from '../../core/redis.service';
-import { logger } from '../../utils/logger';
 import { TrendingValidatorError } from '../../errors/staking.errors';
 import { logDeduplicator } from '../../utils/logDeduplicator';
 
@@ -25,7 +24,7 @@ export class TrendingValidatorService {
           logDeduplicator.info('Validator data updated', { timestamp });
         }
       } catch (error) {
-        logger.error('Error processing cache update:', { error });
+        logDeduplicator.error('Error processing cache update:', { error: error instanceof Error ? error.message : String(error) });
       }
     });
   }
@@ -90,7 +89,10 @@ export class TrendingValidatorService {
 
       return allValidators;
     } catch (error) {
-      logger.error('Error fetching trending validators from cache:', { error, sortBy });
+      logDeduplicator.error('Error fetching trending validators from cache:', { 
+        error: error instanceof Error ? error.message : String(error), 
+        sortBy 
+      });
       throw new TrendingValidatorError('Failed to fetch trending validators from cache');
     }
   }

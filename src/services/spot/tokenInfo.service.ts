@@ -2,7 +2,6 @@ import { FormattedTokenInfo, TokenHolder } from '../../types/market.types';
 import { AuctionInfo } from '../../types/auction.types';
 import { redisService } from '../../core/redis.service';
 import { TokenInfoError, TokenNotFoundError } from '../../errors/spot.errors';
-import { logger } from '../../utils/logger';
 import { logDeduplicator } from '../../utils/logDeduplicator';
 
 export class TokenInfoService {
@@ -23,7 +22,9 @@ export class TokenInfoService {
           logDeduplicator.info('Token info cache updated', { tokenId, timestamp });
         }
       } catch (error) {
-        logger.error('Error processing cache update:', { error });
+        logDeduplicator.error('Error processing cache update:', { 
+          error: error instanceof Error ? error.message : String(error) 
+        });
       }
     });
   }
@@ -45,7 +46,7 @@ export class TokenInfoService {
     try {
       const cachedData = await redisService.get(`${this.CACHE_KEY}:${tokenId}`);
       if (!cachedData) {
-        logger.warn('Token not found in cache', { tokenId });
+        logDeduplicator.warn('Token not found in cache', { tokenId });
         throw new TokenNotFoundError(`Token with ID ${tokenId} not found in cache`);
       }
 
@@ -67,7 +68,10 @@ export class TokenInfoService {
         nonCirculatingHolders
       };
     } catch (error) {
-      logger.error('Error retrieving token info from cache:', { error, tokenId });
+      logDeduplicator.error('Error retrieving token info from cache:', { 
+        error: error instanceof Error ? error.message : String(error), 
+        tokenId 
+      });
       if (error instanceof TokenNotFoundError) {
         throw error;
       }
@@ -82,7 +86,7 @@ export class TokenInfoService {
     try {
       const cachedData = await redisService.get(`${this.CACHE_KEY}:${tokenId}`);
       if (!cachedData) {
-        logger.warn('Token not found in cache for auction details', { tokenId });
+        logDeduplicator.warn('Token not found in cache for auction details', { tokenId });
         throw new TokenNotFoundError(`Token with ID ${tokenId} not found in cache`);
       }
 
@@ -100,7 +104,10 @@ export class TokenInfoService {
         deployGas: details.deployGas
       };
     } catch (error) {
-      logger.error('Error retrieving token auction details from cache:', { error, tokenId });
+      logDeduplicator.error('Error retrieving token auction details from cache:', { 
+        error: error instanceof Error ? error.message : String(error), 
+        tokenId 
+      });
       if (error instanceof TokenNotFoundError) {
         throw error;
       }

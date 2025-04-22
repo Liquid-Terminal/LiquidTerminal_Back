@@ -3,7 +3,8 @@ import { ValidatorSummary } from '../types/staking.types';
 import { GlobalStatsService } from './globalStats.service';
 import { BridgedUsdcService } from './bridgedUsdc.service';
 import { ValidatorSummariesService } from './staking/validator.service';
-import { logger } from '../utils/logger';
+import { logDeduplicator } from '../utils/logDeduplicator';
+
 
 export class DashboardGlobalStatsService {
   private globalStatsService: GlobalStatsService;
@@ -47,7 +48,9 @@ export class DashboardGlobalStatsService {
         totalHypeStake: totalHypeStake
       };
     } catch (error) {
-      logger.error('Error fetching dashboard global stats:', { error });
+      logDeduplicator.error('Error fetching dashboard global stats:', { 
+        error: error instanceof Error ? error.message : String(error) 
+      });
       throw error;
     }
   }

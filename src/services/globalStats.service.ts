@@ -1,5 +1,6 @@
 import { GlobalStats, GlobalStatsResponse } from '../types/market.types';
 import { redisService } from '../core/redis.service';
+import { logDeduplicator } from '../utils/logDeduplicator';
 
 export class GlobalStatsService {
   private readonly HYPERLIQUID_API = 'https://api.hyperliquid.xyz/info';
@@ -36,7 +37,11 @@ export class GlobalStatsService {
 
       return data.data;
     } catch (error) {
-      console.error('Error fetching global stats:', error);
+      logDeduplicator.error('Error fetching global stats', {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        api: this.HYPERLIQUID_API
+      });
       throw error;
     }
   }

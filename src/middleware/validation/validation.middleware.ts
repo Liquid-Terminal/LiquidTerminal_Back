@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction, RequestHandler } from 'express';
 import { AnyZodObject, ZodError } from 'zod';
 import { redisService } from '../../core/redis.service';
+import { logDeduplicator } from '../../utils/logDeduplicator';
 
 /**
  * Middleware de validation générique utilisant Zod
@@ -29,9 +30,9 @@ export const validateRequest = (
 
       // Valider la requête avec le schéma Zod
       await schema.parseAsync({
-        body: req.body,
-        query: req.query,
-        params: req.params,
+        body: { body: req.body },
+        query: { query: req.query },
+        params: { params: req.params },
       });
 
       // Si la validation réussit et qu'on a une clé de cache, on met en cache
@@ -50,6 +51,12 @@ export const validateRequest = (
           message: err.message,
         }));
 
+        logDeduplicator.error('Validation error:', { 
+          path: req.path,
+          method: req.method,
+          errors 
+        });
+
         res.status(400).json({
           error: 'Validation Error',
           details: errors,
@@ -58,7 +65,12 @@ export const validateRequest = (
       }
 
       // Gérer les autres erreurs
-      console.error('Validation middleware error:', error);
+      logDeduplicator.error('Validation middleware error:', { 
+        path: req.path,
+        method: req.method,
+        error: error instanceof Error ? error.message : String(error)
+      });
+
       res.status(500).json({
         error: 'Internal Server Error',
         message: 'An error occurred during request validation',

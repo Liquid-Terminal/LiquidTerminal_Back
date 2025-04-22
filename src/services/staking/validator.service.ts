@@ -1,6 +1,5 @@
 import { ValidatorSummary, ValidatorDetails } from '../../types/staking.types';
 import { redisService } from '../../core/redis.service';
-import { logger } from '../../utils/logger';
 import { ValidatorError } from '../../errors/staking.errors';
 import { logDeduplicator } from '../../utils/logDeduplicator';
 
@@ -25,7 +24,7 @@ export class ValidatorSummariesService {
           logDeduplicator.info('Validator data updated', { timestamp });
         }
       } catch (error) {
-        logger.error('Error processing cache update:', { error });
+        logDeduplicator.error('Error processing cache update:', { error: error instanceof Error ? error.message : String(error) });
       }
     });
   }
@@ -54,7 +53,9 @@ export class ValidatorSummariesService {
       });
       return summaries;
     } catch (error) {
-      logger.error('Failed to fetch validator summaries from cache:', { error });
+      logDeduplicator.error('Failed to fetch validator summaries from cache:', { 
+        error: error instanceof Error ? error.message : String(error) 
+      });
       throw new ValidatorError('Failed to fetch validator summaries from cache');
     }
   }
@@ -104,7 +105,10 @@ export class ValidatorSummariesService {
 
       return sortedValidators;
     } catch (error) {
-      logger.error('Error fetching validator details from cache:', { error, sortBy });
+      logDeduplicator.error('Error fetching validator details from cache:', { 
+        error: error instanceof Error ? error.message : String(error), 
+        sortBy 
+      });
       throw new ValidatorError('Failed to fetch and format validator details from cache');
     }
   }

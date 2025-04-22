@@ -3,7 +3,6 @@ import { SpotGlobalStatsService } from '../../services/spot/spotStats.service';
 import { marketRateLimiter } from '../../middleware/apiRateLimiter';
 import { validateRequest } from '../../middleware/validation';
 import { globalSpotStatsQuerySchema } from '../../schemas/spot.schemas';
-import { logger } from '../../utils/logger';
 import { logDeduplicator } from '../../utils/logDeduplicator';
 
 const router = Router();
@@ -25,7 +24,7 @@ router.get('/', validateRequest(globalSpotStatsQuerySchema), (async (_req: Reque
     });
     res.json(stats);
   } catch (error) {
-    logger.error('Error fetching spot global stats:', { error });
+    logDeduplicator.error('Error fetching spot global stats:', { error: error instanceof Error ? error.message : String(error) });
     res.status(500).json({
       error: 'Failed to fetch spot global stats',
       message: error instanceof Error ? error.message : 'Unknown error'

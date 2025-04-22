@@ -5,7 +5,6 @@ import { marketRateLimiter } from '../../middleware/apiRateLimiter';
 import { validateRequest } from '../../middleware/validation';
 import { marketSpotQuerySchema } from '../../schemas/spot.schemas';
 import { MarketDataError, RateLimitError } from '../../errors/spot.errors';
-import { logger } from '../../utils/logger';
 import { logDeduplicator } from '../../utils/logDeduplicator';
 
 const router = Router();
@@ -48,7 +47,7 @@ router.get('/', validateRequest(marketSpotQuerySchema), async (req: Request, res
       pagination: result.pagination
     });
   } catch (error) {
-    logger.error('Error retrieving market data:', { error });
+    logDeduplicator.error('Error retrieving market data:', { error: error instanceof Error ? error.message : String(error) });
     
     if (error instanceof MarketDataError) {
       res.status(error.statusCode).json({
@@ -85,7 +84,7 @@ router.get('/tokens-without-pairs', validateRequest(marketSpotQuerySchema), asyn
       data: tokens
     });
   } catch (error) {
-    logger.error('Error retrieving tokens without pairs:', { error });
+    logDeduplicator.error('Error retrieving tokens without pairs:', { error: error instanceof Error ? error.message : String(error) });
     
     if (error instanceof MarketDataError) {
       res.status(error.statusCode).json({

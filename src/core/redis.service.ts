@@ -1,118 +1,178 @@
-import Redis from 'ioredis';
+import { Redis } from 'ioredis';
+import { logDeduplicator } from '../utils/logDeduplicator';
 
-class RedisService {
+export class RedisService {
   private client: Redis;
   private subscriber: Redis;
+  private static instance: RedisService;
   private readonly DEFAULT_EXPIRATION = 60 * 5; // 5 minutes
 
-  constructor() {
-    const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
-    
-    this.client = new Redis(redisUrl);
-    this.subscriber = new Redis(redisUrl);
+  private constructor() {
+    this.client = new Redis({
+      host: process.env.REDIS_HOST || 'localhost',
+      port: parseInt(process.env.REDIS_PORT || '6379'),
+      password: process.env.REDIS_PASSWORD,
+      retryStrategy: (times) => {
+        const delay = Math.min(times * 50, 2000);
+        return delay;
+      }
+    });
 
-    this.client.on('error', (err) => console.error('Redis Client Error', err));
-    this.subscriber.on('error', (err) => console.error('Redis Subscriber Error', err));
+    this.subscriber = new Redis({
+      host: process.env.REDIS_HOST || 'localhost',
+      port: parseInt(process.env.REDIS_PORT || '6379'),
+      password: process.env.REDIS_PASSWORD
+    });
+
+    this.client.on('error', (err) => {
+      logDeduplicator.error('Redis Client Error', { 
+        error: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack : undefined
+      });
+    });
+
+    this.subscriber.on('error', (err) => {
+      logDeduplicator.error('Redis Subscriber Error', { 
+        error: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack : undefined
+      });
+    });
   }
 
-  async get(key: string): Promise<string | null> {
+  public static getInstance(): RedisService {
+    if (!RedisService.instance) {
+      RedisService.instance = new RedisService();
+    }
+    return RedisService.instance;
+  }
+
+  public async get(key: string): Promise<string | null> {
     try {
       return await this.client.get(key);
     } catch (error) {
-      console.error('Redis get error:', error);
-      throw error;
+      logDeduplicator.error('Redis get error', { 
+        key,
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
+      return null;
     }
   }
 
-  async set(key: string, value: string, expiration = this.DEFAULT_EXPIRATION): Promise<void> {
+  public async set(key: string, value: string, ttl?: number): Promise<void> {
     try {
-      await this.client.set(key, value, 'EX', expiration);
+      if (ttl) {
+        await this.client.set(key, value, 'EX', ttl);
+      } else {
+        await this.client.set(key, value);
+      }
     } catch (error) {
-      console.error('Redis set error:', error);
-      throw error;
+      logDeduplicator.error('Redis set error', { 
+        key,
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
     }
   }
 
-  async delete(key: string): Promise<boolean> {
+  public async delete(key: string): Promise<void> {
     try {
-      const result = await this.client.del(key);
-      return result > 0;
+      await this.client.del(key);
     } catch (error) {
-      console.error('Redis delete error:', error);
-      throw error;
+      logDeduplicator.error('Redis delete error', { 
+        key,
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
     }
   }
 
-  async keys(pattern: string): Promise<string[]> {
+  public async keys(pattern: string): Promise<string[]> {
     try {
       return await this.client.keys(pattern);
     } catch (error) {
-      console.error('Redis keys error:', error);
-      throw error;
+      logDeduplicator.error('Redis keys error', { 
+        pattern,
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
+      return [];
     }
   }
 
-  async publish(channel: string, message: string): Promise<void> {
+  public async publish(channel: string, message: string): Promise<void> {
     try {
       await this.client.publish(channel, message);
     } catch (error) {
-      console.error('Redis publish error:', error);
-      throw error;
+      logDeduplicator.error('Redis publish error', { 
+        channel,
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
     }
   }
 
-  async subscribe(channel: string, callback: (message: string) => void): Promise<void> {
+  public async subscribe(channel: string, callback: (message: string) => void): Promise<void> {
     try {
       await this.subscriber.subscribe(channel);
-      this.subscriber.on('message', (ch, message) => {
-        if (ch === channel) {
+      this.subscriber.on('message', (receivedChannel, message) => {
+        if (receivedChannel === channel) {
           callback(message);
         }
       });
     } catch (error) {
-      console.error('Redis subscribe error:', error);
-      throw error;
+      logDeduplicator.error('Redis subscribe error', { 
+        channel,
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
     }
   }
 
-  async unsubscribe(channel: string): Promise<void> {
+  public async unsubscribe(channel: string): Promise<void> {
     try {
       await this.subscriber.unsubscribe(channel);
     } catch (error) {
-      console.error('Redis unsubscribe error:', error);
-      throw error;
+      logDeduplicator.error('Redis unsubscribe error', { 
+        channel,
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
     }
   }
 
-  async flushall(): Promise<void> {
+  public async flushAll(): Promise<void> {
     try {
       await this.client.flushall();
     } catch (error) {
-      console.error('Redis flushall error:', error);
-      throw error;
+      logDeduplicator.error('Redis flushall error', { 
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
     }
   }
 
-  async disconnect(): Promise<void> {
+  public async disconnect(): Promise<void> {
     try {
-      await Promise.all([
-        this.client.quit(),
-        this.subscriber.quit()
-      ]);
+      await this.client.quit();
+      await this.subscriber.quit();
     } catch (error) {
-      console.error('Redis disconnect error:', error);
-      throw error;
+      logDeduplicator.error('Redis disconnect error', { 
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
     }
   }
 
-  async reconnect(): Promise<void> {
+  public async reconnect(): Promise<void> {
     try {
-      await this.disconnect();
-      this.client = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
-      this.subscriber = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
+      await this.client.connect();
+      await this.subscriber.connect();
     } catch (error) {
-      console.error('Redis reconnect error:', error);
-      throw error;
+      logDeduplicator.error('Redis reconnect error', { 
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
     }
   }
 
@@ -121,4 +181,4 @@ class RedisService {
   }
 }
 
-export const redisService = new RedisService(); 
+export const redisService = RedisService.getInstance(); 

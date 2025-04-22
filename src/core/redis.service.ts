@@ -1,33 +1,18 @@
-import { createClient } from 'redis';
+import Redis from 'ioredis';
 
 class RedisService {
-  private client;
-  private subscriber;
+  private client: Redis;
+  private subscriber: Redis;
   private readonly DEFAULT_EXPIRATION = 60 * 5; // 5 minutes
 
   constructor() {
-    this.client = createClient({
-      url: process.env.REDIS_URL || 'redis://localhost:6379'
-    });
-
-    this.subscriber = this.client.duplicate();
+    const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
+    
+    this.client = new Redis(redisUrl);
+    this.subscriber = new Redis(redisUrl);
 
     this.client.on('error', (err) => console.error('Redis Client Error', err));
     this.subscriber.on('error', (err) => console.error('Redis Subscriber Error', err));
-
-    this.connect().catch(console.error);
-  }
-
-  private async connect(): Promise<void> {
-    try {
-      await Promise.all([
-        this.client.connect(),
-        this.subscriber.connect()
-      ]);
-    } catch (error) {
-      console.error('Redis connection error:', error);
-      throw error;
-    }
   }
 
   async get(key: string): Promise<string | null> {
@@ -41,7 +26,7 @@ class RedisService {
 
   async set(key: string, value: string, expiration = this.DEFAULT_EXPIRATION): Promise<void> {
     try {
-      await this.client.set(key, value, { EX: expiration });
+      await this.client.set(key, value, 'EX', expiration);
     } catch (error) {
       console.error('Redis set error:', error);
       throw error;
@@ -78,8 +63,11 @@ class RedisService {
 
   async subscribe(channel: string, callback: (message: string) => void): Promise<void> {
     try {
-      await this.subscriber.subscribe(channel, (message) => {
-        callback(message);
+      await this.subscriber.subscribe(channel);
+      this.subscriber.on('message', (ch, message) => {
+        if (ch === channel) {
+          callback(message);
+        }
       });
     } catch (error) {
       console.error('Redis subscribe error:', error);
@@ -98,7 +86,7 @@ class RedisService {
 
   async flushall(): Promise<void> {
     try {
-      await this.client.flushAll();
+      await this.client.flushall();
     } catch (error) {
       console.error('Redis flushall error:', error);
       throw error;
@@ -107,12 +95,10 @@ class RedisService {
 
   async disconnect(): Promise<void> {
     try {
-      if (this.client.isOpen) {
-        await this.client.disconnect();
-      }
-      if (this.subscriber.isOpen) {
-        await this.subscriber.disconnect();
-      }
+      await Promise.all([
+        this.client.quit(),
+        this.subscriber.quit()
+      ]);
     } catch (error) {
       console.error('Redis disconnect error:', error);
       throw error;
@@ -122,7 +108,8 @@ class RedisService {
   async reconnect(): Promise<void> {
     try {
       await this.disconnect();
-      await this.connect();
+      this.client = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
+      this.subscriber = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
     } catch (error) {
       console.error('Redis reconnect error:', error);
       throw error;

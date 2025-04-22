@@ -1,4 +1,4 @@
-import { PerpMarketData, PerpMarket, PerpAssetContext, PerpMarketQueryParams, PaginatedResponse } from '../../types/market.types';
+import { PerpMarketData, PerpMarketQueryParams, PaginatedResponse } from '../../types/market.types';
 import { HyperliquidPerpClient } from '../../clients/hyperliquid/perp/perp.assetcontext.client';
 import { redisService } from '../../core/redis.service';
 import { logger } from '../../utils/logger';

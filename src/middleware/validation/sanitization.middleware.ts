@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import sanitizer from 'express-sanitizer';
+import sanitizeHtml from 'sanitize-html';
 
 /**
  * Middleware de sanitization pour nettoyer les entrées utilisateur
@@ -10,7 +10,6 @@ export const sanitizeInput = (req: Request, res: Response, next: NextFunction) =
   if (req.query) {
     Object.keys(req.query).forEach(key => {
       if (typeof req.query[key] === 'string') {
-        // Supprimer les caractères dangereux
         req.query[key] = sanitizeString(req.query[key] as string);
       }
     });
@@ -20,7 +19,6 @@ export const sanitizeInput = (req: Request, res: Response, next: NextFunction) =
   if (req.params) {
     Object.keys(req.params).forEach(key => {
       if (typeof req.params[key] === 'string') {
-        // Supprimer les caractères dangereux
         req.params[key] = sanitizeString(req.params[key] as string);
       }
     });
@@ -40,19 +38,18 @@ export const sanitizeInput = (req: Request, res: Response, next: NextFunction) =
  * @returns Chaîne sanitizée
  */
 function sanitizeString(str: string): string {
-  // Supprimer les caractères HTML
-  str = str.replace(/<[^>]*>/g, '');
-  
-  // Supprimer les caractères spéciaux dangereux
-  str = str.replace(/[<>'"]/g, '');
-  
-  // Supprimer les caractères de contrôle
-  str = str.replace(/[\x00-\x1F\x7F-\x9F]/g, '');
+  // Utiliser sanitize-html pour nettoyer le HTML
+  str = sanitizeHtml(str, {
+    allowedTags: [], // Ne pas autoriser de tags HTML
+    allowedAttributes: {}, // Ne pas autoriser d'attributs
+    textFilter: (text: string) => {
+      // Supprimer les caractères de contrôle
+      return text.replace(/[\x00-\x1F\x7F-\x9F]/g, '');
+    }
+  });
   
   // Supprimer les espaces multiples
-  str = str.replace(/\s+/g, ' ').trim();
-  
-  return str;
+  return str.replace(/\s+/g, ' ').trim();
 }
 
 /**

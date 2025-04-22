@@ -75,19 +75,22 @@ async function incrementAndGetCount(key: string, now: number, window: number): P
   const multi = redisService.multi();
   
   // Ajouter le timestamp actuel au sorted set
-  multi.zAdd(key, { score: now, value: `${now}` });
+  multi.zadd(key, now, `${now}`);
   
   // Nettoyer les anciennes entrées
-  multi.zRemRangeByScore(key, 0, now - window);
+  multi.zremrangebyscore(key, 0, now - window);
   
   // Compter les entrées restantes
-  multi.zCard(key);
+  multi.zcard(key);
   
   // Définir une expiration sur la clé
   multi.expire(key, window * 2);
   
   const results = await multi.exec();
-  return results ? results[2] as number : 0;
+  if (!results) return 0;
+  
+  const [, , countResult] = results;
+  return countResult ? Number(countResult[1]) : 0;
 }
 
 function sendLimitExceededResponse(res: Response, message: string): void {

@@ -19,8 +19,10 @@ export const securityHeaders = (req: Request, res: Response, next: NextFunction)
   // Politique de référent pour contrôler les informations envoyées dans l'en-tête Referer
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   
-  // Forcer HTTPS avec HSTS (1 an de durée)
-  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
+  // Forcer HTTPS avec HSTS (1 an de durée) - désactivé en développement
+  if (process.env.NODE_ENV !== 'development') {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
+  }
   
   // Permissions-Policy (anciennement Feature-Policy) pour contrôler les fonctionnalités du navigateur
   res.setHeader(
@@ -34,11 +36,15 @@ export const securityHeaders = (req: Request, res: Response, next: NextFunction)
   // Expect-CT pour signaler les certificats non conformes
   res.setHeader('Expect-CT', 'enforce, max-age=30');
   
-  // Cross-Origin-Embedder-Policy pour l'isolation des origines
-  res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
+  // Cross-Origin-Embedder-Policy pour l'isolation des origines - désactivé en développement
+  if (process.env.NODE_ENV !== 'development') {
+    res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
+  }
   
-  // Cross-Origin-Opener-Policy pour l'isolation des origines
-  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+  // Cross-Origin-Opener-Policy pour l'isolation des origines - désactivé en développement
+  if (process.env.NODE_ENV !== 'development') {
+    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+  }
   
   // X-Download-Options pour empêcher le téléchargement automatique des fichiers
   res.setHeader('X-Download-Options', 'noopen');

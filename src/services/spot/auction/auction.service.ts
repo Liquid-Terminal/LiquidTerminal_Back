@@ -3,7 +3,6 @@ import { AuctionInfo, AuctionTimingInfo } from '../../../types/auction.types';
 import { Token } from '../../../types/market.types';
 import { redisService } from '../../../core/redis.service';
 import { AuctionError } from '../../../errors/spot.errors';
-import { logger } from '../../../utils/logger';
 import { logDeduplicator } from '../../../utils/logDeduplicator';
 
 export class AuctionPageService {
@@ -25,7 +24,7 @@ export class AuctionPageService {
           logDeduplicator.info('Hypurrscan cache updated', { timestamp });
         }
       } catch (error) {
-        logger.error('Error processing cache update:', { error });
+        logDeduplicator.error('Error processing cache update:', { error });
       }
     });
   }

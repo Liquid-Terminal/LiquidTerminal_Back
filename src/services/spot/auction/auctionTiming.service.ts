@@ -1,7 +1,7 @@
 import { AuctionTimingInfo } from '../../../types/auction.types';
 import { HyperliquidSpotDeployClient } from '../../../clients/hyperliquid/spot/spot.deploy.client';
 import { AuctionError, InvalidAuctionDataError } from '../../../errors/spot.errors';
-import { logger } from '../../../utils/logger';
+import { logDeduplicator } from '@/utils/logDeduplicator';
 
 export class SpotDeployStateApiService {
   private hyperliquidClient: HyperliquidSpotDeployClient;
@@ -22,7 +22,7 @@ export class SpotDeployStateApiService {
     const key = `${message}:${JSON.stringify(metadata)}`;
     
     if (!this.lastLogTimestamp[key] || now - this.lastLogTimestamp[key] > this.LOG_THROTTLE_MS) {
-      logger.info(message, metadata);
+      logDeduplicator.info(message, metadata);
       this.lastLogTimestamp[key] = now;
     }
   }
@@ -34,14 +34,14 @@ export class SpotDeployStateApiService {
     try {
       const response = await this.hyperliquidClient.getSpotDeployState();
       if (!response) {
-        logger.warn('No spot deploy state data available');
+        logDeduplicator.warn('No spot deploy state data available');
         throw new InvalidAuctionDataError('No spot deploy state data available');
       }
 
       // L'API retourne directement l'objet avec states et gasAuction
       const gasAuction = response.gasAuction;
       if (!gasAuction) {
-        logger.warn('No gas auction data available');
+        logDeduplicator.warn('No gas auction data available');
         throw new InvalidAuctionDataError('No gas auction data available');
       }
 
@@ -75,7 +75,7 @@ export class SpotDeployStateApiService {
         }
       };
     } catch (error) {
-      logger.error('Error fetching auction timing:', { error });
+      logDeduplicator.error('Error fetching auction timing:', { error });
       if (error instanceof InvalidAuctionDataError) {
         throw error;
       }

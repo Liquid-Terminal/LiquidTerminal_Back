@@ -5,12 +5,23 @@ import { TokenInfoError, TokenNotFoundError } from '../../errors/spot.errors';
 import { logDeduplicator } from '../../utils/logDeduplicator';
 
 export class TokenInfoService {
+  private static instance: TokenInfoService; // Ajout pour Singleton
+
   private readonly UPDATE_CHANNEL = 'token:info:updated';
   private readonly CACHE_KEY = 'token:info:raw_data';
   private lastUpdate: Record<string, number> = {};
 
-  constructor() {
+  // Mettre le constructeur en privé
+  private constructor() {
     this.setupSubscriptions();
+  }
+
+  // Méthode statique pour récupérer l'instance unique
+  public static getInstance(): TokenInfoService {
+    if (!TokenInfoService.instance) {
+      TokenInfoService.instance = new TokenInfoService();
+    }
+    return TokenInfoService.instance;
   }
 
   private setupSubscriptions(): void {

@@ -14,17 +14,16 @@ model User {
   email       String?     @unique @db.VarChar(255)
   createdAt   DateTime    @default(now()) @db.Timestamp(6)
   verified    Boolean     @default(false)
-  Wallets     Wallet[]
+  UserWallets UserWallet[]
   Watchlists  Watchlist[]
 }
 
 model Wallet {
-  id      Int      @id @default(autoincrement())
-  address String   @unique @db.VarChar(255)
-  name    String?  @db.VarChar(255)
-  addedAt DateTime @default(now()) @db.Timestamp(6)
-  userId  Int
-  User    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id          Int         @id @default(autoincrement())
+  address     String      @unique @db.VarChar(255)
+  name        String?     @db.VarChar(255)
+  addedAt     DateTime    @default(now()) @db.Timestamp(6)
+  UserWallets UserWallet[]
 }
 
 model Category {
@@ -88,4 +87,16 @@ model Auction {
   createdAt DateTime @default(now())
 
   @@index([time])
+}
+
+model UserWallet {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  walletId  Int
+  name      String?  @db.VarChar(255)
+  addedAt   DateTime @default(now()) @db.Timestamp(6)
+  User      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  Wallet    Wallet   @relation(fields: [walletId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, walletId])
 }

@@ -4,14 +4,25 @@ import { AuctionError, InvalidAuctionDataError } from '../../../errors/spot.erro
 import { logDeduplicator } from '@/utils/logDeduplicator';
 
 export class SpotDeployStateApiService {
+  private static instance: SpotDeployStateApiService; // Ajout pour Singleton
+
   private hyperliquidClient: HyperliquidSpotDeployClient;
   
   // Système de déduplication des logs
   private lastLogTimestamp: Record<string, number> = {};
   private readonly LOG_THROTTLE_MS = 1000;
 
-  constructor() {
+  // Le constructeur devient privé
+  private constructor() {
     this.hyperliquidClient = HyperliquidSpotDeployClient.getInstance();
+  }
+
+  // Méthode statique pour récupérer l'instance unique
+  public static getInstance(): SpotDeployStateApiService {
+    if (!SpotDeployStateApiService.instance) {
+      SpotDeployStateApiService.instance = new SpotDeployStateApiService();
+    }
+    return SpotDeployStateApiService.instance;
   }
 
   /**

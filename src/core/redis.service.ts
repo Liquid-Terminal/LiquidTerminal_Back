@@ -24,6 +24,9 @@ export class RedisService {
       password: process.env.REDIS_PASSWORD
     });
 
+    // Augmenter la limite de listeners pour le client subscriber
+    this.subscriber.setMaxListeners(20); // Permet jusqu'à 20 abonnements sans avertissement
+
     this.client.on('error', (err) => {
       logDeduplicator.error('Redis Client Error', { 
         error: err instanceof Error ? err.message : String(err),

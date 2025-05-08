@@ -106,6 +106,7 @@ export interface PerpGlobalStats {
     totalOpenInterest: number;
     totalVolume24h: number;
     totalPairs: number;
+    hlpTvl: number; // TVL du vault HLP
 }
 
 export interface GlobalStats {
@@ -116,6 +117,7 @@ export interface GlobalStats {
     };
     nUsers: number;
     dailyVolume: number;
+    vaultsTvl: number;
 }
 
 export interface GlobalStatsResponse extends BaseResponse {
@@ -139,6 +141,7 @@ export interface DashboardGlobalStats {
     numberOfUsers: number;
     dailyVolume: number;
     totalHypeStake: number;
+    vaultsTvl: number;
 }
 
 // Types pour les informations des tokens
@@ -224,6 +227,7 @@ export interface PaginatedResponse<T> {
         page: number;
         limit: number;
         totalPages: number;
+        totalVolume?: number;
     };
     metadata?: {
         lastUpdate: number;

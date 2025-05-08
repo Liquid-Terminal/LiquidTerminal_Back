@@ -18,8 +18,20 @@ router.use(marketRateLimiter);
 router.post("/login", validatePrivyToken, validateLogin, (req: Request, res: Response): void => {
   const { privyUserId, name } = req.body;
 
+  logDeduplicator.info('Login request received', { 
+    privyUserId,
+    name,
+    hasUser: !!req.user,
+    userSub: req.user?.sub 
+  });
+
   if (!req.user) {
-    logDeduplicator.warn('Login attempt without authentication', { privyUserId, name });
+    logDeduplicator.warn('Login attempt without authentication', { 
+      privyUserId, 
+      name,
+      path: req.path 
+    });
+    
     res.status(401).json({ 
       success: false,
       message: "Not authenticated",
@@ -32,8 +44,10 @@ router.post("/login", validatePrivyToken, validateLogin, (req: Request, res: Res
     logDeduplicator.warn('Login attempt with invalid Privy User ID', { 
       tokenSub: req.user.sub, 
       providedSub: privyUserId, 
-      name 
+      name,
+      path: req.path 
     });
+    
     res.status(400).json({ 
       success: false,
       message: "Invalid Privy User ID",
@@ -44,7 +58,12 @@ router.post("/login", validatePrivyToken, validateLogin, (req: Request, res: Res
 
   authService.findOrCreateUser(req.user, name)
     .then(user => {
-      logDeduplicator.info('User authenticated successfully', { privyUserId, name });
+      logDeduplicator.info('User authenticated successfully', { 
+        privyUserId, 
+        name,
+        userId: user.id 
+      });
+      
       res.status(200).json({ 
         success: true,
         message: "User authenticated successfully", 
@@ -52,7 +71,13 @@ router.post("/login", validatePrivyToken, validateLogin, (req: Request, res: Res
       });
     })
     .catch(error => {
-      logDeduplicator.error("Authentication error:", { error, privyUserId, name });
+      logDeduplicator.error("Authentication error", { 
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        privyUserId, 
+        name,
+        path: req.path 
+      });
       
       if (error instanceof UserNotFoundError) {
         res.status(error.statusCode).json({ 
@@ -76,8 +101,10 @@ router.get("/user/:privyUserId", validatePrivyToken, validateUserParams, (req: R
   if (req.user?.sub !== req.params.privyUserId) {
     logDeduplicator.warn('Unauthorized access attempt', { 
       tokenSub: req.user?.sub, 
-      requestedSub: req.params.privyUserId 
+      requestedSub: req.params.privyUserId,
+      path: req.path 
     });
+    
     res.status(403).json({ 
       success: false,
       message: "Unauthorized access",
@@ -91,7 +118,11 @@ router.get("/user/:privyUserId", validatePrivyToken, validateUserParams, (req: R
   })
     .then(user => {
       if (!user) {
-        logDeduplicator.warn('User not found', { privyUserId: req.params.privyUserId });
+        logDeduplicator.warn('User not found', { 
+          privyUserId: req.params.privyUserId,
+          path: req.path 
+        });
+        
         res.status(404).json({ 
           success: false,
           message: "User not found",
@@ -100,7 +131,12 @@ router.get("/user/:privyUserId", validatePrivyToken, validateUserParams, (req: R
         return;
       }
       
-      logDeduplicator.info('User retrieved successfully', { privyUserId: req.params.privyUserId });
+      logDeduplicator.info('User retrieved successfully', { 
+        privyUserId: req.params.privyUserId,
+        userId: user.id,
+        path: req.path 
+      });
+      
       res.status(200).json({ 
         success: true,
         message: "User retrieved successfully",
@@ -108,7 +144,12 @@ router.get("/user/:privyUserId", validatePrivyToken, validateUserParams, (req: R
       });
     })
     .catch(error => {
-      logDeduplicator.error("Error retrieving user:", { error, privyUserId: req.params.privyUserId });
+      logDeduplicator.error("Error retrieving user", { 
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        privyUserId: req.params.privyUserId,
+        path: req.path 
+      });
       
       if (error instanceof UserNotFoundError) {
         res.status(error.statusCode).json({ 

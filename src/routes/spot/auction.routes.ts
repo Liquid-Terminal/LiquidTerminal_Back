@@ -7,8 +7,8 @@ import { AuctionError, InvalidAuctionDataError } from '../../errors/spot.errors'
 import { logDeduplicator } from '../../utils/logDeduplicator';
 
 const router = express.Router();
-const spotDeployStateApi = new SpotDeployStateApiService();
-const auctionService = new AuctionPageService(spotDeployStateApi);
+const spotDeployStateApi = SpotDeployStateApiService.getInstance();
+const auctionService = AuctionPageService.getInstance(spotDeployStateApi);
 
 // Appliquer le rate limiting et la sanitization
 

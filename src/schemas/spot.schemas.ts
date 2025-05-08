@@ -12,9 +12,9 @@ export const marketSpotQuerySchema = z.object({
     limit: z.string().regex(/^\d+$/).transform(Number).refine(val => val > 0 && val <= 100, {
       message: 'Limit must be between 1 and 100'
     }).optional().default('20'),
-    page: z.string().regex(/^\d+$/).transform(Number).refine(val => val >= 0, {
-      message: 'Page must be a positive number'
-    }).optional().default('0'),
+    page: z.string().regex(/^\d+$/).transform(Number).refine(val => val >= 1, {
+      message: 'Page must be a positive number (starting from 1)'
+    }).optional().default('1'),
   }),
   params: z.object({}),
   body: z.object({}),

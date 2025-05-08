@@ -5,15 +5,11 @@ export const walletCreateSchema = z.object({
     .min(42, 'Address must be 42 characters')
     .max(42, 'Address must be 42 characters')
     .regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid Ethereum address format'),
-  privyUserId: z.string().min(1, 'PrivyUserId is required')
+  name: z.string().optional()
 });
 
 export const walletUpdateSchema = z.object({
-  address: z.string()
-    .min(42, 'Address must be 42 characters')
-    .max(42, 'Address must be 42 characters')
-    .regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid Ethereum address format')
-    .optional()
+  name: z.string().optional()
 });
 
 export const walletQuerySchema = z.object({

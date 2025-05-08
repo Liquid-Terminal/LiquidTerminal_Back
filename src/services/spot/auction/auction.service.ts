@@ -6,14 +6,23 @@ import { AuctionError } from '../../../errors/spot.errors';
 import { logDeduplicator } from '../../../utils/logDeduplicator';
 
 export class AuctionPageService {
+  private static instance: AuctionPageService;
+
   private readonly UPDATE_CHANNEL = 'hypurrscan:auctions:updated';
   private readonly CACHE_KEY = 'hypurrscan:auctions';
   private readonly SPOT_CACHE_KEY = 'spot:raw_data';
 
-  constructor(
+  private constructor(
     private spotDeployStateApi: SpotDeployStateApiService
   ) {
     this.setupSubscriptions();
+  }
+
+  public static getInstance(spotDeployStateApi: SpotDeployStateApiService): AuctionPageService {
+    if (!AuctionPageService.instance) {
+      AuctionPageService.instance = new AuctionPageService(spotDeployStateApi);
+    }
+    return AuctionPageService.instance;
   }
 
   private setupSubscriptions(): void {

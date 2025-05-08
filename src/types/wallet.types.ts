@@ -16,17 +16,26 @@ export interface WalletWatchlistResponse extends BaseResponse {
 export interface WalletResponse {
   id: number;
   address: string;
-  userId: number;
+  name?: string;
   addedAt: Date;
+}
+
+export interface UserWalletResponse {
+  id: number;
+  userId: number;
+  walletId: number;
+  name?: string;
+  addedAt: Date;
+  Wallet: WalletResponse;
 }
 
 export interface WalletCreateInput {
   address: string;
-  privyUserId: string;
+  name?: string;
 }
 
 export interface WalletUpdateInput {
-  address?: string;
+  name?: string;
 }
 
 export interface WalletQueryParams {
@@ -36,4 +45,10 @@ export interface WalletQueryParams {
   order?: 'asc' | 'desc';
   search?: string;
   userId?: number;
+}
+
+export interface UserWalletCreateInput {
+  userId: number;
+  walletId: number;
+  name?: string;
 }

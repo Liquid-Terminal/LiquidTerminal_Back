@@ -1,9 +1,8 @@
 import pino from 'pino';
 import path from 'path';
-import { createWriteStream } from 'fs';
 import { mkdir } from 'fs/promises';
+import { Writable } from 'stream';
 
-// Interface pour le suivi des logs dupliqués
 interface LogEntry {
   message: string;
   level: string;
@@ -12,180 +11,175 @@ interface LogEntry {
   metadata: Record<string, any>;
 }
 
-// Classe pour gérer la déduplication des logs
-class LogDeduplicator {
-  private static instance: LogDeduplicator;
+class LogDeduplicatorInternal {
+  private static instance: LogDeduplicatorInternal;
   private logMap: Map<string, LogEntry> = new Map();
-  private readonly deduplicationWindow: number = 60000; // 1 minute en millisecondes
-  private readonly maxLogs: number = 1000; // Nombre maximum de logs à conserver
+  private readonly deduplicationWindow: number = 60000;
+  private readonly maxLogs: number = 1000;
   private cleanupInterval: NodeJS.Timeout | null = null;
 
   private constructor() {
-    this.cleanupInterval = setInterval(() => this.cleanup(), this.deduplicationWindow);
+    this.cleanupInterval = setInterval(() => this.cleanupOldEntries(), this.deduplicationWindow);
   }
 
-  public static getInstance(): LogDeduplicator {
-    if (!LogDeduplicator.instance) {
-      LogDeduplicator.instance = new LogDeduplicator();
+  public static getInstance(): LogDeduplicatorInternal {
+    if (!LogDeduplicatorInternal.instance) {
+      LogDeduplicatorInternal.instance = new LogDeduplicatorInternal();
     }
-    return LogDeduplicator.instance;
+    return LogDeduplicatorInternal.instance;
   }
 
-  public cleanup(): void {
-    if (this.cleanupInterval) {
-      clearInterval(this.cleanupInterval);
-      this.cleanupInterval = null;
-    }
-
+  private cleanupOldEntries(): void {
     const now = Date.now();
     for (const [key, log] of this.logMap.entries()) {
       if (now - log.timestamp > this.deduplicationWindow) {
         this.logMap.delete(key);
       }
     }
+  }
 
+  public cleanup(): void {
     if (this.logMap.size > this.maxLogs) {
-      this.logMap.clear();
+      const entries = Array.from(this.logMap.entries());
+      entries.sort(([, a], [, b]) => a.timestamp - b.timestamp);
+      let i = 0;
+      while (this.logMap.size > this.maxLogs && i < entries.length) {
+        this.logMap.delete(entries[i][0]);
+        i++;
+      }
+    }
+  }
+
+  public shutdown(): void {
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
+      this.cleanupInterval = null;
     }
   }
 
   public processLog(level: string, message: string, metadata: Record<string, any> = {}): LogEntry | null {
-    const key = `${level}:${message}:${JSON.stringify(metadata)}`;
+    const key = `${level}:${message}`;
     const now = Date.now();
-    
-    if (this.logMap.has(key)) {
-      const existingLog = this.logMap.get(key)!;
-      
-      if (now - existingLog.timestamp < this.deduplicationWindow) {
-        existingLog.count++;
-        return null;
-      }
+    const existingLog = this.logMap.get(key);
+
+    if (existingLog && (now - existingLog.timestamp < this.deduplicationWindow)) {
+      existingLog.count++;
+      existingLog.timestamp = now;
+      return null;
     }
-    
-    const newLog: LogEntry = {
-      message,
-      level,
-      timestamp: now,
-      count: 1,
-      metadata
-    };
-    
+
+    const newLog: LogEntry = { message, level, timestamp: now, count: 1, metadata };
     this.logMap.set(key, newLog);
-    
     if (this.logMap.size > this.maxLogs) {
       this.cleanup();
     }
-    
     return newLog;
   }
 }
 
-// Configuration de base du logger
 const baseConfig = {
-  level: process.env.NODE_ENV === 'production' ? 'info' : 'debug',
-  base: {
-    service: 'liquidterminal-api'
-  },
+  base: { service: 'liquidterminal-api' },
   timestamp: pino.stdTimeFunctions.isoTime,
-  formatters: {
-    level: (label: string) => ({ level: label }),
-    bindings: (bindings: Record<string, any>) => ({ pid: bindings.pid, host: bindings.hostname })
-  }
+  formatters: { level: (label: string) => ({ level: label }) },
 };
 
-// Initialisation des streams de logs
-let errorStream: NodeJS.WritableStream;
-let combinedStream: NodeJS.WritableStream;
-let logger: pino.Logger;
-let errorLogger: pino.Logger;
+let infoWarnLogger: pino.Logger;
+let errorDebugLogger: pino.Logger;
 
-// Fonction d'initialisation asynchrone
+let iwFileStream: pino.DestinationStream;
+let edFileStream: pino.DestinationStream;
+
+const logsDir = path.join(__dirname, '../../logs');
+const combinedLogPath = path.join(logsDir, 'combined.log');
+const errorLogPath = path.join(logsDir, 'error.log');
+
 async function initializeLogger() {
-  const logsDir = path.join(__dirname, '../../logs');
-  await mkdir(logsDir, { recursive: true });
+  try {
+    await mkdir(logsDir, { recursive: true });
 
-  errorStream = createWriteStream(path.join(logsDir, 'error.log'));
-  combinedStream = createWriteStream(path.join(logsDir, 'combined.log'));
+    const prettyPrintOptions = {
+      colorize: true,
+      translateTime: 'SYS:standard',
+      ignore: 'pid,hostname,service',
+    };
 
-  // Configuration simplifiée sans transport de fichier
-  logger = pino({
-    ...baseConfig,
-    transport: {
-      target: 'pino-pretty',
-      options: {
-        colorize: true,
-        translateTime: 'SYS:standard',
-        ignore: 'pid,hostname'
-      }
+    const consoleTransport = process.env.NODE_ENV !== 'production'
+      ? { target: 'pino-pretty', options: prettyPrintOptions }
+      : null;
+
+    iwFileStream = pino.destination(combinedLogPath);
+    const iwPinoStreams: pino.StreamEntry[] = [{ level: 'info', stream: iwFileStream }];
+    if (consoleTransport) {
+      iwPinoStreams.push({ level: 'info', stream: pino.transport(consoleTransport) as unknown as Writable });
     }
-  });
+    infoWarnLogger = pino({ ...baseConfig, level: 'info' }, pino.multistream(iwPinoStreams));
 
-  errorLogger = pino({
-    ...baseConfig,
-    level: 'error',
-    transport: {
-      target: 'pino-pretty',
-      options: {
-        colorize: true,
-        translateTime: 'SYS:standard',
-        ignore: 'pid,hostname'
-      }
+    edFileStream = pino.destination(errorLogPath);
+    const edPinoStreams: pino.StreamEntry[] = [{ level: 'debug', stream: edFileStream }];
+    if (consoleTransport) {
+      edPinoStreams.push({ level: 'debug', stream: pino.transport(consoleTransport) as unknown as Writable });
     }
-  });
+    errorDebugLogger = pino({ ...baseConfig, level: 'debug' }, pino.multistream(edPinoStreams));
+
+    const shutdown = () => {
+      (iwFileStream as any)?.flushSync(); 
+      (edFileStream as any)?.flushSync();
+      
+      LogDeduplicatorInternal.getInstance().shutdown();
+      process.exit(0);
+    };
+
+    process.on('exit', () => {
+        (iwFileStream as any)?.flushSync();
+        (edFileStream as any)?.flushSync();
+    });
+    process.on('SIGINT', shutdown);
+    process.on('SIGTERM', shutdown);
+
+  } catch (err) {
+    console.error('Failed to initialize pino logger:', err);
+    infoWarnLogger = pino({ level: process.env.NODE_ENV === 'production' ? 'info' : 'debug' });
+    errorDebugLogger = pino({ level: process.env.NODE_ENV === 'production' ? 'info' : 'debug' }); 
+  }
 }
 
-// Initialiser les loggers
-initializeLogger().catch(console.error);
+initializeLogger();
 
-// Wrapper pour la déduplication des logs
 const deduplicatedLogger = {
   info: (message: string, metadata: Record<string, any> = {}) => {
-    const deduplicator = LogDeduplicator.getInstance();
+    if (!infoWarnLogger) { console.info(message, metadata); return; }
+    const deduplicator = LogDeduplicatorInternal.getInstance();
     const processedLog = deduplicator.processLog('info', message, metadata);
     if (processedLog) {
-      if (processedLog.count > 1) {
-        logger?.info({ ...metadata, count: processedLog.count }, `${message} (occurred ${processedLog.count} times)`);
-      } else {
-        logger?.info(metadata, message);
-      }
+      infoWarnLogger.info(processedLog.metadata, processedLog.count > 1 ? `${message} (occurred ${processedLog.count} times)` : message);
     }
   },
   error: (message: string, metadata: Record<string, any> = {}) => {
-    const deduplicator = LogDeduplicator.getInstance();
+    if (!errorDebugLogger) { console.error(message, metadata); return; }
+    const deduplicator = LogDeduplicatorInternal.getInstance();
     const processedLog = deduplicator.processLog('error', message, metadata);
     if (processedLog) {
-      if (processedLog.count > 1) {
-        errorLogger?.error({ ...metadata, count: processedLog.count }, `${message} (occurred ${processedLog.count} times)`);
-      } else {
-        errorLogger?.error(metadata, message);
-      }
+      errorDebugLogger.error(processedLog.metadata, processedLog.count > 1 ? `${message} (occurred ${processedLog.count} times)` : message);
     }
   },
   debug: (message: string, metadata: Record<string, any> = {}) => {
-    const deduplicator = LogDeduplicator.getInstance();
+    if (!errorDebugLogger) { console.debug(message, metadata); return; }
+    const deduplicator = LogDeduplicatorInternal.getInstance();
     const processedLog = deduplicator.processLog('debug', message, metadata);
     if (processedLog) {
-      if (processedLog.count > 1) {
-        logger?.debug({ ...metadata, count: processedLog.count }, `${message} (occurred ${processedLog.count} times)`);
-      } else {
-        logger?.debug(metadata, message);
-      }
+      errorDebugLogger.debug(processedLog.metadata, processedLog.count > 1 ? `${message} (occurred ${processedLog.count} times)` : message);
     }
   },
   warn: (message: string, metadata: Record<string, any> = {}) => {
-    const deduplicator = LogDeduplicator.getInstance();
+    if (!infoWarnLogger) { console.warn(message, metadata); return; }
+    const deduplicator = LogDeduplicatorInternal.getInstance();
     const processedLog = deduplicator.processLog('warn', message, metadata);
     if (processedLog) {
-      if (processedLog.count > 1) {
-        logger?.warn({ ...metadata, count: processedLog.count }, `${message} (occurred ${processedLog.count} times)`);
-      } else {
-        logger?.warn(metadata, message);
-      }
+      infoWarnLogger.warn(processedLog.metadata, processedLog.count > 1 ? `${message} (occurred ${processedLog.count} times)` : message);
     }
-  }
+  },
 };
 
-// Fonction utilitaire pour mesurer le temps d'exécution
 export const measureExecutionTime = async <T>(
   operation: () => Promise<T>,
   operationName: string
@@ -198,20 +192,19 @@ export const measureExecutionTime = async <T>(
     return result;
   } catch (error) {
     const duration = Date.now() - start;
-    deduplicatedLogger.error(`Operation failed: ${operationName}`, { 
-      duration, 
-      operationName, 
-      error: error instanceof Error ? error.message : String(error) 
+    deduplicatedLogger.error(`Operation failed: ${operationName}`, {
+      duration,
+      operationName,
+      error: error instanceof Error ? error.message : String(error),
     });
     throw error;
   }
 };
 
-// Stream pour Morgan
 export const stream = {
   write: (message: string) => {
     deduplicatedLogger.info(message.trim());
-  }
+  },
 };
 
 export default deduplicatedLogger; 

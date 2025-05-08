@@ -1,6 +1,5 @@
 {
   "compilerOptions": {
-    /* Language and Environment */
     "target": "ES2020",
     "module": "CommonJS",
     "moduleResolution": "node",
@@ -10,18 +9,14 @@
     "forceConsistentCasingInFileNames": true,
     "strict": true,
     "skipLibCheck": true,
-
-    /* Emit */
+    "resolveJsonModule": true,
     "outDir": "./dist",
     "declaration": true,
     "sourceMap": true,
-
-    /* Interop Constraints */
     "isolatedModules": true,
-
-    "baseUrl": ".",
+    "baseUrl": "./src",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["*"]
     }
   },
   "include": ["src/**/*"],

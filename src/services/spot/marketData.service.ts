@@ -4,13 +4,24 @@ import { MarketDataError } from '../../errors/spot.errors';
 import { logDeduplicator } from '../../utils/logDeduplicator';
 
 export class SpotAssetContextService {
+  private static instance: SpotAssetContextService; // Ajout pour Singleton
+
   private readonly UPDATE_CHANNEL = 'spot:data:updated';
   private readonly CACHE_KEY = 'spot:raw_data';
   private lastUpdate: Record<string, number> = {};
   private readonly MARKET_CACHE_KEY = 'spot:markets';
 
-  constructor() {
+  // Mettre le constructeur en privé
+  private constructor() {
     this.setupSubscriptions();
+  }
+
+  // Méthode statique pour récupérer l'instance unique
+  public static getInstance(): SpotAssetContextService {
+    if (!SpotAssetContextService.instance) {
+      SpotAssetContextService.instance = new SpotAssetContextService();
+    }
+    return SpotAssetContextService.instance;
   }
 
   private setupSubscriptions(): void {
@@ -76,14 +87,18 @@ export class SpotAssetContextService {
 
       // Appliquer la pagination
       const limit = params.limit || 20;
-      const page = params.page || 0;
-      const start = page * limit;
+      const page = params.page || 1;
+      const start = (page - 1) * limit;
       const end = start + limit;
       const paginatedMarkets = markets.slice(start, end);
+
+      // Calculer le volume total
+      const totalVolume = markets.reduce((sum, market) => sum + (market.volume || 0), 0);
 
       logDeduplicator.info('Market data retrieved successfully', { 
         count: paginatedMarkets.length,
         total: markets.length,
+        totalVolume,
         page,
         limit
       });
@@ -94,7 +109,8 @@ export class SpotAssetContextService {
           total: markets.length,
           page,
           limit,
-          totalPages: Math.ceil(markets.length / limit)
+          totalPages: Math.ceil(markets.length / limit),
+          totalVolume
         }
       };
     } catch (error) {

@@ -58,7 +58,13 @@ export class TrendingValidatorService {
         return {
           name: validator.name,
           stake: Number(validator.stake) / 100000000,
-          apr: predictedApr
+          apr: predictedApr,
+          commission: parseFloat(validator.commission) * 100,
+          uptime: validator.stats && validator.stats.length > 0 && validator.stats[0][1] 
+            ? parseFloat(validator.stats[0][1].uptimeFraction) * 100 
+            : 0,
+          isActive: validator.isActive,
+          nRecentBlocks: validator.nRecentBlocks
         };
       });
 
@@ -70,7 +76,11 @@ export class TrendingValidatorService {
       const hyperFoundationAggregate: TrendingValidator = {
         name: 'Hyper Foundation (All)',
         stake: hyperFoundationValidators.reduce((sum: number, v: TrendingValidator) => sum + v.stake, 0),
-        apr: hyperFoundationValidators[0]?.apr || 0 // Tous les APR sont identiques
+        apr: hyperFoundationValidators[0]?.apr || 0,
+        commission: hyperFoundationValidators[0]?.commission || 0,
+        uptime: hyperFoundationValidators[0]?.uptime || 0,
+        isActive: hyperFoundationValidators[0]?.isActive || false,
+        nRecentBlocks: hyperFoundationValidators[0]?.nRecentBlocks || 0
       };
 
       // Combiner et trier

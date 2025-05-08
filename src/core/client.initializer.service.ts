@@ -3,10 +3,12 @@ import { HyperliquidPerpClient } from '../clients/hyperliquid/perp/perp.assetcon
 import { HyperliquidSpotDeployClient } from '../clients/hyperliquid/spot/spot.deploy.client';
 import { HyperliquidTokenInfoClient } from '../clients/hyperliquid/spot/spot.tokeninfo.client';
 import { ValidatorClient } from '../clients/hyperliquid/staking/validator';
-import { HyperliquidVaultClient } from '../clients/hyperliquid/vault/vault.client';
+import { HyperliquidVaultClient } from '../clients/hyperliquid/vault/hlpvault.client';
+import { HyperliquidVaultsClient } from '../clients/hyperliquid/vault/vaults.client';
 import { HypurrscanClient } from '../clients/hypurrscan/auction.client';
 import { SpotUSDCClient } from '../clients/hypurrscan/spotUSDC.client';
 import { HyperliquidSpotStatsClient } from '../clients/hyperliquid/spot/spot.stats.client';
+import { HypurrscanFeesClient } from '../clients/hypurrscan/fees.client';
 import { logDeduplicator } from '../utils/logDeduplicator';
 
 export class ClientInitializerService {
@@ -103,6 +105,12 @@ export class ClientInitializerService {
       // Initialiser le client Vault
       const vaultClient = HyperliquidVaultClient.getInstance();
       this.clients.set('vault', vaultClient);
+      vaultClient.startPolling();
+
+      // Initialiser le client Vaults (liste des vaults)
+      const vaultsClient = HyperliquidVaultsClient.getInstance();
+      this.clients.set('vaults', vaultsClient);
+      vaultsClient.startPolling();
 
       // Initialiser le client Spot Stats
       const spotStatsClient = HyperliquidSpotStatsClient.getInstance();
@@ -114,6 +122,11 @@ export class ClientInitializerService {
 
       const spotUSDCClient = SpotUSDCClient.getInstance();
       this.clients.set('spotUSDC', spotUSDCClient);
+
+      // Initialiser le client Fees
+      const feesClient = HypurrscanFeesClient.getInstance();
+      this.clients.set('fees', feesClient);
+      feesClient.startPolling();
 
       // Démarrer le polling pour tous les clients
       this.startAllPolling();

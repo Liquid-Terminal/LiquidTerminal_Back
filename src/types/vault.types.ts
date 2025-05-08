@@ -20,8 +20,8 @@ export interface VaultPortfolio {
 
 // Types pour les relations et états
 export interface VaultRelationship {
-  type: string;
-  data: {
+  type?: 'parent' | 'child';
+  data?: {
     childAddresses?: string[];
     parentAddress?: string;
     relationshipType?: 'parent' | 'child' | 'sibling';
@@ -77,4 +77,45 @@ export interface VaultDetailsRequest extends TimeRange {
 
 export interface VaultDetailsResponse extends BaseResponse {
   data: VaultDetails;
+}
+
+// Types pour la liste des vaults
+export type TimeFrame = 'day' | 'week' | 'month' | 'allTime';
+export type PnlData = [TimeFrame, string[]];
+
+export interface VaultSummary {
+  name: string;
+  vaultAddress: string;
+  leader: string;
+  tvl: string;
+  isClosed: boolean;
+  relationship: VaultRelationship;
+  createTimeMillis: number;
+}
+
+export interface VaultData {
+  summary: VaultSummary;
+  apr: number;
+}
+
+export interface VaultsResponse {
+  success: boolean;
+  data: VaultData[];
+  pagination: {
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+    totalTvl: number;
+  };
+}
+
+export interface VaultQueryParams {
+  sortBy?: 'apr' | 'tvl' | 'createTime';
+  sortOrder?: 'asc' | 'desc';
+  limit?: number;
+  page?: number;
+  name?: string;
+  leader?: string;
+  isClosed?: boolean;
 } 

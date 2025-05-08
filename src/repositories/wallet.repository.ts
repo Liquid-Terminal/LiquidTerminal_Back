@@ -27,14 +27,20 @@ export class WalletRepository {
 
   async findByUser(userId: number, options?: { skip?: number; take?: number }) {
     return this.prismaClient.wallet.findMany({
-      where: { userId },
+      where: {
+        UserWallets: {
+          some: {
+            userId
+          }
+        }
+      },
       orderBy: { addedAt: 'desc' },
       skip: options?.skip,
       take: options?.take
     });
   }
 
-  async create(data: { address: string; userId: number }) {
+  async create(data: { address: string; name?: string }) {
     return this.prismaClient.wallet.create({
       data
     });
@@ -47,7 +53,13 @@ export class WalletRepository {
 
   async countByUser(userId: number): Promise<number> {
     return this.prismaClient.wallet.count({
-      where: { userId }
+      where: {
+        UserWallets: {
+          some: {
+            userId
+          }
+        }
+      }
     });
   }
 

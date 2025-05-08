@@ -84,7 +84,9 @@ export class ValidatorSummariesService {
           stake: Number(validator.stake) / 100000000,
           apr: predictedApr,
           commission: commission,
-          uptime: uptime
+          uptime: uptime,
+          isActive: validator.isActive,
+          nRecentBlocks: validator.nRecentBlocks
         };
       });
 

@@ -35,6 +35,10 @@ export interface TrendingValidator {
   name: string;
   stake: number;
   apr: number;
+  commission: number;
+  uptime: number;
+  isActive: boolean;
+  nRecentBlocks: number;
 }
 
 export interface ValidatorDetails {
@@ -43,6 +47,8 @@ export interface ValidatorDetails {
   apr: number;
   commission: number;
   uptime: number;
+  isActive: boolean;
+  nRecentBlocks: number;
 }
 
 export interface ValidatorStats {

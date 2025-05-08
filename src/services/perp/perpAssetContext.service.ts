@@ -1,16 +1,26 @@
 import { PerpMarketData, PerpMarketQueryParams, PaginatedResponse } from '../../types/market.types';
-import { HyperliquidPerpClient } from '../../clients/hyperliquid/perp/perp.assetcontext.client';
 import { redisService } from '../../core/redis.service';
 import { PerpMarketDataError } from '../../errors/perp.errors';
 import { logDeduplicator } from '../../utils/logDeduplicator';
 
 export class PerpAssetContextService {
+  private static instance: PerpAssetContextService; // Ajout pour Singleton
+
   private readonly UPDATE_CHANNEL = 'perp:data:updated';
   private readonly MARKET_CACHE_KEY = 'perp:markets';
   private lastUpdate: Record<string, number> = {};
 
-  constructor() {
+  // Le constructeur devient privé
+  private constructor() {
     this.setupSubscriptions();
+  }
+
+  // Méthode statique pour récupérer l'instance unique
+  public static getInstance(): PerpAssetContextService {
+    if (!PerpAssetContextService.instance) {
+      PerpAssetContextService.instance = new PerpAssetContextService();
+    }
+    return PerpAssetContextService.instance;
   }
 
   private setupSubscriptions(): void {
@@ -44,6 +54,12 @@ export class PerpAssetContextService {
       
       let markets = JSON.parse(raw) as PerpMarketData[];
 
+      // Convertir l'openInterest en dollars pour tous les marchés
+      markets = markets.map(market => ({
+        ...market,
+        openInterest: market.openInterest * market.price
+      }));
+
       // Appliquer les filtres
       if (params.token) {
         markets = markets.filter(market => 
@@ -59,8 +75,22 @@ export class PerpAssetContextService {
       // Appliquer le tri
       const sortBy = params.sortBy || 'volume';
       const sortOrder = params.sortOrder || 'desc';
+      
       markets.sort((a, b) => {
         const multiplier = sortOrder === 'desc' ? -1 : 1;
+        
+        // Tri spécial pour openInterest en dollars
+        if (sortBy === 'openInterest') {
+          const valueA = a.openInterest * a.price;
+          const valueB = b.openInterest * b.price;
+          
+          if (valueA === undefined || valueA === null) return 1;
+          if (valueB === undefined || valueB === null) return -1;
+          
+          return multiplier * (valueA - valueB);
+        }
+        
+        // Pour les autres critères de tri
         const valueA = a[sortBy as keyof PerpMarketData];
         const valueB = b[sortBy as keyof PerpMarketData];
         
@@ -76,16 +106,22 @@ export class PerpAssetContextService {
 
       // Appliquer la pagination
       const limit = params.limit || 20;
-      const page = params.page || 0;
-      const start = page * limit;
+      const page = params.page || 1;
+      const start = (page - 1) * limit;
       const end = start + limit;
       const paginatedMarkets = markets.slice(start, end);
+
+      // Calculer le volume total
+      const totalVolume = markets.reduce((sum, market) => sum + (market.volume || 0), 0);
 
       logDeduplicator.info('Perp market data retrieved successfully', { 
         count: paginatedMarkets.length,
         total: markets.length,
+        totalVolume,
         page,
-        limit
+        limit,
+        sortBy,
+        sortOrder
       });
 
       return {
@@ -94,7 +130,8 @@ export class PerpAssetContextService {
           total: markets.length,
           page,
           limit,
-          totalPages: Math.ceil(markets.length / limit)
+          totalPages: Math.ceil(markets.length / limit),
+          totalVolume
         }
       };
     } catch (error) {
@@ -103,12 +140,5 @@ export class PerpAssetContextService {
       });
       throw error;
     }
-  }
-
-  /**
-   * Récupère le poids de la requête pour le rate limiting
-   */
-  public getRequestWeight(): number {
-    return HyperliquidPerpClient.getRequestWeight();
   }
 } 

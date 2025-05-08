@@ -7,7 +7,7 @@ import { logDeduplicator } from '../../utils/logDeduplicator';
 import { PerpMarketDataError, PerpTimeoutError } from '../../errors/perp.errors';
 
 const router = Router();
-const perpMarketService = new PerpAssetContextService();
+const perpMarketService = PerpAssetContextService.getInstance();
 
 // Appliquer le rate limiting et la sanitization
 router.use(marketRateLimiter);
@@ -32,22 +32,18 @@ router.get('/', validateRequest(marketPerpQuerySchema), async (req: Request, res
       pair: pair as string
     });
 
-    // Convertir l'openInterest en dollars
-    const marketsWithDollarOI = result.data.map(token => ({
-      ...token,
-      openInterest: token.openInterest * token.price
-    }));
-
     logDeduplicator.info('Perp market data retrieved successfully', { 
-      count: marketsWithDollarOI.length,
+      count: result.data.length,
       page: result.pagination.page,
-      totalPages: result.pagination.totalPages
+      totalPages: result.pagination.totalPages,
+      sortBy,
+      sortOrder
     });
 
     res.status(200).json({
       success: true,
       message: 'Perp market data retrieved successfully',
-      data: marketsWithDollarOI,
+      data: result.data,
       pagination: result.pagination
     });
   } catch (error) {

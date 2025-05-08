@@ -7,7 +7,7 @@ import { logDeduplicator } from '../../utils/logDeduplicator';
 import { PerpGlobalStatsError } from '../../errors/perp.errors';
 
 const router = Router();
-const perpGlobalStatsService = new PerpGlobalStatsService();
+const perpGlobalStatsService = PerpGlobalStatsService.getInstance();
 
 // Appliquer le rate limiting et la sanitization
 router.use(marketRateLimiter);
@@ -18,7 +18,8 @@ router.get('/', validateRequest(globalPerpStatsQuerySchema), (async (_req: Reque
     logDeduplicator.info('Perp global stats retrieved successfully', { 
       totalOpenInterest: stats.totalOpenInterest,
       totalVolume24h: stats.totalVolume24h,
-      totalPairs: stats.totalPairs
+      totalPairs: stats.totalPairs,
+      hlpTvl: stats.hlpTvl
     });
     res.json(stats);
   } catch (error) {

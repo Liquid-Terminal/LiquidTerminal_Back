@@ -8,12 +8,21 @@ import { MarketDataError, RateLimitError } from '../../errors/spot.errors';
 import { logDeduplicator } from '../../utils/logDeduplicator';
 
 const router = Router();
-const marketService = new SpotAssetContextService();
+const marketService = SpotAssetContextService.getInstance();
 
 // Appliquer le rate limiting et la sanitization
 router.use(marketRateLimiter);
 
-// Appliquer la validation des requêtes
+/**
+ * @route GET /market/spot
+ * @description Récupère les données de marché spot avec pagination
+ * @query sortBy - Critère de tri ('volume', 'marketCap', 'change24h', par défaut 'volume')
+ * @query sortOrder - Ordre de tri ('asc', 'desc', par défaut 'desc')
+ * @query limit - Nombre d'éléments par page (1-100, par défaut 20)
+ * @query page - Numéro de page (commence à 1, par défaut 1)
+ * @query token - Filtre par nom de token
+ * @query pair - Filtre par nom de paire
+ */
 router.get('/', validateRequest(marketSpotQuerySchema), async (req: Request, res: Response): Promise<void> => {
   try {
     const { 

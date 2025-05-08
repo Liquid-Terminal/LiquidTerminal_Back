@@ -1,10 +1,12 @@
 import { BaseService } from '../../core/crudBase.service';
 import { walletRepository } from '../../repositories/wallet.repository';
+import { userWalletRepository } from '../../repositories/userWallet.repository';
 import { 
   WalletCreateInput, 
   WalletUpdateInput, 
   WalletResponse,
-  WalletQueryParams 
+  WalletQueryParams,
+  UserWalletResponse 
 } from '../../types/wallet.types';
 import { 
   WalletNotFoundError, 
@@ -47,24 +49,18 @@ export class WalletService extends BaseService<WalletResponse, WalletCreateInput
   }
 
   protected async checkExistsForUpdate(id: number, data: WalletUpdateInput): Promise<boolean> {
-    if (data.address) {
-      const wallet = await this.repository.findById(id);
-      if (wallet && data.address !== wallet.address) {
-        return await this.repository.existsByAddress(data.address);
-      }
-    }
-    return false;
+    return false; // Nous ne permettons pas de modifier l'adresse
   }
 
   protected async checkCanDelete(id: number): Promise<void> {
-    // Vérifications spécifiques pour la suppression d'un wallet
-    return;
+    // Vérifier si le wallet a des transactions
+    // Cette méthode sera implémentée plus tard
   }
 
   /**
    * Ajoute un wallet pour un utilisateur
    */
-  public async addWallet(privyUserId: string, address: string) {
+  public async addWallet(privyUserId: string, address: string, name?: string) {
     try {
       // Validation de l'adresse Ethereum
       if (!this.validateEthereumAddress(address)) {
@@ -72,9 +68,10 @@ export class WalletService extends BaseService<WalletResponse, WalletCreateInput
       }
 
       // Utiliser le service de transaction pour l'ajout du wallet
-      const wallet = await transactionService.execute(async (tx) => {
-        // Configurer le repository pour utiliser le client transactionnel
+      const userWallet = await transactionService.execute(async (tx) => {
+        // Configurer les repositories pour utiliser le client transactionnel
         this.repository.setPrismaClient(tx);
+        userWalletRepository.setPrismaClient(tx);
 
         // Vérifier si l'utilisateur existe
         const user = await tx.user.findUnique({
@@ -86,14 +83,27 @@ export class WalletService extends BaseService<WalletResponse, WalletCreateInput
         }
 
         // Vérifier si le wallet existe déjà
-        if (await this.repository.existsByAddress(address)) {
-          throw new WalletAlreadyExistsError();
+        let wallet = await this.repository.findByAddress(address);
+        
+        if (!wallet) {
+          // Créer le wallet s'il n'existe pas
+          wallet = await this.repository.create({
+            address,
+            name
+          });
+        } else {
+          // Vérifier si l'utilisateur a déjà ce wallet
+          const existingUserWallet = await userWalletRepository.findByUserAndWallet(user.id, wallet.id);
+          if (existingUserWallet) {
+            throw new WalletAlreadyExistsError();
+          }
         }
 
-        // Créer le wallet
-        return this.repository.create({
-          address,
-          userId: user.id
+        // Créer l'association utilisateur-wallet
+        return await userWalletRepository.create({
+          userId: user.id,
+          walletId: wallet.id,
+          name
         });
       });
 
@@ -102,10 +112,11 @@ export class WalletService extends BaseService<WalletResponse, WalletCreateInput
 
       logDeduplicator.info('Wallet added successfully', { 
         address, 
-        userId: wallet.userId 
+        userId: userWallet.userId,
+        walletId: userWallet.walletId
       });
 
-      return wallet;
+      return userWallet;
     } catch (error) {
       if (error instanceof WalletAlreadyExistsError || 
           error instanceof UserNotFoundError ||
@@ -115,7 +126,8 @@ export class WalletService extends BaseService<WalletResponse, WalletCreateInput
       logDeduplicator.error('Error adding wallet:', { 
         error, 
         privyUserId, 
-        address 
+        address,
+        name
       });
       throw error;
     }
@@ -130,30 +142,44 @@ export class WalletService extends BaseService<WalletResponse, WalletCreateInput
       
       // Utiliser le service de transaction pour la récupération des wallets
       const result = await transactionService.execute(async (tx) => {
-        // Configurer le repository pour utiliser le client transactionnel
+        // Configurer les repositories pour utiliser le client transactionnel
         this.repository.setPrismaClient(tx);
+        userWalletRepository.setPrismaClient(tx);
 
-        const [wallets, total] = await Promise.all([
-          this.repository.findByUser(userId, { skip, take: limit }),
-          this.repository.countByUser(userId)
+        const [userWallets, total] = await Promise.all([
+          userWalletRepository.findByUser(userId, { skip, take: limit }),
+          userWalletRepository.countByUser(userId)
         ]);
 
-        return { wallets, total };
+        return { userWallets, total };
       });
 
-      // Réinitialiser le client Prisma
+      // Réinitialiser les clients Prisma
       this.repository.resetPrismaClient();
+      userWalletRepository.resetPrismaClient();
 
       logDeduplicator.info('Wallets retrieved successfully', { 
         userId, 
-        count: result.wallets.length,
+        count: result.userWallets.length,
         total: result.total,
         page,
         limit
       });
 
       return {
-        data: result.wallets,
+        data: result.userWallets.map(uw => ({
+          id: uw.id,
+          userId: uw.userId,
+          walletId: uw.walletId,
+          name: uw.name,
+          addedAt: uw.addedAt,
+          wallet: {
+            id: uw.Wallet.id,
+            address: uw.Wallet.address,
+            name: uw.Wallet.name,
+            addedAt: uw.Wallet.addedAt
+          }
+        })),
         pagination: {
           total: result.total,
           page,
@@ -165,6 +191,107 @@ export class WalletService extends BaseService<WalletResponse, WalletCreateInput
       logDeduplicator.error('Error retrieving wallets:', { 
         error, 
         userId 
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Supprime un wallet d'un utilisateur
+   * @param walletId ID du wallet à supprimer
+   * @param userId ID de l'utilisateur
+   * @throws Erreur si le wallet n'est pas trouvé
+   */
+  public async removeWalletFromUser(walletId: number, userId: number): Promise<void> {
+    try {
+      // Utiliser le service de transaction pour la suppression
+      await transactionService.execute(async (tx) => {
+        // Configurer les repositories pour utiliser le client transactionnel
+        this.repository.setPrismaClient(tx);
+        userWalletRepository.setPrismaClient(tx);
+        
+        // Vérifier si l'association existe
+        const userWallet = await userWalletRepository.findByUserAndWallet(userId, walletId);
+        if (!userWallet) {
+          throw new WalletNotFoundError();
+        }
+
+        // Supprimer l'association
+        await userWalletRepository.delete(userWallet.id);
+      });
+
+      // Réinitialiser les clients Prisma
+      this.repository.resetPrismaClient();
+      userWalletRepository.resetPrismaClient();
+
+      // Invalider le cache
+      await this.invalidateEntityListCache();
+
+      logDeduplicator.info('Wallet removed from user successfully', { walletId, userId });
+    } catch (error) {
+      if (error instanceof WalletNotFoundError) {
+        throw error;
+      }
+      logDeduplicator.error('Error removing wallet from user:', { error, walletId, userId });
+      throw error;
+    }
+  }
+
+  /**
+   * Met à jour le nom d'un wallet pour un utilisateur spécifique
+   * @param userId ID de l'utilisateur
+   * @param walletId ID du wallet
+   * @param name Nouveau nom du wallet
+   * @returns Le UserWallet mis à jour
+   */
+  public async updateWalletName(userId: number, walletId: number, name: string) {
+    try {
+      // Valider le nom
+      const validationResult = walletUpdateSchema.shape.name.safeParse(name);
+      if (!validationResult.success) {
+        throw new WalletValidationError('Invalid wallet name');
+      }
+
+      // Utiliser le service de transaction pour la mise à jour
+      const updatedUserWallet = await transactionService.execute(async (tx) => {
+        // Configurer les repositories pour utiliser le client transactionnel
+        this.repository.setPrismaClient(tx);
+        userWalletRepository.setPrismaClient(tx);
+        
+        // Vérifier si l'association existe
+        const userWallet = await userWalletRepository.findByUserAndWallet(userId, walletId);
+        if (!userWallet) {
+          throw new WalletNotFoundError();
+        }
+
+        // Mettre à jour le nom
+        return await userWalletRepository.updateName(userWallet.id, name);
+      });
+
+      // Réinitialiser les clients Prisma
+      this.repository.resetPrismaClient();
+      userWalletRepository.resetPrismaClient();
+
+      // Invalider le cache
+      await this.invalidateEntityListCache();
+
+      logDeduplicator.info('Wallet name updated successfully', { 
+        userId, 
+        walletId, 
+        name 
+      });
+
+      return updatedUserWallet;
+    } catch (error) {
+      if (error instanceof WalletNotFoundError || 
+          error instanceof WalletValidationError) {
+        throw error;
+      }
+      logDeduplicator.error('Error updating wallet name:', { 
+        error, 
+        userId, 
+        walletId, 
+        name 
       });
       throw error;
     }

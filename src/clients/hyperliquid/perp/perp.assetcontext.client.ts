@@ -73,23 +73,27 @@ export class HyperliquidPerpClient extends BaseApiService {
         })
       );
       
-      const marketsData = meta.universe.map((market: PerpMarket, index: number) => {
-        const assetContext = assetContexts[index];
-        const currentPrice = Number(assetContext.markPx);
-        const prevDayPrice = Number(assetContext.prevDayPx);
-        const change = prevDayPrice !== 0 ? Number((((currentPrice - prevDayPrice) / prevDayPrice) * 100).toFixed(2)) : 0;
+      const marketsData = meta.universe
+        .map((market: PerpMarket, index: number) => {
+          const assetContext = assetContexts[index];
+          const currentPrice = Number(assetContext.markPx);
+          const prevDayPrice = Number(assetContext.prevDayPx);
+          const change = prevDayPrice !== 0 ? Number((((currentPrice - prevDayPrice) / prevDayPrice) * 100).toFixed(2)) : 0;
+          const volume = Number(assetContext.dayNtlVlm);
 
-        return {
-          name: market.name,
-          price: currentPrice,
-          change24h: change,
-          volume: Number(assetContext.dayNtlVlm),
-          openInterest: Number(assetContext.openInterest),
-          funding: Number(assetContext.funding),
-          maxLeverage: market.maxLeverage,
-          onlyIsolated: market.onlyIsolated || false
-        };
-      });
+          return {
+            name: market.name,
+            logo: `https://app.hyperliquid.xyz/coins/${market.name}.svg`,
+            price: currentPrice,
+            change24h: change,
+            volume: volume,
+            openInterest: Number(assetContext.openInterest),
+            funding: Number(assetContext.funding),
+            maxLeverage: market.maxLeverage,
+            onlyIsolated: market.onlyIsolated || false
+          };
+        })
+        .filter(market => market.volume > 0); // Filtrer les tokens avec un volume de 0
 
       await Promise.all([
         redisService.set(this.CACHE_KEY_RAW, JSON.stringify([meta, assetContexts])),
@@ -103,7 +107,8 @@ export class HyperliquidPerpClient extends BaseApiService {
       }));
       this.lastUpdate = now;
       logDeduplicator.info('Perp data updated & cached', {
-        markets: marketsData.length
+        markets: marketsData.length,
+        filteredOut: meta.universe.length - marketsData.length
       });
     } catch (error) {
       logDeduplicator.error('Failed to update perp data:', { error });

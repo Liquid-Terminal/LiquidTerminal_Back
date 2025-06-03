@@ -1,6 +1,6 @@
 import { DashboardGlobalStats } from '../types/market.types';
 import { ValidatorSummary } from '../types/staking.types';
-import { GlobalStatsService } from './globalStats.service';
+import { HyperliquidGlobalStatsClient } from '../clients/hyperliquid/globalstats.client';
 import { BridgedUsdcService } from './bridgedUsdc.service';
 import { ValidatorSummariesService } from './staking/validator.service';
 import { VaultsService } from './vault/vaults.service';
@@ -8,14 +8,14 @@ import { logDeduplicator } from '../utils/logDeduplicator';
 
 
 export class DashboardGlobalStatsService {
-  private globalStatsService: GlobalStatsService;
+  private globalStatsClient: HyperliquidGlobalStatsClient;
   private bridgedUsdcService: BridgedUsdcService;
   private validatorSummariesService: ValidatorSummariesService;
   private vaultsService: VaultsService;
   private readonly HYPE_DECIMALS = 8;
 
   constructor() {
-    this.globalStatsService = new GlobalStatsService();
+    this.globalStatsClient = HyperliquidGlobalStatsClient.getInstance();
     this.bridgedUsdcService = new BridgedUsdcService();
     this.validatorSummariesService = ValidatorSummariesService.getInstance();
     this.vaultsService = VaultsService.getInstance();
@@ -32,7 +32,7 @@ export class DashboardGlobalStatsService {
     try {
       // Récupérer les données en parallèle
       const [globalStats, bridgedUsdcData, validatorSummaries, vaultsData] = await Promise.all([
-        this.globalStatsService.getGlobalStats(),
+        this.globalStatsClient.getGlobalStats(),
         this.bridgedUsdcService.getBridgedUsdcData(),
         this.validatorSummariesService.getValidatorSummaries(),
         this.vaultsService.getVaultsList()
@@ -46,8 +46,8 @@ export class DashboardGlobalStatsService {
       const latestBridgedUsdc = bridgedUsdcData[bridgedUsdcData.length - 1]?.totalCirculating.peggedUSD || 0;
 
       return {
-        numberOfUsers: globalStats?.nUsers || 0,
-        dailyVolume: globalStats?.dailyVolume || 0,
+        numberOfUsers: globalStats.nUsers,
+        dailyVolume: globalStats.dailyVolume,
         bridgedUsdc: latestBridgedUsdc,
         totalHypeStake: totalHypeStake,
         vaultsTvl: vaultsData.pagination.totalTvl

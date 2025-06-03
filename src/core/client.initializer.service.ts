@@ -9,6 +9,7 @@ import { HypurrscanClient } from '../clients/hypurrscan/auction.client';
 import { SpotUSDCClient } from '../clients/hypurrscan/spotUSDC.client';
 import { HyperliquidSpotStatsClient } from '../clients/hyperliquid/spot/spot.stats.client';
 import { HypurrscanFeesClient } from '../clients/hypurrscan/fees.client';
+import { HyperliquidGlobalStatsClient } from '../clients/hyperliquid/globalstats.client';
 import { logDeduplicator } from '../utils/logDeduplicator';
 
 export class ClientInitializerService {
@@ -127,6 +128,11 @@ export class ClientInitializerService {
       const feesClient = HypurrscanFeesClient.getInstance();
       this.clients.set('fees', feesClient);
       feesClient.startPolling();
+
+      // Initialiser le client Global Stats
+      const globalStatsClient = HyperliquidGlobalStatsClient.getInstance();
+      this.clients.set('globalStats', globalStatsClient);
+      globalStatsClient.startPolling();
 
       // Démarrer le polling pour tous les clients
       this.startAllPolling();

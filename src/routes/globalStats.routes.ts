@@ -1,12 +1,12 @@
 import { Router, Request, Response, RequestHandler } from 'express';
 import { DashboardGlobalStatsService } from '../services/globalStatsLiquid.service';
 import { marketRateLimiter } from '../middleware/apiRateLimiter';
-import { GlobalStatsService } from '../services/globalStats.service';
+import { HyperliquidGlobalStatsClient } from '../clients/hyperliquid/globalstats.client';
 import { logDeduplicator } from '../utils/logDeduplicator';
 
 const router = Router();
 const dashboardGlobalStatsService = new DashboardGlobalStatsService();
-const globalStatsService = new GlobalStatsService();
+const globalStatsClient = HyperliquidGlobalStatsClient.getInstance();
 
 router.use(marketRateLimiter);
 
@@ -28,7 +28,7 @@ router.get('/', (async (_req: Request, res: Response) => {
 
 router.get('/dashboard', async (req, res) => {
   try {
-    const stats = await globalStatsService.getGlobalStats();
+    const stats = await globalStatsClient.getGlobalStats();
     res.json(stats);
   } catch (error) {
     logDeduplicator.error('Error fetching dashboard global stats', {

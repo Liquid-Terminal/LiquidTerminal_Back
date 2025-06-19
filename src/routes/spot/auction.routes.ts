@@ -15,19 +15,26 @@ const auctionService = AuctionPageService.getInstance(spotDeployStateApi);
 // Appliquer la validation des requêtes
 router.get('/', validateRequest(auctionQuerySchema), (async (_req: Request, res: Response) => {
   try {
-    const auctions = await auctionService.getAllAuctions();
+    const auctionsData = await auctionService.getAllAuctions();
+    const totalCount = auctionsData.usdcAuctions.length + auctionsData.hypeAuctions.length;
+    
     logDeduplicator.info('Auctions retrieved successfully', { 
-      count: auctions.length,
-      total: auctions.length,
-      page: 1,
-      limit: auctions.length
+      total: totalCount,
+      usdcCount: auctionsData.usdcAuctions.length,
+      hypeCount: auctionsData.hypeAuctions.length,
+      splitTimestamp: auctionsData.splitTimestamp
     });
-    res.json(auctions);
+    
+    res.json({
+      success: true,
+      data: auctionsData
+    });
   } catch (error) {
     logDeduplicator.error('Error fetching auctions:', { error: error instanceof Error ? error.message : String(error) });
     
     if (error instanceof AuctionError) {
       return res.status(error.statusCode).json({
+        success: false,
         error: error.code,
         message: error.message
       });
@@ -35,12 +42,14 @@ router.get('/', validateRequest(auctionQuerySchema), (async (_req: Request, res:
     
     if (error instanceof InvalidAuctionDataError) {
       return res.status(error.statusCode).json({
+        success: false,
         error: error.code,
         message: error.message
       });
     }
     
     res.status(500).json({
+      success: false,
       error: 'INTERNAL_SERVER_ERROR',
       message: error instanceof Error ? error.message : 'Unknown error'
     });

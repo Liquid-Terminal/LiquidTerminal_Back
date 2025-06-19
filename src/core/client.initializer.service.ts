@@ -15,8 +15,6 @@ import { logDeduplicator } from '../utils/logDeduplicator';
 export class ClientInitializerService {
   private static instance: ClientInitializerService;
   private clients: Map<string, any> = new Map();
-  private pollingIntervals: { [key: string]: NodeJS.Timeout } = {};
-  private POLLING_INTERVAL: number = 10000; // Assuming a default POLLING_INTERVAL
 
   private constructor() {}
 
@@ -38,29 +36,6 @@ export class ClientInitializerService {
       logDeduplicator.info('All clients initialized successfully');
     } catch (error) {
       logDeduplicator.error('Error initializing clients:', { error });
-      throw error;
-    }
-  }
-
-  private async startPolling(name: string, pollingFunction: () => Promise<void>): Promise<void> {
-    try {
-      this.pollingIntervals[name] = setInterval(pollingFunction, this.POLLING_INTERVAL);
-      logDeduplicator.info(`Started polling for ${name} client`);
-    } catch (error) {
-      logDeduplicator.error(`Error starting polling for ${name} client:`, { error });
-      throw error;
-    }
-  }
-
-  private stopPolling(name: string): void {
-    try {
-      if (this.pollingIntervals[name]) {
-        clearInterval(this.pollingIntervals[name]);
-        delete this.pollingIntervals[name];
-        logDeduplicator.info(`Stopped polling for ${name} client`);
-      }
-    } catch (error) {
-      logDeduplicator.error(`Error stopping polling for ${name} client:`, { error });
       throw error;
     }
   }
@@ -106,12 +81,10 @@ export class ClientInitializerService {
       // Initialiser le client Vault
       const vaultClient = HyperliquidVaultClient.getInstance();
       this.clients.set('vault', vaultClient);
-      vaultClient.startPolling();
 
       // Initialiser le client Vaults (liste des vaults)
       const vaultsClient = HyperliquidVaultsClient.getInstance();
       this.clients.set('vaults', vaultsClient);
-      vaultsClient.startPolling();
 
       // Initialiser le client Spot Stats
       const spotStatsClient = HyperliquidSpotStatsClient.getInstance();
@@ -127,12 +100,10 @@ export class ClientInitializerService {
       // Initialiser le client Fees
       const feesClient = HypurrscanFeesClient.getInstance();
       this.clients.set('fees', feesClient);
-      feesClient.startPolling();
 
       // Initialiser le client Global Stats
       const globalStatsClient = HyperliquidGlobalStatsClient.getInstance();
       this.clients.set('globalStats', globalStatsClient);
-      globalStatsClient.startPolling();
 
       // Démarrer le polling pour tous les clients
       this.startAllPolling();

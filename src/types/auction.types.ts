@@ -1,4 +1,3 @@
-
 export type AuctionInfo = {
   time: number;
   deployer: string;
@@ -40,4 +39,15 @@ export interface AuctionTimingInfo {
     startTime: number;
     startGas: string;
   };
+}
+
+export interface AuctionInfoWithCurrency extends AuctionInfo {
+  currency: 'USDC' | 'HYPE';
+  deployGasAbs: string; // Montant absolu (sans le signe négatif pour HYPE)
+}
+
+export interface SplitAuctionsResponse {
+  usdcAuctions: AuctionInfoWithCurrency[];
+  hypeAuctions: AuctionInfoWithCurrency[];
+  splitTimestamp: number; // Le timestamp de transition
 } 

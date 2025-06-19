@@ -1,5 +1,5 @@
 import { SpotDeployStateApiService } from './auctionTiming.service';
-import { AuctionInfo, AuctionTimingInfo } from '../../../types/auction.types';
+import { AuctionInfo, AuctionTimingInfo, AuctionInfoWithCurrency, SplitAuctionsResponse } from '../../../types/auction.types';
 import { Token } from '../../../types/market.types';
 import { redisService } from '../../../core/redis.service';
 import { AuctionError } from '../../../errors/spot.errors';
@@ -7,6 +7,7 @@ import { logDeduplicator } from '../../../utils/logDeduplicator';
 
 export class AuctionPageService {
   private static instance: AuctionPageService;
+  private static readonly HYPE_TRANSITION_TIMESTAMP = 1748277000047;
 
   private readonly UPDATE_CHANNEL = 'hypurrscan:auctions:updated';
   private readonly CACHE_KEY = 'hypurrscan:auctions';
@@ -38,7 +39,38 @@ export class AuctionPageService {
     });
   }
 
-  public async getAllAuctions(): Promise<AuctionInfo[]> {
+  private processAuctionData(auction: AuctionInfo): AuctionInfoWithCurrency {
+    const isHype = auction.time >= AuctionPageService.HYPE_TRANSITION_TIMESTAMP;
+    const deployGasNumber = parseFloat(auction.deployGas);
+    
+    return {
+      ...auction,
+      currency: isHype ? 'HYPE' : 'USDC',
+      deployGasAbs: Math.abs(deployGasNumber).toString(),
+      deployGas: isHype ? Math.abs(deployGasNumber).toString() : auction.deployGas
+    };
+  }
+
+  private validateCurrencyTransition(auctions: AuctionInfoWithCurrency[]): void {
+    const transitionAuction = auctions.find(a => a.time === AuctionPageService.HYPE_TRANSITION_TIMESTAMP);
+    
+    if (transitionAuction && parseFloat(transitionAuction.deployGas) > 0) {
+      logDeduplicator.warn('Unexpected positive value at HYPE transition', {
+        auction: transitionAuction
+      });
+    }
+
+    // Vérification supplémentaire pour les valeurs négatives
+    const negativeBeforeTransition = auctions
+      .filter(a => a.time < AuctionPageService.HYPE_TRANSITION_TIMESTAMP)
+      .some(a => parseFloat(a.deployGas) < 0);
+
+    if (negativeBeforeTransition) {
+      logDeduplicator.warn('Negative values found before HYPE transition');
+    }
+  }
+
+  public async getAllAuctions(): Promise<SplitAuctionsResponse> {
     try {
       const cachedData = await redisService.get(this.CACHE_KEY);
       if (!cachedData) {
@@ -60,24 +92,48 @@ export class AuctionPageService {
         throw new AuctionError('Invalid spot data format');
       }
 
+      // Enrichir les données avec les informations de token
       const enrichedAuctions = auctions.map(auction => {
         const token = spotContext.tokens.find((t: Token) => t.name === auction.name);
-        if (token) {
-          return {
-            ...auction,
-            tokenId: token.tokenId,
-            index: token.index
-          };
-        }
-        return auction;
+        return {
+          ...auction,
+          tokenId: token?.tokenId,
+          index: token?.index
+        };
       });
 
-      logDeduplicator.info('Auctions retrieved successfully', { 
-        count: enrichedAuctions.length,
-        auctionsWithTokens: enrichedAuctions.filter(a => a.tokenId).length
+      // Traiter et séparer les auctions
+      const processedAuctions = enrichedAuctions
+        .map(auction => this.processAuctionData(auction))
+        .sort((a, b) => a.time - b.time);
+
+      // Valider la transition
+      this.validateCurrencyTransition(processedAuctions);
+
+      // Séparer en deux tableaux
+      const { usdcAuctions, hypeAuctions } = processedAuctions.reduce(
+        (acc, auction) => {
+          if (auction.currency === 'USDC') {
+            acc.usdcAuctions.push(auction);
+          } else {
+            acc.hypeAuctions.push(auction);
+          }
+          return acc;
+        },
+        { usdcAuctions: [] as AuctionInfoWithCurrency[], hypeAuctions: [] as AuctionInfoWithCurrency[] }
+      );
+
+      logDeduplicator.info('Auctions split successfully', {
+        totalCount: processedAuctions.length,
+        usdcCount: usdcAuctions.length,
+        hypeCount: hypeAuctions.length
       });
 
-      return enrichedAuctions;
+      return {
+        usdcAuctions,
+        hypeAuctions,
+        splitTimestamp: AuctionPageService.HYPE_TRANSITION_TIMESTAMP
+      };
     } catch (error) {
       if (error instanceof AuctionError) {
         throw error;

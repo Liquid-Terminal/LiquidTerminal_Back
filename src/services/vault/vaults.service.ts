@@ -122,7 +122,8 @@ export class VaultsService {
           page,
           limit,
           totalPages: Math.ceil(filteredVaults.length / limit),
-          totalTvl
+          totalTvl,
+          vaultsNumber: vaults.length
         }
       };
     } catch (error) {

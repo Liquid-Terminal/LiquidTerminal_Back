@@ -124,12 +124,31 @@ export class FeesService {
   private findClosestEntry(data: FeeData[], targetTime: number): FeeData | null {
     if (!data.length) return null;
 
-    return data.reduce((closest, current) => {
-      if (!closest) return current;
-      return Math.abs(current.time - targetTime) < Math.abs(closest.time - targetTime) 
-        ? current 
-        : closest;
+    // Trier les données par timestamp
+    const sortedData = [...data].sort((a, b) => a.time - b.time);
+
+    // Trouver la dernière entrée qui n'est pas plus récente que targetTime
+    let closestEntry = null;
+    for (const entry of sortedData) {
+      if (entry.time <= targetTime) {
+        closestEntry = entry;
+      } else {
+        break;
+      }
+    }
+
+    // Si aucune entrée n'est trouvée avant targetTime, prendre la plus ancienne
+    if (!closestEntry && sortedData.length > 0) {
+      closestEntry = sortedData[0];
+    }
+
+    logDeduplicator.info('Found closest entry', {
+      targetTime,
+      foundTime: closestEntry?.time,
+      difference: closestEntry ? Math.abs(closestEntry.time - targetTime) : null
     });
+
+    return closestEntry;
   }
 
   private calculateFeeDifference(
@@ -165,6 +184,7 @@ export class FeesService {
     const oneHourAgoInSeconds = nowInSeconds - (60 * 60);
 
     const sortedData = [...feesData].sort((a, b) => a.time - b.time);
+    const latestDataTime = sortedData[sortedData.length - 1]?.time;
 
     logDeduplicator.info('Calculating fees with time ranges', {
       nowInSeconds,
@@ -172,9 +192,41 @@ export class FeesService {
       oneHourAgoInSeconds,
       dataPoints: sortedData.length,
       oldestTime: sortedData[0]?.time,
-      newestTime: sortedData[sortedData.length - 1]?.time
+      newestTime: latestDataTime,
+      timeSinceLastData: nowInSeconds - latestDataTime
     });
 
+    // Si nos données sont trop vieilles (plus de 2h), on utilise les dernières données disponibles
+    if (nowInSeconds - latestDataTime > 7200) {
+      const latestEntry = sortedData[sortedData.length - 1];
+      const prevDayEntry = this.findClosestEntry(sortedData, latestDataTime - (24 * 60 * 60));
+      const prevHourEntry = this.findClosestEntry(sortedData, latestDataTime - (60 * 60));
+
+      if (!latestEntry) {
+        throw new FeesError('No fee data available');
+      }
+
+      const dailyFees = this.calculateFeeDifference(prevDayEntry, latestEntry, 'total_fees');
+      const dailySpotFees = this.calculateFeeDifference(prevDayEntry, latestEntry, 'total_spot_fees');
+      const hourlyFees = this.calculateFeeDifference(prevHourEntry, latestEntry, 'total_fees');
+      const hourlySpotFees = this.calculateFeeDifference(prevHourEntry, latestEntry, 'total_spot_fees');
+
+      logDeduplicator.warn('Using old data for fee calculations', {
+        latestDataTime,
+        timeSinceLastData: nowInSeconds - latestDataTime,
+        dailyFees,
+        hourlyFees
+      });
+
+      return {
+        dailyFees: this.convertToUSD(dailyFees),
+        dailySpotFees: this.convertToUSD(dailySpotFees),
+        hourlyFees: this.convertToUSD(hourlyFees),
+        hourlySpotFees: this.convertToUSD(hourlySpotFees)
+      };
+    }
+
+    // Sinon, on utilise la logique normale
     const latestEntry = this.findClosestEntry(sortedData, nowInSeconds);
     const dayStartEntry = this.findClosestEntry(sortedData, oneDayAgoInSeconds);
     const hourStartEntry = this.findClosestEntry(sortedData, oneHourAgoInSeconds);

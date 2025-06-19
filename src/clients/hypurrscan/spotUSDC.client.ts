@@ -9,16 +9,15 @@ import { RateLimiterService } from '../../core/hyperLiquid.ratelimiter.service';
 export class SpotUSDCClient extends BaseApiService {
   private static instance: SpotUSDCClient;
   private static readonly API_URL = 'https://api.hypurrscan.io';
-  private static readonly REQUEST_WEIGHT = 1;
-  private static readonly MAX_WEIGHT_PER_MINUTE = 1000;
-  private static readonly UPDATE_INTERVAL = 60 * 60 * 1000; // 1 heure en millisecondes
-  private static readonly CACHE_KEY = 'hypurrscan:spotUSDC:data';
-  private static readonly UPDATE_CHANNEL = 'hypurrscan:spotUSDC:updated';
+  private static readonly REQUEST_WEIGHT = 20;
+  private static readonly MAX_WEIGHT_PER_MINUTE = 1200;
 
+  private readonly CACHE_KEY_RAW = 'spotUSDC:raw_data';
+  private readonly UPDATE_CHANNEL = 'spotUSDC:data:updated';
+  private readonly UPDATE_INTERVAL = 30000;
+  private pollingInterval: NodeJS.Timeout | null = null;
   private circuitBreaker: CircuitBreakerService;
   private rateLimiter: RateLimiterService;
-  private lastUpdate: number = 0;
-  private pollingInterval: NodeJS.Timeout | null = null;
 
   private constructor() {
     super(SpotUSDCClient.API_URL);
@@ -43,17 +42,15 @@ export class SpotUSDCClient extends BaseApiService {
     }
 
     logDeduplicator.info('Starting SpotUSDC polling');
-    // Faire une première mise à jour immédiate
-    this.updateSpotUSDCData().catch(error => {
-      logDeduplicator.error('Error in initial SpotUSDC update:', { error });
-    });
+    this.updateSpotUSDCData().catch(err =>
+      logDeduplicator.error('Error in initial SpotUSDC update:', { error: err })
+    );
 
-    // Démarrer le polling régulier
     this.pollingInterval = setInterval(() => {
-      this.updateSpotUSDCData().catch(error => {
-        logDeduplicator.error('Error in SpotUSDC polling:', { error });
-      });
-    }, SpotUSDCClient.UPDATE_INTERVAL);
+      this.updateSpotUSDCData().catch(err =>
+        logDeduplicator.error('Error in SpotUSDC polling:', { error: err })
+      );
+    }, this.UPDATE_INTERVAL);
   }
 
   public stopPolling(): void {
@@ -71,13 +68,12 @@ export class SpotUSDCClient extends BaseApiService {
       );
       
       if (data) {
-        await redisService.set(SpotUSDCClient.CACHE_KEY, JSON.stringify(data));
-        const now = Date.now();
-        await redisService.publish(SpotUSDCClient.UPDATE_CHANNEL, JSON.stringify({
+        await redisService.set(this.CACHE_KEY_RAW, JSON.stringify(data));
+        await redisService.publish(this.UPDATE_CHANNEL, JSON.stringify({
           type: 'DATA_UPDATED',
-          timestamp: now
+          timestamp: Date.now()
         }));
-        this.lastUpdate = now;
+
         logDeduplicator.info('SpotUSDC data updated successfully', {
           lastUpdate: data.lastUpdate,
           totalSpotUSDC: data.totalSpotUSDC
@@ -85,22 +81,17 @@ export class SpotUSDCClient extends BaseApiService {
       }
     } catch (error) {
       logDeduplicator.error('Failed to update SpotUSDC data:', { error });
-      throw error;
     }
   }
 
-  /**
-   * Récupère les données USDC spot sur Hyperliquid
-   */
   public async getSpotUSDCData(): Promise<SpotUSDCData> {
     try {
-      const cachedData = await redisService.get(SpotUSDCClient.CACHE_KEY);
+      const cachedData = await redisService.get(this.CACHE_KEY_RAW);
       
       if (cachedData) {
         return JSON.parse(cachedData) as SpotUSDCData;
       }
       
-      // Si pas de données en cache, essayer de les récupérer directement
       return await this.circuitBreaker.execute(() => 
         this.get<SpotUSDCData>('/spotUSDC')
       );
@@ -110,18 +101,11 @@ export class SpotUSDCClient extends BaseApiService {
     }
   }
 
-  /**
-   * Vérifie si une requête peut être effectuée selon les rate limits
-   * @param ip Adresse IP du client
-   */
-  public checkRateLimit(ip: string): boolean {
-    return this.rateLimiter.checkRateLimit(ip);
-  }
-
-  /**
-   * Retourne le poids de la requête pour le rate limiting
-   */
   public static getRequestWeight(): number {
     return SpotUSDCClient.REQUEST_WEIGHT;
+  }
+
+  public checkRateLimit(ip: string): boolean {
+    return this.rateLimiter.checkRateLimit(ip);
   }
 } 

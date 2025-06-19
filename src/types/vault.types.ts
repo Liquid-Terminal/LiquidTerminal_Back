@@ -107,6 +107,7 @@ export interface VaultsResponse {
     limit: number;
     totalPages: number;
     totalTvl: number;
+    vaultsNumber: number;
   };
 }
 

@@ -8,8 +8,8 @@ const JWKS_URL = process.env.JWKS_URL!;
 
 export class AuthService {
   private static instance: AuthService;
-  
-  private constructor() {}
+
+  private constructor() { }
 
   public static getInstance(): AuthService {
     if (!AuthService.instance) {
@@ -21,13 +21,13 @@ export class AuthService {
   private async getSigningKey(header: { kid: string }): Promise<CryptoKey> {
     try {
       logDeduplicator.info('Fetching JWKS', { kid: header.kid });
-      
+
       const response = await fetch(JWKS_URL);
       if (!response.ok) {
-        logDeduplicator.error('Error fetching JWKS', { 
-          status: response.status, 
+        logDeduplicator.error('Error fetching JWKS', {
+          status: response.status,
           statusText: response.statusText,
-          kid: header.kid 
+          kid: header.kid
         });
         throw new JWKSError("Error fetching JWKS");
       }
@@ -36,7 +36,7 @@ export class AuthService {
       const signingKey = jwks.keys.find((key: { kid: string }) => key.kid === header.kid);
 
       if (!signingKey) {
-        logDeduplicator.error('Signing key not found', { 
+        logDeduplicator.error('Signing key not found', {
           kid: header.kid,
           availableKids: jwks.keys.map((k: { kid: string }) => k.kid)
         });
@@ -50,10 +50,10 @@ export class AuthService {
       if (error instanceof JWKSError || error instanceof SigningKeyError) {
         throw error;
       }
-      logDeduplicator.error('Unexpected error during JWKS retrieval', { 
+      logDeduplicator.error('Unexpected error during JWKS retrieval', {
         error: error instanceof Error ? error.message : String(error),
         stack: error instanceof Error ? error.stack : undefined,
-        kid: header.kid 
+        kid: header.kid
       });
       throw new JWKSError("Unexpected error during JWKS retrieval");
     }
@@ -62,7 +62,7 @@ export class AuthService {
   public async verifyToken(token: string): Promise<PrivyPayload> {
     try {
       logDeduplicator.info('Verifying token');
-      
+
       const decodedHeader = JSON.parse(Buffer.from(token.split(".")[0], "base64").toString());
       const signingKey = await this.getSigningKey(decodedHeader);
 
@@ -72,16 +72,16 @@ export class AuthService {
         audience: process.env.NEXT_PUBLIC_PRIVY_AUDIENCE!,
       });
 
-      logDeduplicator.info('Token verified successfully', { 
+      logDeduplicator.info('Token verified successfully', {
         sub: payload.sub,
-        iss: payload.iss 
+        iss: payload.iss
       });
 
       return payload as PrivyPayload;
     } catch (error) {
-      logDeduplicator.error('Token validation error', { 
+      logDeduplicator.error('Token validation error', {
         error: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : undefined 
+        stack: error instanceof Error ? error.stack : undefined
       });
       throw new TokenValidationError("Invalid or expired token");
     }
@@ -91,17 +91,17 @@ export class AuthService {
     const privyUserId = payload.sub;
 
     if (!privyUserId) {
-      logDeduplicator.error('Missing Privy User ID in token', { 
+      logDeduplicator.error('Missing Privy User ID in token', {
         payload,
-        username 
+        username
       });
       throw new TokenValidationError("Missing Privy User ID in token");
     }
 
     try {
-      logDeduplicator.info('Finding or creating user', { 
+      logDeduplicator.info('Finding or creating user', {
         privyUserId,
-        username 
+        username
       });
 
       const user = await prisma.user.upsert({
@@ -114,8 +114,8 @@ export class AuthService {
           name: username,
         },
       });
-      
-      logDeduplicator.info('User found or created', { 
+
+      logDeduplicator.info('User found or created', {
         userId: user.id,
         privyUserId,
         username,
@@ -124,11 +124,11 @@ export class AuthService {
 
       return user;
     } catch (error) {
-      logDeduplicator.error('Error finding or creating user', { 
+      logDeduplicator.error('Error finding or creating user', {
         error: error instanceof Error ? error.message : String(error),
         stack: error instanceof Error ? error.stack : undefined,
         privyUserId,
-        username 
+        username
       });
       throw new UserNotFoundError("Error finding or creating user");
     }

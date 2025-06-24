@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import { logDeduplicator } from './utils/logDeduplicator';
@@ -41,7 +42,7 @@ app.use(cors({
     // En développement, autoriser toutes les origines
     if (process.env.NODE_ENV === 'development') {
       callback(null, true);
-    } 
+    }
     // En production, vérifier contre les origines autorisées
     else if (!origin || SECURITY_CONSTANTS.ALLOWED_ORIGINS.includes(origin as typeof SECURITY_CONSTANTS.ALLOWED_ORIGINS[number])) {
       callback(null, true);

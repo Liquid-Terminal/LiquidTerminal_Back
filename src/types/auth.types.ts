@@ -1,5 +1,4 @@
 import { JWTPayload } from 'jose';
-import { SocialLinks } from './common.types';
 
 export interface PrivyPayload extends JWTPayload {
   sub: string; // ID utilisateur unique (Privy DID)

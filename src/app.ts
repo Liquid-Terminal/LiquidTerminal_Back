@@ -22,6 +22,7 @@ import feesRoutes from './routes/fees/fees.routes';
 import walletRoutes from './routes/wallet/wallet.routes';
 import projectRoutes from './routes/project/project.routes';
 import categoryRoutes from './routes/project/category.routes';
+import educationalRoutes from './routes/educational';
 
 import validatorRoutes from './routes/staking/validator.routes';
 import trendingValidatorRoutes from './routes/staking/trendingValidator.routes';
@@ -74,6 +75,7 @@ app.use('/market/fees', feesRoutes);
 app.use('/wallet', walletRoutes);
 app.use('/projects', projectRoutes);
 app.use('/categories', categoryRoutes);
+app.use('/educational', educationalRoutes);
 app.use('/staking/validators', validatorRoutes);
 app.use('/staking/validators/trending', trendingValidatorRoutes);
 app.use('/home/globalstats', dashboardGlobalStatsRoutes);

@@ -2,6 +2,8 @@
 export const CACHE_PREFIX = {
   PROJECT: 'project',
   CATEGORY: 'category',
+  EDUCATIONAL_CATEGORY: 'educational_category',
+  EDUCATIONAL_RESOURCE: 'educational_resource',
   MARKET: 'market',
   STATS: 'stats',
   WALLET: 'wallet'
@@ -20,6 +22,11 @@ export const CACHE_KEYS = {
   PROJECT_LIST: (params: string) => `${CACHE_PREFIX.PROJECT}:list:${params}`,
   CATEGORY: (id: number) => `${CACHE_PREFIX.CATEGORY}:${id}`,
   CATEGORY_LIST: (params: string) => `${CACHE_PREFIX.CATEGORY}:list:${params}`,
+  EDUCATIONAL_CATEGORY: (id: number) => `${CACHE_PREFIX.EDUCATIONAL_CATEGORY}:${id}`,
+  EDUCATIONAL_CATEGORY_LIST: (params: string) => `${CACHE_PREFIX.EDUCATIONAL_CATEGORY}:list:${params}`,
+  EDUCATIONAL_RESOURCE: (id: number) => `${CACHE_PREFIX.EDUCATIONAL_RESOURCE}:${id}`,
+  EDUCATIONAL_RESOURCE_LIST: (params: string) => `${CACHE_PREFIX.EDUCATIONAL_RESOURCE}:list:${params}`,
+  EDUCATIONAL_RESOURCE_BY_CATEGORY: (categoryId: number) => `${CACHE_PREFIX.EDUCATIONAL_RESOURCE}:category:${categoryId}`,
   MARKET: (id: string) => `${CACHE_PREFIX.MARKET}:${id}`,
   MARKET_LIST: (params: string) => `${CACHE_PREFIX.MARKET}:list:${params}`,
   STATS: (id: string) => `${CACHE_PREFIX.STATS}:${id}`,

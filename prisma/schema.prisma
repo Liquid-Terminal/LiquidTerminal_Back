@@ -8,14 +8,17 @@ datasource db {
 }
 
 model User {
-  id          Int         @id @default(autoincrement())
-  privyUserId String      @unique
-  name        String?     @db.VarChar(255)
-  email       String?     @unique @db.VarChar(255)
-  createdAt   DateTime    @default(now()) @db.Timestamp(6)
-  verified    Boolean     @default(false)
-  UserWallets UserWallet[]
-  Watchlists  Watchlist[]
+  id                              Int                           @id @default(autoincrement())
+  privyUserId                     String                        @unique
+  name                            String?                       @db.VarChar(255)
+  email                           String?                       @unique @db.VarChar(255)
+  createdAt                       DateTime                      @default(now()) @db.Timestamp(6)
+  verified                        Boolean                       @default(false)
+  UserWallets                     UserWallet[]
+  Watchlists                      Watchlist[]
+  createdEducationalCategories    EducationalCategory[]         @relation("EducationalCategoryCreator")
+  addedEducationalResources       EducationalResource[]         @relation("EducationalResourceCreator")
+  assignedEducationalResources    EducationalResourceCategory[] @relation("EducationalResourceAssigner")
 }
 
 model Wallet {
@@ -76,19 +79,6 @@ model Resource {
   watchlistItems WatchlistItem[]
 }
 
-model Auction {
-  id        Int      @id @default(autoincrement())
-  time      BigInt
-  deployer  String
-  name      String
-  deployGas String
-  tokenId   String   @unique
-  updatedAt DateTime @updatedAt
-  createdAt DateTime @default(now())
-
-  @@index([time])
-}
-
 model UserWallet {
   id        Int      @id @default(autoincrement())
   userId    Int
@@ -99,4 +89,36 @@ model UserWallet {
   Wallet    Wallet   @relation(fields: [walletId], references: [id], onDelete: Cascade)
 
   @@unique([userId, walletId])
+}
+
+model EducationalCategory {
+  id          Int       @id @default(autoincrement())
+  name        String    @unique @db.VarChar(100)
+  description String?   @db.VarChar(255)
+  createdAt   DateTime  @default(now()) @db.Timestamp(6)
+  createdBy   Int
+  creator     User      @relation("EducationalCategoryCreator", fields: [createdBy], references: [id])
+  resources   EducationalResourceCategory[]
+}
+
+model EducationalResource {
+  id          Int       @id @default(autoincrement())
+  url         String    @db.VarChar(500)
+  createdAt   DateTime  @default(now()) @db.Timestamp(6)
+  addedBy     Int
+  creator     User      @relation("EducationalResourceCreator", fields: [addedBy], references: [id])
+  categories  EducationalResourceCategory[]
+}
+
+model EducationalResourceCategory {
+  id         Int                   @id @default(autoincrement())
+  resourceId Int
+  categoryId Int
+  assignedAt DateTime              @default(now()) @db.Timestamp(6)
+  assignedBy Int?
+  resource   EducationalResource   @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+  category   EducationalCategory   @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  assigner   User?                 @relation("EducationalResourceAssigner", fields: [assignedBy], references: [id])
+
+  @@unique([resourceId, categoryId])
 }

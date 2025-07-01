@@ -81,6 +81,8 @@ export class ValidatorSummariesService {
         
         return {
           name: validator.name,
+          validator: validator.validator,
+          description: validator.description,
           stake: Number(validator.stake) / 100000000,
           apr: predictedApr,
           commission: commission,

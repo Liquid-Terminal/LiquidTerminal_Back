@@ -50,4 +50,6 @@ export interface SplitAuctionsResponse {
   usdcAuctions: AuctionInfoWithCurrency[];
   hypeAuctions: AuctionInfoWithCurrency[];
   splitTimestamp: number; // Le timestamp de transition
+  totalUsdcSpent: string; // Total USDC dépensé
+  totalHypeSpent: string; // Total HYPE dépensé
 } 

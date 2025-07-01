@@ -9,12 +9,12 @@ import { RateLimiterService } from '../../core/hyperLiquid.ratelimiter.service';
 export class SpotUSDCClient extends BaseApiService {
   private static instance: SpotUSDCClient;
   private static readonly API_URL = 'https://api.hypurrscan.io';
-  private static readonly REQUEST_WEIGHT = 20;
-  private static readonly MAX_WEIGHT_PER_MINUTE = 1200;
+  private static readonly REQUEST_WEIGHT = 1;
+  private static readonly MAX_WEIGHT_PER_MINUTE = 1000;
 
   private readonly CACHE_KEY_RAW = 'spotUSDC:raw_data';
   private readonly UPDATE_CHANNEL = 'spotUSDC:data:updated';
-  private readonly UPDATE_INTERVAL = 30000;
+  private readonly UPDATE_INTERVAL = 60000;
   private pollingInterval: NodeJS.Timeout | null = null;
   private circuitBreaker: CircuitBreakerService;
   private rateLimiter: RateLimiterService;

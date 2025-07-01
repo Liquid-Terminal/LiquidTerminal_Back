@@ -123,16 +123,29 @@ export class AuctionPageService {
         { usdcAuctions: [] as AuctionInfoWithCurrency[], hypeAuctions: [] as AuctionInfoWithCurrency[] }
       );
 
+      // Calculer les totaux dépensés
+      const totalUsdcSpent = usdcAuctions
+        .reduce((sum, auction) => sum + parseFloat(auction.deployGas), 0)
+        .toString();
+      
+      const totalHypeSpent = hypeAuctions
+        .reduce((sum, auction) => sum + parseFloat(auction.deployGasAbs), 0)
+        .toString();
+
       logDeduplicator.info('Auctions split successfully', {
         totalCount: processedAuctions.length,
         usdcCount: usdcAuctions.length,
-        hypeCount: hypeAuctions.length
+        hypeCount: hypeAuctions.length,
+        totalUsdcSpent,
+        totalHypeSpent
       });
 
       return {
         usdcAuctions,
         hypeAuctions,
-        splitTimestamp: AuctionPageService.HYPE_TRANSITION_TIMESTAMP
+        splitTimestamp: AuctionPageService.HYPE_TRANSITION_TIMESTAMP,
+        totalUsdcSpent,
+        totalHypeSpent
       };
     } catch (error) {
       if (error instanceof AuctionError) {

@@ -89,6 +89,7 @@ export class HyperliquidSpotClient extends BaseApiService {
           change24h: change,
           liquidity: Number(ctx.midPx),
           supply: Number(ctx.circulatingSupply),
+          marketIndex: market.index,
         };
       }).filter(Boolean) as MarketData[];
 

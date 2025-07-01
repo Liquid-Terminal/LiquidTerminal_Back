@@ -22,7 +22,9 @@ router.get('/', validateRequest(auctionQuerySchema), (async (_req: Request, res:
       total: totalCount,
       usdcCount: auctionsData.usdcAuctions.length,
       hypeCount: auctionsData.hypeAuctions.length,
-      splitTimestamp: auctionsData.splitTimestamp
+      splitTimestamp: auctionsData.splitTimestamp,
+      totalUsdcSpent: auctionsData.totalUsdcSpent,
+      totalHypeSpent: auctionsData.totalHypeSpent
     });
     
     res.json({

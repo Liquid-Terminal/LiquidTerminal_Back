@@ -26,6 +26,7 @@ import educationalRoutes from './routes/educational';
 
 import validatorRoutes from './routes/staking/validator.routes';
 import trendingValidatorRoutes from './routes/staking/trendingValidator.routes';
+import validationRoutes from './routes/staking/validation.routes';
 import dashboardGlobalStatsRoutes from './routes/globalStats.routes';
 
 import healthRoutes from './routes/health.routes';
@@ -78,6 +79,7 @@ app.use('/categories', categoryRoutes);
 app.use('/educational', educationalRoutes);
 app.use('/staking/validators', validatorRoutes);
 app.use('/staking/validators/trending', trendingValidatorRoutes);
+app.use('/staking/validations', validationRoutes);
 app.use('/home/globalstats', dashboardGlobalStatsRoutes);
 app.use('/market/spot/globalstats', globalSpotStatsRoutes);
 app.use('/market/perp/globalstats', globalPerpStatsRoutes);

@@ -51,6 +51,7 @@ export interface MarketData {
     change24h: number;
     liquidity: number;
     supply: number;
+    marketIndex: number;
 }
 
 export interface SpotUSDCData {

@@ -43,6 +43,8 @@ export interface TrendingValidator {
 
 export interface ValidatorDetails {
   name: string;
+  validator: string;
+  description: string;
   stake: number;
   apr: number;
   commission: number;
@@ -54,4 +56,37 @@ export interface ValidatorDetails {
 export interface ValidatorStats {
   predictedApr: string;
   uptimeFraction: string;
+}
+
+// Types pour les actions de validation/delegation
+export interface ValidationAction {
+  type: string;
+  signatureChainId: string;
+  hyperliquidChain: string;
+  validator: string;
+  wei: number;
+  isUndelegate: boolean;
+  nonce: number;
+}
+
+export interface ValidationRawData {
+  time: number;
+  user: string;
+  action: ValidationAction;
+  block: number;
+  hash: string;
+  error: string | null;
+}
+
+export interface ValidationInfo {
+  time: string; // ISO date string
+  user: string;
+  type: 'Delegate' | 'Undelegate';
+  amount: number; // Converti depuis wei (divisé par 10^8)
+  validator: string;
+  hash: string;
+}
+
+export interface ValidationResponse extends BaseResponse {
+  data: ValidationInfo[];
 } 

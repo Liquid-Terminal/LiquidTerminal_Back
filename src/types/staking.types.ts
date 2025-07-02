@@ -87,6 +87,57 @@ export interface ValidationInfo {
   hash: string;
 }
 
+// Types pour la pagination
+export interface PaginationParams {
+  page?: number;
+  limit?: number;
+}
+
+export interface PaginatedResponse<T> {
+  data: T[];
+  pagination: {
+    currentPage: number;
+    totalPages: number;
+    totalItems: number;
+    itemsPerPage: number;
+    hasNextPage: boolean;
+    hasPreviousPage: boolean;
+  };
+}
+
 export interface ValidationResponse extends BaseResponse {
   data: ValidationInfo[];
+  pagination?: {
+    currentPage: number;
+    totalPages: number;
+    totalItems: number;
+    itemsPerPage: number;
+    hasNextPage: boolean;
+    hasPreviousPage: boolean;
+  };
+}
+
+// Types pour la queue de unstaking
+export interface UnstakingQueueRawData {
+  time: number;
+  user: string;
+  wei: number;
+}
+
+export interface UnstakingQueueInfo {
+  time: string; // ISO date string
+  user: string;
+  amount: number; // Converti depuis wei (divisé par 10^8)
+}
+
+export interface UnstakingQueueResponse extends BaseResponse {
+  data: UnstakingQueueInfo[];
+  pagination?: {
+    currentPage: number;
+    totalPages: number;
+    totalItems: number;
+    itemsPerPage: number;
+    hasNextPage: boolean;
+    hasPreviousPage: boolean;
+  };
 } 

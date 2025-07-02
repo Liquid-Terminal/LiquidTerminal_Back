@@ -1,19 +1,19 @@
 import { Router, Request, Response } from 'express';
-import { ValidationService } from '../../services/staking/validation.service';
-import { ValidationResponse } from '../../types/staking.types';
+import { UnstakingService } from '../../services/staking/unstaking.service';
+import { UnstakingQueueResponse } from '../../types/staking.types';
 import { marketRateLimiter } from '../../middleware/apiRateLimiter';
 import { ValidatorError } from '../../errors/staking.errors';
 import { logDeduplicator } from '../../utils/logDeduplicator';
 
 const router = Router();
-const validationService = ValidationService.getInstance();
+const unstakingService = UnstakingService.getInstance();
 
 // Appliquer le rate limiter à toutes les routes
 router.use(marketRateLimiter);
 
 /**
- * @route GET /staking/validations
- * @description Récupère toutes les actions de validation (delegate/undelegate)
+ * @route GET /staking/unstaking-queue
+ * @description Récupère toutes les données de la queue de unstaking
  * @query page - Numéro de page (défaut: 1)
  * @query limit - Nombre d'éléments par page (défaut: 50, max: 200)
  */
@@ -22,16 +22,16 @@ router.get('/', async (req: Request, res: Response) => {
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 50;
     
-    logDeduplicator.info('Fetching validations with pagination', { page, limit });
+    logDeduplicator.info('Fetching unstaking queue with pagination', { page, limit });
 
-    const result = await validationService.getAllValidations({ page, limit });
-    const response: ValidationResponse = {
+    const result = await unstakingService.getUnstakingQueue({ page, limit });
+    const response: UnstakingQueueResponse = {
       success: true,
       data: result.data,
       pagination: result.pagination
     };
 
-    logDeduplicator.info('Validations retrieved successfully', { 
+    logDeduplicator.info('Unstaking queue retrieved successfully', { 
       count: result.data.length,
       page: result.pagination.currentPage,
       totalPages: result.pagination.totalPages,
@@ -40,7 +40,7 @@ router.get('/', async (req: Request, res: Response) => {
     
     res.json(response);
   } catch (error) {
-    logDeduplicator.error('Error in /validations route:', { error });
+    logDeduplicator.error('Error in /unstaking-queue route:', { error });
     
     if (error instanceof ValidatorError) {
       res.status(error.statusCode).json({
@@ -51,7 +51,7 @@ router.get('/', async (req: Request, res: Response) => {
     } else {
       res.status(500).json({
         success: false,
-        error: 'Failed to fetch validations',
+        error: 'Failed to fetch unstaking queue',
         code: 'UNKNOWN_ERROR'
       });
     }

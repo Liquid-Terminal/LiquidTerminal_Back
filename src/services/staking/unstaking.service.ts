@@ -1,18 +1,18 @@
-import { ValidationRawData, ValidationInfo, PaginationParams, PaginatedResponse } from '../../types/staking.types';
-import { HypurrscanValidationClient } from '../../clients/hypurrscan/validation.client';
+import { UnstakingQueueRawData, UnstakingQueueInfo, PaginationParams, PaginatedResponse } from '../../types/staking.types';
+import { HypurrscanUnstakingClient } from '../../clients/hypurrscan/unstaking.client';
 import { redisService } from '../../core/redis.service';
 import { ValidatorError } from '../../errors/staking.errors';
 import { logDeduplicator } from '../../utils/logDeduplicator';
 
-export class ValidationService {
-  private static instance: ValidationService;
-  private readonly validationClient: HypurrscanValidationClient;
-  private readonly UPDATE_CHANNEL = 'hypurrscan:validations:updated';
+export class UnstakingService {
+  private static instance: UnstakingService;
+  private readonly unstakingClient: HypurrscanUnstakingClient;
+  private readonly UPDATE_CHANNEL = 'hypurrscan:unstaking:updated';
   private lastUpdate: number = 0;
 
   // HYPE utilise 8 décimales (10^8)
   private static readonly HYPE_DECIMALS = 8;
-  private static readonly WEI_DIVISOR = Math.pow(10, ValidationService.HYPE_DECIMALS);
+  private static readonly WEI_DIVISOR = Math.pow(10, UnstakingService.HYPE_DECIMALS);
   
   // Pagination par défaut
   private static readonly DEFAULT_PAGE = 1;
@@ -20,7 +20,7 @@ export class ValidationService {
   private static readonly MAX_LIMIT = 200;
 
   private constructor() {
-    this.validationClient = HypurrscanValidationClient.getInstance();
+    this.unstakingClient = HypurrscanUnstakingClient.getInstance();
     this.setupSubscriptions();
   }
 
@@ -30,28 +30,28 @@ export class ValidationService {
         const { type, timestamp } = JSON.parse(message);
         if (type === 'DATA_UPDATED') {
           this.lastUpdate = timestamp;
-          logDeduplicator.info('Validation data updated', { timestamp });
+          logDeduplicator.info('Unstaking queue data updated', { timestamp });
         }
       } catch (error) {
-        logDeduplicator.error('Error processing validation cache update:', { 
+        logDeduplicator.error('Error processing unstaking cache update:', { 
           error: error instanceof Error ? error.message : String(error) 
         });
       }
     });
   }
 
-  public static getInstance(): ValidationService {
-    if (!ValidationService.instance) {
-      ValidationService.instance = new ValidationService();
+  public static getInstance(): UnstakingService {
+    if (!UnstakingService.instance) {
+      UnstakingService.instance = new UnstakingService();
     }
-    return ValidationService.instance;
+    return UnstakingService.instance;
   }
 
   /**
    * Convertit les wei en HYPE (divise par 10^8)
    */
   private weiToHype(wei: number): number {
-    return wei / ValidationService.WEI_DIVISOR;
+    return wei / UnstakingService.WEI_DIVISOR;
   }
 
   /**
@@ -64,16 +64,12 @@ export class ValidationService {
   /**
    * Formate les données brutes en données lisibles
    */
-  private formatValidationData(rawData: ValidationRawData[]): ValidationInfo[] {
+  private formatUnstakingData(rawData: UnstakingQueueRawData[]): UnstakingQueueInfo[] {
     return rawData
-      .filter(item => item.action.type === 'tokenDelegate' && item.error === null)
       .map(item => ({
         time: this.timestampToISOString(item.time),
         user: item.user,
-        type: item.action.isUndelegate ? 'Undelegate' : 'Delegate' as 'Undelegate' | 'Delegate',
-        amount: this.weiToHype(item.action.wei),
-        validator: item.action.validator,
-        hash: item.hash
+        amount: this.weiToHype(item.wei)
       }))
       .sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime()); // Trier par date décroissante
   }
@@ -102,23 +98,23 @@ export class ValidationService {
   }
 
   /**
-   * Récupère toutes les validations formatées avec pagination
+   * Récupère toutes les données de la queue de unstaking formatées avec pagination
    */
-  public async getAllValidations(params: PaginationParams = {}): Promise<PaginatedResponse<ValidationInfo>> {
+  public async getUnstakingQueue(params: PaginationParams = {}): Promise<PaginatedResponse<UnstakingQueueInfo>> {
     try {
-      const page = Math.max(1, params.page || ValidationService.DEFAULT_PAGE);
+      const page = Math.max(1, params.page || UnstakingService.DEFAULT_PAGE);
       const limit = Math.min(
-        ValidationService.MAX_LIMIT, 
-        Math.max(1, params.limit || ValidationService.DEFAULT_LIMIT)
+        UnstakingService.MAX_LIMIT, 
+        Math.max(1, params.limit || UnstakingService.DEFAULT_LIMIT)
       );
 
-      const rawValidations = await this.validationClient.getValidations();
-      const formattedValidations = this.formatValidationData(rawValidations);
-      const paginatedResult = this.paginateData(formattedValidations, page, limit);
+      const rawUnstaking = await this.unstakingClient.getUnstakingQueue();
+      const formattedUnstaking = this.formatUnstakingData(rawUnstaking);
+      const paginatedResult = this.paginateData(formattedUnstaking, page, limit);
 
-      logDeduplicator.info('Validations retrieved and formatted successfully', { 
-        totalCount: rawValidations.length,
-        formattedCount: formattedValidations.length,
+      logDeduplicator.info('Unstaking queue retrieved and formatted successfully', { 
+        totalCount: rawUnstaking.length,
+        formattedCount: formattedUnstaking.length,
         page,
         limit,
         totalPages: paginatedResult.pagination.totalPages,
@@ -127,10 +123,10 @@ export class ValidationService {
 
       return paginatedResult;
     } catch (error) {
-      logDeduplicator.error('Error fetching and formatting validations:', { 
+      logDeduplicator.error('Error fetching and formatting unstaking queue:', { 
         error: error instanceof Error ? error.message : String(error) 
       });
-      throw new ValidatorError('Failed to fetch validation data');
+      throw new ValidatorError('Failed to fetch unstaking queue data');
     }
   }
 
@@ -138,13 +134,13 @@ export class ValidationService {
    * Démarre le polling du client
    */
   public startPolling(): void {
-    this.validationClient.startPolling();
+    this.unstakingClient.startPolling();
   }
 
   /**
    * Arrête le polling du client
    */
   public stopPolling(): void {
-    this.validationClient.stopPolling();
+    this.unstakingClient.stopPolling();
   }
 } 

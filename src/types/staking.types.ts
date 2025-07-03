@@ -28,6 +28,7 @@ export interface TrendingValidatorsResponse extends BaseResponse {
 
 export interface ValidatorDetailsResponse extends BaseResponse {
   data: ValidatorDetails[];
+  stats?: ValidatorOverallStats;
 }
 
 // Types pour les données formatées
@@ -56,6 +57,12 @@ export interface ValidatorDetails {
 export interface ValidatorStats {
   predictedApr: string;
   uptimeFraction: string;
+}
+
+export interface ValidatorOverallStats {
+  totalValidators: number;
+  activeValidators: number;
+  totalHypeStaked: number;
 }
 
 // Types pour les actions de validation/delegation

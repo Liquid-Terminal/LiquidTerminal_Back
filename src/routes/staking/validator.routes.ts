@@ -13,23 +13,27 @@ router.use(marketRateLimiter);
 
 /**
  * @route GET /staking/validators
- * @description Récupère tous les validateurs avec leurs détails
+ * @description Récupère tous les validateurs avec leurs détails et statistiques globales
  * @query sortBy - Critère de tri ('stake' ou 'apr', par défaut 'stake')
  */
 router.get('/', async (req: Request, res: Response) => {
   try {
     const sortBy = (req.query.sortBy as SortBy) || 'stake';
-    logDeduplicator.info('Fetching all validators', { sortBy });
+    logDeduplicator.info('Fetching all validators with stats', { sortBy });
 
-    const validators = await validatorService.getAllValidatorsDetails(sortBy);
+    const { validators, stats } = await validatorService.getAllValidatorsDetails(sortBy);
     const response: ValidatorDetailsResponse = {
       success: true,
-      data: validators
+      data: validators,
+      stats: stats
     };
 
-    logDeduplicator.info('All validators retrieved successfully', { 
+    logDeduplicator.info('All validators and stats retrieved successfully', { 
       count: validators.length,
-      sortBy
+      sortBy,
+      totalValidators: stats.totalValidators,
+      activeValidators: stats.activeValidators,
+      totalHypeStaked: stats.totalHypeStaked
     });
     
     res.json(response);

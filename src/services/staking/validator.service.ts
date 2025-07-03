@@ -1,4 +1,4 @@
-import { ValidatorSummary, ValidatorDetails } from '../../types/staking.types';
+import { ValidatorSummary, ValidatorDetails, ValidatorOverallStats } from '../../types/staking.types';
 import { redisService } from '../../core/redis.service';
 import { ValidatorError } from '../../errors/staking.errors';
 import { logDeduplicator } from '../../utils/logDeduplicator';
@@ -61,9 +61,28 @@ export class ValidatorSummariesService {
   }
 
   /**
+   * Calcule les statistiques globales des validateurs
+   */
+  private calculateOverallStats(validators: ValidatorSummary[]): ValidatorOverallStats {
+    const totalValidators = validators.length;
+    const activeValidators = validators.filter(v => v.isActive).length;
+    
+    // Calculer le total des HYPE stakés (convertir depuis wei, diviser par 10^8)
+    const totalHypeStaked = validators.reduce((total, validator) => {
+      return total + (Number(validator.stake) / 100000000); // Division par 10^8 pour convertir en HYPE
+    }, 0);
+
+    return {
+      totalValidators,
+      activeValidators,
+      totalHypeStaked
+    };
+  }
+
+  /**
    * Récupère tous les validateurs avec leurs détails formatés depuis le cache
    */
-  public async getAllValidatorsDetails(sortBy: SortBy = 'stake'): Promise<ValidatorDetails[]> {
+  public async getAllValidatorsDetails(sortBy: SortBy = 'stake'): Promise<{ validators: ValidatorDetails[], stats: ValidatorOverallStats }> {
     try {
       const validators = await this.getValidatorSummaries();
       
@@ -101,13 +120,22 @@ export class ValidatorSummariesService {
         }
       });
 
+      // Calculer les statistiques globales
+      const stats = this.calculateOverallStats(validators);
+
       logDeduplicator.info('Validator details retrieved and formatted from cache', { 
         count: sortedValidators.length,
         sortBy,
+        totalValidators: stats.totalValidators,
+        activeValidators: stats.activeValidators,
+        totalHypeStaked: stats.totalHypeStaked,
         lastUpdate: this.lastUpdate
       });
 
-      return sortedValidators;
+      return {
+        validators: sortedValidators,
+        stats
+      };
     } catch (error) {
       logDeduplicator.error('Error fetching validator details from cache:', { 
         error: error instanceof Error ? error.message : String(error), 

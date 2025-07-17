@@ -82,6 +82,7 @@ export class HyperliquidPerpClient extends BaseApiService {
           const volume = Number(assetContext.dayNtlVlm);
 
           return {
+            index: index,
             name: market.name,
             logo: `https://app.hyperliquid.xyz/coins/${market.name}.svg`,
             price: currentPrice,

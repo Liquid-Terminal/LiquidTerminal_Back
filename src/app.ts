@@ -29,6 +29,7 @@ import trendingValidatorRoutes from './routes/staking/trendingValidator.routes';
 import validationRoutes from './routes/staking/validation.routes';
 import unstakingRoutes from './routes/staking/unstaking.routes';
 import dashboardGlobalStatsRoutes from './routes/globalStats.routes';
+import leaderboardRoutes from './routes/leaderboard/leaderboard.routes';
 
 import healthRoutes from './routes/health.routes';
 
@@ -85,6 +86,7 @@ app.use('/staking/unstaking-queue', unstakingRoutes);
 app.use('/home/globalstats', dashboardGlobalStatsRoutes);
 app.use('/market/spot/globalstats', globalSpotStatsRoutes);
 app.use('/market/perp/globalstats', globalPerpStatsRoutes);
+app.use('/leaderboard', leaderboardRoutes);
 app.use('/api/health', healthRoutes);
 
 const PORT = process.env.PORT || 3002;

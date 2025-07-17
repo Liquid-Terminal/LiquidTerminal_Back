@@ -12,6 +12,7 @@ import { SpotUSDCClient } from '../clients/hypurrscan/spotUSDC.client';
 import { HyperliquidSpotStatsClient } from '../clients/hyperliquid/spot/spot.stats.client';
 import { HypurrscanFeesClient } from '../clients/hypurrscan/fees.client';
 import { HyperliquidGlobalStatsClient } from '../clients/hyperliquid/globalstats.client';
+import { HyperliquidLeaderboardClient } from '../clients/hyperliquid/leaderboard/leaderboard.client';
 import { logDeduplicator } from '../utils/logDeduplicator';
 
 export class ClientInitializerService {
@@ -112,6 +113,10 @@ export class ClientInitializerService {
       // Initialiser le client Global Stats
       const globalStatsClient = HyperliquidGlobalStatsClient.getInstance();
       this.clients.set('globalStats', globalStatsClient);
+
+      // Initialiser le client Leaderboard
+      const leaderboardClient = HyperliquidLeaderboardClient.getInstance();
+      this.clients.set('leaderboard', leaderboardClient);
 
       // Démarrer le polling pour tous les clients
       this.startAllPolling();

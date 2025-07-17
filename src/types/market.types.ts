@@ -84,6 +84,7 @@ export interface PerpAssetContext {
 }
 
 export interface PerpMarketData {
+    index: number;
     name: string;
     price: number;
     change24h: number;

@@ -4,6 +4,7 @@ import { CircuitBreakerService } from '../../../core/circuit.breaker.service';
 import { RateLimiterService } from '../../../core/hyperLiquid.ratelimiter.service';
 import { redisService } from '../../../core/redis.service';
 import { logDeduplicator } from '../../../utils/logDeduplicator';
+import * as unitTokens from './unit.json';
 
 export class HyperliquidSpotClient extends BaseApiService {
   private static instance: HyperliquidSpotClient;
@@ -80,9 +81,12 @@ export class HyperliquidSpotClient extends BaseApiService {
         const previous = Number(ctx.prevDayPx);
         const change = previous !== 0 ? Number((((current - previous) / previous) * 100).toFixed(2)) : 0;
 
+        const displayName = unitTokens[token.name as keyof typeof unitTokens] || token.name;
+        const logoName = displayName;
+
         return {
-          name: token.name,
-          logo: `https://app.hyperliquid.xyz/coins/${token.name}_USDC.svg`,
+          name: displayName,
+          logo: `https://app.hyperliquid.xyz/coins/${logoName}.svg`,
           price: current,
           marketCap: current * Number(ctx.circulatingSupply),
           volume: Number(ctx.dayNtlVlm),

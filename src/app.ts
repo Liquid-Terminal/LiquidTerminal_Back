@@ -28,6 +28,7 @@ import validatorRoutes from './routes/staking/validator.routes';
 import trendingValidatorRoutes from './routes/staking/trendingValidator.routes';
 import validationRoutes from './routes/staking/validation.routes';
 import unstakingRoutes from './routes/staking/unstaking.routes';
+import stakedHoldersRoutes from './routes/staking/stakedHolders.routes';
 import dashboardGlobalStatsRoutes from './routes/globalStats.routes';
 import leaderboardRoutes from './routes/leaderboard/leaderboard.routes';
 
@@ -83,6 +84,7 @@ app.use('/staking/validators', validatorRoutes);
 app.use('/staking/validators/trending', trendingValidatorRoutes);
 app.use('/staking/validations', validationRoutes);
 app.use('/staking/unstaking-queue', unstakingRoutes);
+app.use('/staking/holders', stakedHoldersRoutes);
 app.use('/home/globalstats', dashboardGlobalStatsRoutes);
 app.use('/market/spot/globalstats', globalSpotStatsRoutes);
 app.use('/market/perp/globalstats', globalPerpStatsRoutes);

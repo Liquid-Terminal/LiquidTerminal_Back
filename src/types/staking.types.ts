@@ -147,4 +147,17 @@ export interface UnstakingQueueResponse extends BaseResponse {
     hasNextPage: boolean;
     hasPreviousPage: boolean;
   };
+}
+
+// Types pour les staked holders
+export interface StakedHoldersData {
+  token: string;
+  lastUpdate: number;
+  holders: Record<string, number>;
+  holdersCount: number;
+}
+
+export interface StakedHolder {
+  address: string;
+  amount: number;
 } 

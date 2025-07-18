@@ -13,6 +13,7 @@ import { HyperliquidSpotStatsClient } from '../clients/hyperliquid/spot/spot.sta
 import { HypurrscanFeesClient } from '../clients/hypurrscan/fees.client';
 import { HyperliquidGlobalStatsClient } from '../clients/hyperliquid/globalstats.client';
 import { HyperliquidLeaderboardClient } from '../clients/hyperliquid/leaderboard/leaderboard.client';
+import { HypurrscanStakedHoldersClient } from '../clients/hypurrscan/stakedHolders.client';
 import { logDeduplicator } from '../utils/logDeduplicator';
 
 export class ClientInitializerService {
@@ -117,6 +118,10 @@ export class ClientInitializerService {
       // Initialiser le client Leaderboard
       const leaderboardClient = HyperliquidLeaderboardClient.getInstance();
       this.clients.set('leaderboard', leaderboardClient);
+
+      // Initialiser le client Staked Holders
+      const stakedHoldersClient = HypurrscanStakedHoldersClient.getInstance();
+      this.clients.set('stakedHolders', stakedHoldersClient);
 
       // Démarrer le polling pour tous les clients
       this.startAllPolling();

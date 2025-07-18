@@ -15,7 +15,6 @@ model User {
   createdAt                       DateTime                      @default(now()) @db.Timestamp(6)
   verified                        Boolean                       @default(false)
   UserWallets                     UserWallet[]
-  Watchlists                      Watchlist[]
   createdEducationalCategories    EducationalCategory[]         @relation("EducationalCategoryCreator")
   addedEducationalResources       EducationalResource[]         @relation("EducationalResourceCreator")
   assignedEducationalResources    EducationalResourceCategory[] @relation("EducationalResourceAssigner")
@@ -51,32 +50,6 @@ model Project {
   website    String?   @db.VarChar(255)
   categoryId Int?
   category   Category? @relation(fields: [categoryId], references: [id])
-}
-
-model Watchlist {
-  id        Int             @id @default(autoincrement())
-  name      String          @db.VarChar(255)
-  createdAt DateTime        @default(now()) @db.Timestamp(6)
-  userId    Int
-  User      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  items     WatchlistItem[]
-}
-
-model WatchlistItem {
-  id          Int       @id @default(autoincrement())
-  addedAt     DateTime  @default(now()) @db.Timestamp(6)
-  resourceId  Int
-  watchlistId Int
-  Resource    Resource  @relation(fields: [resourceId], references: [id], onDelete: Cascade)
-  Watchlist   Watchlist @relation(fields: [watchlistId], references: [id], onDelete: Cascade)
-}
-
-model Resource {
-  id             Int             @id @default(autoincrement())
-  name           String          @db.VarChar(255)
-  type           String          @db.VarChar(50)
-  createdAt      DateTime        @default(now()) @db.Timestamp(6)
-  watchlistItems WatchlistItem[]
 }
 
 model UserWallet {

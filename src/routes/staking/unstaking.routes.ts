@@ -58,4 +58,44 @@ router.get('/', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * @route GET /staking/unstaking-queue/stats
+ * @description Récupère les statistiques d'unstaking par jour
+ */
+router.get('/stats', async (req: Request, res: Response) => {
+  try {
+    logDeduplicator.info('Fetching unstaking stats');
+
+    const stats = await unstakingService.getUnstakingStats();
+
+    logDeduplicator.info('Unstaking stats retrieved successfully', { 
+      totalDays: stats.dailyStats.length,
+      totalTokens: stats.totalStats.totalTokens,
+      totalTransactions: stats.totalStats.totalTransactions,
+      totalUniqueUsers: stats.totalStats.totalUniqueUsers
+    });
+    
+    res.json({
+      success: true,
+      data: stats
+    });
+  } catch (error) {
+    logDeduplicator.error('Error in /unstaking-queue/stats route:', { error });
+    
+    if (error instanceof ValidatorError) {
+      res.status(error.statusCode).json({
+        success: false,
+        error: error.message,
+        code: error.code
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: 'Failed to fetch unstaking stats',
+        code: 'UNKNOWN_ERROR'
+      });
+    }
+  }
+});
+
 export default router; 

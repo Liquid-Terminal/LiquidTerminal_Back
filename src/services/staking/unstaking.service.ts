@@ -131,6 +131,99 @@ export class UnstakingService {
   }
 
   /**
+   * Récupère les statistiques d'unstaking par jour
+   */
+  public async getUnstakingStats(): Promise<{
+    dailyStats: {
+      date: string;
+      totalTokens: number;
+      transactionCount: number;
+      uniqueUsers: number;
+    }[];
+    totalStats: {
+      totalTokens: number;
+      totalTransactions: number;
+      totalUniqueUsers: number;
+      averageTokensPerDay: number;
+      averageTransactionsPerDay: number;
+    };
+    lastUpdate: number;
+  }> {
+    try {
+      const rawUnstaking = await this.unstakingClient.getUnstakingQueue();
+      
+      // Grouper par jour
+      const dailyGroups = new Map<string, {
+        totalTokens: number;
+        transactions: UnstakingQueueRawData[];
+        users: Set<string>;
+      }>();
+
+      rawUnstaking.forEach(item => {
+        const date = new Date(item.time).toISOString().split('T')[0]; // Format YYYY-MM-DD
+        
+        if (!dailyGroups.has(date)) {
+          dailyGroups.set(date, {
+            totalTokens: 0,
+            transactions: [],
+            users: new Set()
+          });
+        }
+        
+        const dayData = dailyGroups.get(date)!;
+        dayData.totalTokens += this.weiToHype(item.wei);
+        dayData.transactions.push(item);
+        dayData.users.add(item.user);
+      });
+
+      // Convertir en array et trier par date
+      const dailyStats = Array.from(dailyGroups.entries())
+        .map(([date, data]) => ({
+          date,
+          totalTokens: Math.round(data.totalTokens * 100) / 100, // Arrondir à 2 décimales
+          transactionCount: data.transactions.length,
+          uniqueUsers: data.users.size
+        }))
+        .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+      // Calculer les statistiques totales
+      const totalTokens = dailyStats.reduce((sum, day) => sum + day.totalTokens, 0);
+      const totalTransactions = dailyStats.reduce((sum, day) => sum + day.transactionCount, 0);
+      const allUsers = new Set(rawUnstaking.map(item => item.user));
+      const totalUniqueUsers = allUsers.size;
+      
+      const daysCount = dailyStats.length || 1;
+      const averageTokensPerDay = Math.round((totalTokens / daysCount) * 100) / 100;
+      const averageTransactionsPerDay = Math.round((totalTransactions / daysCount) * 100) / 100;
+
+      logDeduplicator.info('Unstaking stats calculated successfully', {
+        totalDays: daysCount,
+        totalTokens,
+        totalTransactions,
+        totalUniqueUsers,
+        lastUpdate: this.lastUpdate
+      });
+
+      return {
+        dailyStats,
+        totalStats: {
+          totalTokens: Math.round(totalTokens * 100) / 100,
+          totalTransactions,
+          totalUniqueUsers,
+          averageTokensPerDay,
+          averageTransactionsPerDay
+        },
+        lastUpdate: this.lastUpdate
+      };
+    } catch (error) {
+      logDeduplicator.error('Error calculating unstaking stats:', { 
+        error: error instanceof Error ? error.message : String(error) 
+      });
+      throw new ValidatorError('Failed to calculate unstaking stats');
+    }
+  }
+
+  /**
    * Démarre le polling du client
    */
   public startPolling(): void {

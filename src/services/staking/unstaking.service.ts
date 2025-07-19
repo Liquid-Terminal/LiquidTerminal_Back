@@ -147,12 +147,59 @@ export class UnstakingService {
       averageTokensPerDay: number;
       averageTransactionsPerDay: number;
     };
+    upcomingUnstaking: {
+      nextHour: {
+        totalTokens: number;
+        transactionCount: number;
+        uniqueUsers: number;
+      };
+      next24Hours: {
+        totalTokens: number;
+        transactionCount: number;
+        uniqueUsers: number;
+      };
+      next7Days: {
+        totalTokens: number;
+        transactionCount: number;
+        uniqueUsers: number;
+      };
+    };
     lastUpdate: number;
   }> {
     try {
       const rawUnstaking = await this.unstakingClient.getUnstakingQueue();
       
-      // Grouper par jour
+      // Calculer les timestamps pour les périodes futures
+      const now = Date.now();
+      const nextHour = now + (60 * 60 * 1000); // +1 heure
+      const next24Hours = now + (24 * 60 * 60 * 1000); // +24 heures
+      const next7Days = now + (7 * 24 * 60 * 60 * 1000); // +7 jours
+
+      // Filtrer les données pour les périodes futures (time = moment de déblocage)
+      const nextHourData = rawUnstaking.filter(item => item.time >= now && item.time <= nextHour);
+      const next24HoursData = rawUnstaking.filter(item => item.time >= now && item.time <= next24Hours);
+      const next7DaysData = rawUnstaking.filter(item => item.time >= now && item.time <= next7Days);
+
+      // Calculer les stats pour chaque période
+      const calculatePeriodStats = (data: UnstakingQueueRawData[]) => {
+        const totalTokens = data.reduce((sum, item) => sum + this.weiToHype(item.wei), 0);
+        const transactionCount = data.length;
+        const uniqueUsers = new Set(data.map(item => item.user)).size;
+        
+        return {
+          totalTokens: Math.round(totalTokens * 100) / 100,
+          transactionCount,
+          uniqueUsers
+        };
+      };
+
+      const upcomingUnstaking = {
+        nextHour: calculatePeriodStats(nextHourData),
+        next24Hours: calculatePeriodStats(next24HoursData),
+        next7Days: calculatePeriodStats(next7DaysData)
+      };
+
+      // Grouper par jour (code existant)
       const dailyGroups = new Map<string, {
         totalTokens: number;
         transactions: UnstakingQueueRawData[];
@@ -201,6 +248,9 @@ export class UnstakingService {
         totalTokens,
         totalTransactions,
         totalUniqueUsers,
+        upcomingNextHour: upcomingUnstaking.nextHour.totalTokens,
+        upcomingNext24h: upcomingUnstaking.next24Hours.totalTokens,
+        upcomingNext7d: upcomingUnstaking.next7Days.totalTokens,
         lastUpdate: this.lastUpdate
       });
 
@@ -213,6 +263,7 @@ export class UnstakingService {
           averageTokensPerDay,
           averageTransactionsPerDay
         },
+        upcomingUnstaking,
         lastUpdate: this.lastUpdate
       };
     } catch (error) {

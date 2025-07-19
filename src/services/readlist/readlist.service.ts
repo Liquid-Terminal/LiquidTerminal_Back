@@ -1,0 +1,234 @@
+import { 
+  ReadListResponse, 
+  ReadListCreateInput, 
+  ReadListUpdateInput,
+  ReadListSummaryResponse
+} from '../../types/readlist.types';
+import { 
+  ReadListNotFoundError, 
+  ReadListAlreadyExistsError,
+  ReadListValidationError,
+  ReadListPermissionError
+} from '../../errors/readlist.errors';
+import { logDeduplicator } from '../../utils/logDeduplicator';
+import { CACHE_PREFIX, CACHE_KEYS } from '../../constants/cache.constants';
+import { 
+  readListCreateSchema, 
+  readListUpdateSchema, 
+  readListQuerySchema 
+} from '../../schemas/readlist.schema';
+import { readListRepository } from '../../repositories';
+import { BaseService } from '../../core/crudBase.service';
+import { cacheService } from '../../core/cache.service';
+import { CACHE_TTL } from '../../constants/cache.constants';
+
+// Type pour les paramètres de requête
+type ReadListQueryParams = {
+  page?: number;
+  limit?: number;
+  sort?: string;
+  order?: 'asc' | 'desc';
+  search?: string;
+  userId?: number;
+  isPublic?: boolean;
+};
+
+export class ReadListService extends BaseService<
+  ReadListResponse, 
+  ReadListCreateInput, 
+  ReadListUpdateInput, 
+  ReadListQueryParams
+> {
+  protected repository = readListRepository;
+  protected cacheKeyPrefix = CACHE_PREFIX.READLIST;
+  protected validationSchemas = {
+    create: readListCreateSchema,
+    update: readListUpdateSchema,
+    query: readListQuerySchema
+  };
+  protected errorClasses = {
+    notFound: ReadListNotFoundError,
+    alreadyExists: ReadListAlreadyExistsError,
+    validation: ReadListValidationError
+  };
+
+  /**
+   * Vérifie si une read list avec le nom donné existe déjà pour cet utilisateur
+   * @param data Données de la read list
+   * @returns true si la read list existe déjà, false sinon
+   */
+  protected async checkExists(data: ReadListCreateInput): Promise<boolean> {
+    return await this.repository.existsByNameAndUser(data.name, data.userId);
+  }
+
+  /**
+   * Vérifie si une read list avec le nom donné existe déjà pour cet utilisateur (pour la mise à jour)
+   * @param id ID de la read list à mettre à jour
+   * @param data Données de mise à jour
+   * @returns true si une autre read list avec le même nom existe déjà, false sinon
+   */
+  protected async checkExistsForUpdate(id: number, data: ReadListUpdateInput): Promise<boolean> {
+    if (data.name) {
+      const readList = await this.repository.findById(id);
+      if (readList && data.name !== readList.name) {
+        return await this.repository.existsByNameAndUser(data.name, readList.userId);
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Vérifie si une read list peut être supprimée
+   * @param id ID de la read list à supprimer
+   * @throws Erreur si la read list ne peut pas être supprimée
+   */
+  protected async checkCanDelete(id: number): Promise<void> {
+    // Les read lists peuvent toujours être supprimées
+    // Les items seront supprimés en cascade grâce à la contrainte de la DB
+    return;
+  }
+
+  /**
+   * Vérifie si un utilisateur a accès à une read list
+   * @param readListId ID de la read list
+   * @param userId ID de l'utilisateur
+   * @returns true si l'utilisateur a accès, false sinon
+   */
+  async hasAccess(readListId: number, userId: number): Promise<boolean> {
+    try {
+      return await cacheService.getOrSet(
+        `${CACHE_PREFIX.READLIST}:access:${readListId}:${userId}`,
+        async () => {
+          const hasAccess = await this.repository.hasAccess(readListId, userId);
+          logDeduplicator.info('ReadList access check completed', { readListId, userId, hasAccess });
+          return hasAccess;
+        },
+        CACHE_TTL.SHORT // Cache court pour les permissions
+      );
+    } catch (error) {
+      logDeduplicator.error('Error checking read list access:', { error, readListId, userId });
+      return false;
+    }
+  }
+
+  /**
+   * Récupère une read list avec vérification des permissions
+   * @param id ID de la read list
+   * @param userId ID de l'utilisateur demandeur
+   * @returns Read list si accessible
+   * @throws Erreur si pas d'accès ou read list non trouvée
+   */
+  async getByIdWithPermission(id: number, userId: number): Promise<ReadListResponse> {
+    try {
+      const readList = await this.getById(id);
+      
+      if (!await this.hasAccess(id, userId)) {
+        throw new ReadListPermissionError();
+      }
+
+      return readList;
+    } catch (error) {
+      if (error instanceof ReadListNotFoundError || error instanceof ReadListPermissionError) {
+        throw error;
+      }
+      logDeduplicator.error('Error fetching read list with permission:', { error, id, userId });
+      throw error;
+    }
+  }
+
+  /**
+   * Récupère toutes les read lists d'un utilisateur
+   * @param userId ID de l'utilisateur
+   * @returns Liste des read lists de l'utilisateur
+   */
+  async getByUser(userId: number): Promise<ReadListSummaryResponse[]> {
+    try {
+      return await cacheService.getOrSet(
+        CACHE_KEYS.READLIST_BY_USER(userId),
+        async () => {
+          const readLists = await this.repository.findByUser(userId);
+          logDeduplicator.info('Read lists by user retrieved successfully', { 
+            userId,
+            count: readLists.length
+          });
+          return readLists;
+        },
+        CACHE_TTL.MEDIUM
+      );
+    } catch (error) {
+      logDeduplicator.error('Error fetching read lists by user:', { error, userId });
+      throw error;
+    }
+  }
+
+  /**
+   * Récupère toutes les read lists publiques
+   * @param query Paramètres de requête
+   * @returns Liste paginée des read lists publiques
+   */
+  async getPublicLists(query: ReadListQueryParams) {
+    try {
+      const validatedQuery = this.validateInput(query, this.validationSchemas.query);
+
+      const cacheKey = `${this.cacheKeyPrefix}:public:list:${JSON.stringify(validatedQuery)}`;
+
+      return await cacheService.getOrSet(
+        cacheKey,
+        async () => {
+          const result = await this.repository.findPublicLists(validatedQuery);
+          logDeduplicator.info('Public read lists retrieved successfully', {
+            count: result.data.length,
+            total: result.pagination.total
+          });
+          return result;
+        },
+        CACHE_TTL.MEDIUM
+      );
+    } catch (error) {
+      logDeduplicator.error('Error fetching public read lists:', { error, query });
+      throw error;
+    }
+  }
+
+  /**
+   * Invalide le cache spécifique aux read lists
+   * @param id ID de la read list
+   * @param userId ID de l'utilisateur (pour invalider le cache utilisateur)
+   */
+  protected async invalidateReadListCache(id: number, userId?: number): Promise<void> {
+    await Promise.all([
+      this.invalidateEntityCache(id),
+      cacheService.invalidateByPattern(`${CACHE_PREFIX.READLIST}:access:${id}:*`),
+      userId ? cacheService.invalidate(CACHE_KEYS.READLIST_BY_USER(userId)) : Promise.resolve(),
+      cacheService.invalidateByPattern(`${CACHE_PREFIX.READLIST}:public:*`)
+    ]);
+  }
+
+  /**
+   * Override de la méthode create pour invalider les caches spécifiques
+   */
+  async create(data: ReadListCreateInput): Promise<ReadListResponse> {
+    const result = await super.create(data);
+    await this.invalidateReadListCache(result.id, data.userId);
+    return result;
+  }
+
+  /**
+   * Override de la méthode update pour invalider les caches spécifiques
+   */
+  async update(id: number, data: ReadListUpdateInput): Promise<ReadListResponse> {
+    const existingReadList = await this.repository.findById(id);
+    const result = await super.update(id, data);
+    await this.invalidateReadListCache(id, existingReadList?.userId);
+    return result;
+  }
+
+  /**
+   * Override de la méthode delete pour invalider les caches spécifiques
+   */
+  async delete(id: number): Promise<void> {
+    const existingReadList = await this.repository.findById(id);
+    await super.delete(id);
+    await this.invalidateReadListCache(id, existingReadList?.userId);
+  }
+} 

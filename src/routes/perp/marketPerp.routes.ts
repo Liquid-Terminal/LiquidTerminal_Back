@@ -1,18 +1,14 @@
-import { Router, Request, Response, RequestHandler } from 'express';
+import express, { Request, Response } from 'express';
 import { PerpAssetContextService } from '../../services/perp/perpAssetContext.service';
-import { marketRateLimiter } from '../../middleware/apiRateLimiter';
-import { validateRequest } from '../../middleware/validation';
-import { marketPerpQuerySchema } from '../../schemas/perp.schemas';
-import { logDeduplicator } from '../../utils/logDeduplicator';
+import { validateGetRequest } from '../../middleware/validation';
+import { marketPerpGetSchema } from '../../schemas/perp.schemas';
 import { PerpMarketDataError, PerpTimeoutError } from '../../errors/perp.errors';
+import { logDeduplicator } from '../../utils/logDeduplicator';
 
-const router = Router();
+const router = express.Router();
 const perpMarketService = PerpAssetContextService.getInstance();
 
-// Appliquer le rate limiting et la sanitization
-router.use(marketRateLimiter);
-
-router.get('/', validateRequest(marketPerpQuerySchema), async (req: Request, res: Response): Promise<void> => {
+router.get('/', validateGetRequest(marketPerpGetSchema), async (req: Request, res: Response): Promise<void> => {
   try {
     const { 
       sortBy, 

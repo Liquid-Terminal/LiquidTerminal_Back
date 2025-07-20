@@ -2,6 +2,8 @@ import { Router, Request, Response } from 'express';
 import { ValidationService } from '../../services/staking/validation.service';
 import { ValidationResponse } from '../../types/staking.types';
 import { marketRateLimiter } from '../../middleware/apiRateLimiter';
+import { validateGetRequest } from '../../middleware/validation';
+import { validationsGetSchema } from '../../schemas/staking.schema';
 import { ValidatorError } from '../../errors/staking.errors';
 import { logDeduplicator } from '../../utils/logDeduplicator';
 
@@ -17,7 +19,7 @@ router.use(marketRateLimiter);
  * @query page - Numéro de page (défaut: 1)
  * @query limit - Nombre d'éléments par page (défaut: 50, max: 200)
  */
-router.get('/', async (req: Request, res: Response) => {
+router.get('/', validateGetRequest(validationsGetSchema), async (req: Request, res: Response) => {
   try {
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 50;
@@ -40,7 +42,9 @@ router.get('/', async (req: Request, res: Response) => {
     
     res.json(response);
   } catch (error) {
-    logDeduplicator.error('Error in /validations route:', { error });
+    logDeduplicator.error('Error in /validations route:', { 
+      error: error instanceof Error ? error.message : String(error)
+    });
     
     if (error instanceof ValidatorError) {
       res.status(error.statusCode).json({

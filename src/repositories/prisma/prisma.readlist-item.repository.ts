@@ -162,7 +162,16 @@ export class PrismaReadListItemRepository implements ReadListItemRepository {
         }
 
         const item = await this.prismaClient.readListItem.create({
-          data: finalData,
+          data: {
+            notes: finalData.notes,
+            order: finalData.order,
+            readList: {
+              connect: { id: data.readListId }
+            },
+            resource: {
+              connect: { id: data.resourceId }
+            }
+          },
           include: this.includeConfig
         });
         return item;

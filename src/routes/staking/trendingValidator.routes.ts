@@ -2,6 +2,8 @@ import { Router, Request, Response } from 'express';
 import { TrendingValidatorService, SortBy } from '../../services/staking/trending.validator.service';
 import { TrendingValidatorsResponse } from '../../types/staking.types';
 import { marketRateLimiter } from '../../middleware/apiRateLimiter';
+import { validateGetRequest } from '../../middleware/validation';
+import { trendingValidatorsGetSchema } from '../../schemas/staking.schema';
 import { TrendingValidatorError } from '../../errors/staking.errors';
 import { logDeduplicator } from '../../utils/logDeduplicator';
 
@@ -16,7 +18,7 @@ router.use(marketRateLimiter);
  * @description Récupère le top 5 des validateurs classés par nombre de tokens stake ou APR
  * @query sortBy - Critère de tri ('stake' ou 'apr', par défaut 'stake')
  */
-router.get('/', async (req: Request, res: Response) => {
+router.get('/', validateGetRequest(trendingValidatorsGetSchema), async (req: Request, res: Response) => {
   try {
     const sortBy = (req.query.sortBy as SortBy) || 'stake';
     logDeduplicator.info('Fetching trending validators', { sortBy });
@@ -34,7 +36,9 @@ router.get('/', async (req: Request, res: Response) => {
     
     res.json(response);
   } catch (error) {
-    logDeduplicator.error('Error in /trending route:', { error });
+    logDeduplicator.error('Error in /trending route:', { 
+      error: error instanceof Error ? error.message : String(error)
+    });
     
     if (error instanceof TrendingValidatorError) {
       res.status(error.statusCode).json({

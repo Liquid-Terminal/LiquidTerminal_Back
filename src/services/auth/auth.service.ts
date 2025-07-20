@@ -69,7 +69,7 @@ export class AuthService {
       const { jwtVerify } = await import('jose'); // Import dynamique de jwtVerify
       const { payload } = await jwtVerify(token, signingKey, {
         issuer: "privy.io",
-        audience: process.env.NEXT_PUBLIC_PRIVY_AUDIENCE!,
+        audience: [process.env.NEXT_PUBLIC_PRIVY_AUDIENCE!, "https://auth.privy.io"],
       });
 
       logDeduplicator.info('Token verified successfully', {

@@ -1,13 +1,12 @@
-// src/routes/market.routes.ts
-import { Router, Request, Response } from 'express';
+import express, { Request, Response } from 'express';
 import { SpotAssetContextService } from '../../services/spot/marketData.service';
 import { marketRateLimiter } from '../../middleware/apiRateLimiter';
-import { validateRequest } from '../../middleware/validation';
-import { marketSpotQuerySchema } from '../../schemas/spot.schemas';
+import { validateGetRequest } from '../../middleware/validation';
+import { marketSpotGetSchema } from '../../schemas/spot.schemas';
 import { MarketDataError, RateLimitError } from '../../errors/spot.errors';
 import { logDeduplicator } from '../../utils/logDeduplicator';
 
-const router = Router();
+const router = express.Router();
 const marketService = SpotAssetContextService.getInstance();
 
 // Appliquer le rate limiting et la sanitization
@@ -23,7 +22,7 @@ router.use(marketRateLimiter);
  * @query token - Filtre par nom de token
  * @query pair - Filtre par nom de paire
  */
-router.get('/', validateRequest(marketSpotQuerySchema), async (req: Request, res: Response): Promise<void> => {
+router.get('/', validateGetRequest(marketSpotGetSchema), async (req: Request, res: Response): Promise<void> => {
   try {
     const { 
       sortBy, 
@@ -83,10 +82,18 @@ router.get('/', validateRequest(marketSpotQuerySchema), async (req: Request, res
   }
 });
 
-router.get('/tokens-without-pairs', validateRequest(marketSpotQuerySchema), async (req: Request, res: Response): Promise<void> => {
+/**
+ * @route GET /market/spot/tokens-without-pairs
+ * @description Récupère les tokens sans paires de trading
+ */
+router.get('/tokens-without-pairs', validateGetRequest(marketSpotGetSchema), async (req: Request, res: Response): Promise<void> => {
   try {
     const tokens = await marketService.getTokensWithoutPairs();
-    logDeduplicator.info('Tokens without pairs retrieved successfully', { count: tokens.length });
+
+    logDeduplicator.info('Tokens without pairs retrieved successfully', { 
+      count: tokens.length
+    });
+
     res.status(200).json({
       success: true,
       message: 'Tokens without pairs retrieved successfully',

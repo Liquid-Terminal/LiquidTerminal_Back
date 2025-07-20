@@ -1,300 +1,356 @@
 import express, { Request, Response, RequestHandler } from "express";
 import { ReadListService } from "../../services/readlist/readlist.service";
+import { ReadListItemService } from "../../services/readlist/readlist-item.service";
 import { marketRateLimiter } from '../../middleware/apiRateLimiter';
 import { validatePrivyToken } from '../../middleware/authMiddleware';
 import {
-  validateCreateReadList,
   validateUpdateReadList,
-  validateGetReadList,
-  validateReadListQuery
+  validateCreateReadListItem,
+  validateUpdateReadListItem,
+  validateReadListQuery,
+  validateReadListItemQuery
 } from '../../middleware/validation/readlist.validation';
+import { readListCreateSchema } from '../../schemas/readlist.schema';
 import { ReadListError } from '../../errors/readlist.errors';
 import { logDeduplicator } from '../../utils/logDeduplicator';
+import { prisma } from '../../core/prisma.service';
 
 const router = express.Router();
 const readListService = new ReadListService();
+const readListItemService = new ReadListItemService();
 
-// Appliquer le rate limiting à toutes les routes
+// Rate limiting
 router.use(marketRateLimiter);
 
-// Route pour créer une nouvelle read list
-router.post('/', validatePrivyToken, validateCreateReadList, (async (req: Request, res: Response) => {
+// ========== READ LISTS ==========
+
+// Créer une read list
+router.post('/', validatePrivyToken, (async (req: Request, res: Response) => {
   try {
-    const userId = req.user?.id;
-    if (!userId) {
-      return res.status(401).json({
-        success: false,
-        error: 'User not authenticated',
-        code: 'UNAUTHENTICATED'
-      });
+    const privyUserId = req.user?.sub;
+    if (!privyUserId) {
+      return res.status(401).json({ success: false, error: 'User not authenticated', code: 'UNAUTHENTICATED' });
     }
 
-    const readListData = { ...req.body, userId };
-    const readList = await readListService.create(readListData);
-    
-    res.status(201).json({
-      success: true,
-      message: 'Read list created successfully',
-      data: readList
-    });
+    // Récupère l'utilisateur depuis la DB
+    const user = await prisma.user.findUnique({ where: { privyUserId } });
+    if (!user) {
+      return res.status(401).json({ success: false, error: 'User not found', code: 'USER_NOT_FOUND' });
+    }
+
+    // Valider après avoir ajouté le userId
+    const dataWithUserId = { ...req.body, userId: user.id };
+    readListCreateSchema.parse(dataWithUserId);
+
+    const readList = await readListService.create(dataWithUserId);
+    res.status(201).json({ success: true, message: 'Read list created successfully', data: readList });
   } catch (error) {
     logDeduplicator.error('Error creating read list:', { error, body: req.body });
-    
     if (error instanceof ReadListError) {
-      return res.status(error.statusCode).json({
-        success: false,
-        error: error.message,
-        code: error.code
-      });
+      return res.status(error.statusCode).json({ success: false, error: error.message, code: error.code });
     }
-
-    res.status(500).json({
-      success: false,
-      error: 'Internal server error',
-      code: 'INTERNAL_SERVER_ERROR'
-    });
+    res.status(500).json({ success: false, error: 'Internal server error', code: 'INTERNAL_SERVER_ERROR' });
   }
 }) as RequestHandler);
 
-// Route pour récupérer toutes les read lists (avec filtres)
+// Lister toutes les read lists
 router.get('/', validateReadListQuery, (async (req: Request, res: Response) => {
   try {
     const readLists = await readListService.getAll(req.query);
-    res.json({
-      success: true,
-      data: readLists.data,
-      pagination: readLists.pagination
-    });
+    res.json({ success: true, data: readLists.data, pagination: readLists.pagination });
   } catch (error) {
     logDeduplicator.error('Error fetching read lists:', { error });
-    
     if (error instanceof ReadListError) {
-      return res.status(error.statusCode).json({
-        success: false,
-        error: error.message,
-        code: error.code
-      });
+      return res.status(error.statusCode).json({ success: false, error: error.message, code: error.code });
     }
-
-    res.status(500).json({
-      success: false,
-      error: 'Internal server error',
-      code: 'INTERNAL_SERVER_ERROR'
-    });
+    res.status(500).json({ success: false, error: 'Internal server error', code: 'INTERNAL_SERVER_ERROR' });
   }
 }) as RequestHandler);
 
-// Route pour récupérer les read lists publiques
-router.get('/public', validateReadListQuery, (async (req: Request, res: Response) => {
+// Lister les read lists publiques
+router.get('/public', (async (req: Request, res: Response) => {
   try {
     const publicLists = await readListService.getPublicLists(req.query);
-    res.json({
-      success: true,
-      data: publicLists.data,
-      pagination: publicLists.pagination
-    });
+    res.json({ success: true, data: publicLists.data, pagination: publicLists.pagination });
   } catch (error) {
     logDeduplicator.error('Error fetching public read lists:', { error });
-    
     if (error instanceof ReadListError) {
-      return res.status(error.statusCode).json({
-        success: false,
-        error: error.message,
-        code: error.code
-      });
+      return res.status(error.statusCode).json({ success: false, error: error.message, code: error.code });
     }
-
-    res.status(500).json({
-      success: false,
-      error: 'Internal server error',
-      code: 'INTERNAL_SERVER_ERROR'
-    });
+    res.status(500).json({ success: false, error: 'Internal server error', code: 'INTERNAL_SERVER_ERROR' });
   }
 }) as RequestHandler);
 
-// Route pour récupérer les read lists d'un utilisateur
+// Mes read lists
 router.get('/my-lists', validatePrivyToken, (async (req: Request, res: Response) => {
   try {
-    const userId = req.user?.id;
-    if (!userId) {
-      return res.status(401).json({
-        success: false,
-        error: 'User not authenticated',
-        code: 'UNAUTHENTICATED'
-      });
+    const privyUserId = req.user?.sub;
+    if (!privyUserId) {
+      return res.status(401).json({ success: false, error: 'User not authenticated', code: 'UNAUTHENTICATED' });
     }
 
-    const readLists = await readListService.getByUser(userId);
-    res.json({
-      success: true,
-      data: readLists
-    });
+    // Récupère l'utilisateur depuis la DB
+    const user = await prisma.user.findUnique({ where: { privyUserId } });
+    if (!user) {
+      return res.status(401).json({ success: false, error: 'User not found', code: 'USER_NOT_FOUND' });
+    }
+
+    const readLists = await readListService.getByUser(user.id);
+    res.json({ success: true, data: readLists });
   } catch (error) {
-    logDeduplicator.error('Error fetching user read lists:', { error, userId: req.user?.id });
-    
+    logDeduplicator.error('Error fetching user read lists:', { error, privyUserId: req.user?.sub });
     if (error instanceof ReadListError) {
-      return res.status(error.statusCode).json({
-        success: false,
-        error: error.message,
-        code: error.code
-      });
+      return res.status(error.statusCode).json({ success: false, error: error.message, code: error.code });
     }
-
-    res.status(500).json({
-      success: false,
-      error: 'Internal server error',
-      code: 'INTERNAL_SERVER_ERROR'
-    });
+    res.status(500).json({ success: false, error: 'Internal server error', code: 'INTERNAL_SERVER_ERROR' });
   }
 }) as RequestHandler);
 
-// Route pour récupérer une read list par son ID
-router.get('/:id', validateGetReadList, (async (req: Request, res: Response) => {
+// Récupérer une read list par ID
+router.get('/:id', (async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) {
-      return res.status(400).json({
-        success: false,
-        error: 'Invalid ID format',
-        code: 'INVALID_ID_FORMAT'
-      });
+      return res.status(400).json({ success: false, error: 'Invalid ID format', code: 'INVALID_ID_FORMAT' });
     }
 
-    const userId = req.user?.id;
+    const privyUserId = req.user?.sub;
     let readList;
 
-    if (userId) {
-      // Si l'utilisateur est authentifié, vérifier les permissions
-      readList = await readListService.getByIdWithPermission(id, userId);
+    if (privyUserId) {
+      // Récupère l'utilisateur depuis la DB
+      const user = await prisma.user.findUnique({ where: { privyUserId } });
+      if (user) {
+        readList = await readListService.getByIdWithPermission(id, user.id);
+      } else {
+        readList = await readListService.getById(id);
+        if (!readList.isPublic) {
+          return res.status(403).json({ success: false, error: 'Access denied to private read list', code: 'ACCESS_DENIED' });
+        }
+      }
     } else {
-      // Si pas authentifié, récupérer seulement si publique
       readList = await readListService.getById(id);
       if (!readList.isPublic) {
-        return res.status(403).json({
-          success: false,
-          error: 'Access denied to private read list',
-          code: 'ACCESS_DENIED'
-        });
+        return res.status(403).json({ success: false, error: 'Access denied to private read list', code: 'ACCESS_DENIED' });
       }
     }
 
-    res.json({
-      success: true,
-      data: readList
-    });
+    res.json({ success: true, data: readList });
   } catch (error) {
     logDeduplicator.error('Error fetching read list:', { error, id: req.params.id });
-    
     if (error instanceof ReadListError) {
-      return res.status(error.statusCode).json({
-        success: false,
-        error: error.message,
-        code: error.code
-      });
+      return res.status(error.statusCode).json({ success: false, error: error.message, code: error.code });
     }
-
-    res.status(500).json({
-      success: false,
-      error: 'Internal server error',
-      code: 'INTERNAL_SERVER_ERROR'
-    });
+    res.status(500).json({ success: false, error: 'Internal server error', code: 'INTERNAL_SERVER_ERROR' });
   }
 }) as RequestHandler);
 
-// Route pour mettre à jour une read list
+// Modifier une read list
 router.put('/:id', validatePrivyToken, validateUpdateReadList, (async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) {
-      return res.status(400).json({
-        success: false,
-        error: 'Invalid ID format',
-        code: 'INVALID_ID_FORMAT'
-      });
+      return res.status(400).json({ success: false, error: 'Invalid ID format', code: 'INVALID_ID_FORMAT' });
     }
 
-    const userId = req.user?.id;
-    if (!userId) {
-      return res.status(401).json({
-        success: false,
-        error: 'User not authenticated',
-        code: 'UNAUTHENTICATED'
-      });
+    const privyUserId = req.user?.sub;
+    if (!privyUserId) {
+      return res.status(401).json({ success: false, error: 'User not authenticated', code: 'UNAUTHENTICATED' });
     }
 
-    // Vérifier d'abord que l'utilisateur a accès à cette read list
-    await readListService.getByIdWithPermission(id, userId);
-    
+    // Récupère l'utilisateur depuis la DB
+    const user = await prisma.user.findUnique({ where: { privyUserId } });
+    if (!user) {
+      return res.status(401).json({ success: false, error: 'User not found', code: 'USER_NOT_FOUND' });
+    }
+
+    await readListService.getByIdWithPermission(id, user.id);
     const readList = await readListService.update(id, req.body);
-    res.json({
-      success: true,
-      message: 'Read list updated successfully',
-      data: readList
-    });
+    res.json({ success: true, message: 'Read list updated successfully', data: readList });
   } catch (error) {
     logDeduplicator.error('Error updating read list:', { error, id: req.params.id, body: req.body });
-    
     if (error instanceof ReadListError) {
-      return res.status(error.statusCode).json({
-        success: false,
-        error: error.message,
-        code: error.code
-      });
+      return res.status(error.statusCode).json({ success: false, error: error.message, code: error.code });
     }
-
-    res.status(500).json({
-      success: false,
-      error: 'Internal server error',
-      code: 'INTERNAL_SERVER_ERROR'
-    });
+    res.status(500).json({ success: false, error: 'Internal server error', code: 'INTERNAL_SERVER_ERROR' });
   }
 }) as RequestHandler);
 
-// Route pour supprimer une read list
+// Supprimer une read list
 router.delete('/:id', validatePrivyToken, (async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) {
-      return res.status(400).json({
-        success: false,
-        error: 'Invalid ID format',
-        code: 'INVALID_ID_FORMAT'
-      });
+      return res.status(400).json({ success: false, error: 'Invalid ID format', code: 'INVALID_ID_FORMAT' });
     }
 
-    const userId = req.user?.id;
-    if (!userId) {
-      return res.status(401).json({
-        success: false,
-        error: 'User not authenticated',
-        code: 'UNAUTHENTICATED'
-      });
+    const privyUserId = req.user?.sub;
+    if (!privyUserId) {
+      return res.status(401).json({ success: false, error: 'User not authenticated', code: 'UNAUTHENTICATED' });
     }
 
-    // Vérifier d'abord que l'utilisateur a accès à cette read list
-    await readListService.getByIdWithPermission(id, userId);
-    
+    // Récupère l'utilisateur depuis la DB
+    const user = await prisma.user.findUnique({ where: { privyUserId } });
+    if (!user) {
+      return res.status(401).json({ success: false, error: 'User not found', code: 'USER_NOT_FOUND' });
+    }
+
+    await readListService.getByIdWithPermission(id, user.id);
     await readListService.delete(id);
-    res.json({
-      success: true,
-      message: 'Read list deleted successfully'
-    });
+    res.json({ success: true, message: 'Read list deleted successfully' });
   } catch (error) {
     logDeduplicator.error('Error deleting read list:', { error, id: req.params.id });
-    
     if (error instanceof ReadListError) {
-      return res.status(error.statusCode).json({
-        success: false,
-        error: error.message,
-        code: error.code
-      });
+      return res.status(error.statusCode).json({ success: false, error: error.message, code: error.code });
+    }
+    res.status(500).json({ success: false, error: 'Internal server error', code: 'INTERNAL_SERVER_ERROR' });
+  }
+}) as RequestHandler);
+
+// ========== READ LIST ITEMS ==========
+
+// Ajouter un item à une read list
+router.post('/:id/items', validatePrivyToken, validateCreateReadListItem, (async (req: Request, res: Response) => {
+  try {
+    const readListId = parseInt(req.params.id, 10);
+    if (isNaN(readListId)) {
+      return res.status(400).json({ success: false, error: 'Invalid read list ID format', code: 'INVALID_ID_FORMAT' });
     }
 
-    res.status(500).json({
-      success: false,
-      error: 'Internal server error',
-      code: 'INTERNAL_SERVER_ERROR'
-    });
+    const privyUserId = req.user?.sub;
+    if (!privyUserId) {
+      return res.status(401).json({ success: false, error: 'User not authenticated', code: 'UNAUTHENTICATED' });
+    }
+
+    // Récupère l'utilisateur depuis la DB
+    const user = await prisma.user.findUnique({ where: { privyUserId } });
+    if (!user) {
+      return res.status(401).json({ success: false, error: 'User not found', code: 'USER_NOT_FOUND' });
+    }
+
+    const itemData = { ...req.body, readListId };
+    const item = await readListItemService.addResourceToReadList(itemData, user.id);
+    res.status(201).json({ success: true, message: 'Resource added to read list successfully', data: item });
+  } catch (error) {
+    logDeduplicator.error('Error adding resource to read list:', { error, body: req.body });
+    if (error instanceof ReadListError) {
+      return res.status(error.statusCode).json({ success: false, error: error.message, code: error.code });
+    }
+    res.status(500).json({ success: false, error: 'Internal server error', code: 'INTERNAL_SERVER_ERROR' });
+  }
+}) as RequestHandler);
+
+// Lister les items d'une read list
+router.get('/:id/items', validatePrivyToken, validateReadListItemQuery, (async (req: Request, res: Response) => {
+  try {
+    const readListId = parseInt(req.params.id, 10);
+    if (isNaN(readListId)) {
+      return res.status(400).json({ success: false, error: 'Invalid read list ID format', code: 'INVALID_ID_FORMAT' });
+    }
+
+    const privyUserId = req.user?.sub;
+    if (!privyUserId) {
+      return res.status(401).json({ success: false, error: 'User not authenticated', code: 'UNAUTHENTICATED' });
+    }
+
+    // Récupère l'utilisateur depuis la DB
+    const user = await prisma.user.findUnique({ where: { privyUserId } });
+    if (!user) {
+      return res.status(401).json({ success: false, error: 'User not found', code: 'USER_NOT_FOUND' });
+    }
+
+    const items = await readListItemService.getByReadListWithPermission(readListId, user.id, req.query);
+    res.json({ success: true, data: items.data, pagination: items.pagination });
+  } catch (error) {
+    logDeduplicator.error('Error fetching items by read list:', { error, readListId: req.params.id });
+    if (error instanceof ReadListError) {
+      return res.status(error.statusCode).json({ success: false, error: error.message, code: error.code });
+    }
+    res.status(500).json({ success: false, error: 'Internal server error', code: 'INTERNAL_SERVER_ERROR' });
+  }
+}) as RequestHandler);
+
+// Modifier un item
+router.put('/items/:itemId', validatePrivyToken, validateUpdateReadListItem, (async (req: Request, res: Response) => {
+  try {
+    const itemId = parseInt(req.params.itemId, 10);
+    if (isNaN(itemId)) {
+      return res.status(400).json({ success: false, error: 'Invalid item ID format', code: 'INVALID_ID_FORMAT' });
+    }
+
+    const item = await readListItemService.update(itemId, req.body);
+    res.json({ success: true, message: 'Read list item updated successfully', data: item });
+  } catch (error) {
+    logDeduplicator.error('Error updating read list item:', { error, id: req.params.itemId, body: req.body });
+    if (error instanceof ReadListError) {
+      return res.status(error.statusCode).json({ success: false, error: error.message, code: error.code });
+    }
+    res.status(500).json({ success: false, error: 'Internal server error', code: 'INTERNAL_SERVER_ERROR' });
+  }
+}) as RequestHandler);
+
+// Supprimer un item
+router.delete('/items/:itemId', validatePrivyToken, (async (req: Request, res: Response) => {
+  try {
+    const itemId = parseInt(req.params.itemId, 10);
+    if (isNaN(itemId)) {
+      return res.status(400).json({ success: false, error: 'Invalid item ID format', code: 'INVALID_ID_FORMAT' });
+    }
+
+    const privyUserId = req.user?.sub;
+    if (!privyUserId) {
+      return res.status(401).json({ success: false, error: 'User not authenticated', code: 'UNAUTHENTICATED' });
+    }
+
+    // Récupère l'utilisateur depuis la DB
+    const user = await prisma.user.findUnique({ where: { privyUserId } });
+    if (!user) {
+      return res.status(401).json({ success: false, error: 'User not found', code: 'USER_NOT_FOUND' });
+    }
+
+    await readListItemService.deleteWithPermission(itemId, user.id);
+    res.json({ success: true, message: 'Read list item deleted successfully' });
+  } catch (error) {
+    logDeduplicator.error('Error deleting read list item:', { error, id: req.params.itemId });
+    if (error instanceof ReadListError) {
+      return res.status(error.statusCode).json({ success: false, error: error.message, code: error.code });
+    }
+    res.status(500).json({ success: false, error: 'Internal server error', code: 'INTERNAL_SERVER_ERROR' });
+  }
+}) as RequestHandler);
+
+// Marquer un item comme lu/non lu
+router.patch('/items/:itemId/read-status', validatePrivyToken, (async (req: Request, res: Response) => {
+  try {
+    const itemId = parseInt(req.params.itemId, 10);
+    if (isNaN(itemId)) {
+      return res.status(400).json({ success: false, error: 'Invalid item ID format', code: 'INVALID_ID_FORMAT' });
+    }
+
+    const privyUserId = req.user?.sub;
+    if (!privyUserId) {
+      return res.status(401).json({ success: false, error: 'User not authenticated', code: 'UNAUTHENTICATED' });
+    }
+
+    // Récupère l'utilisateur depuis la DB
+    const user = await prisma.user.findUnique({ where: { privyUserId } });
+    if (!user) {
+      return res.status(401).json({ success: false, error: 'User not found', code: 'USER_NOT_FOUND' });
+    }
+
+    const { isRead } = req.body;
+    if (typeof isRead !== 'boolean') {
+      return res.status(400).json({ success: false, error: 'isRead must be a boolean', code: 'INVALID_READ_STATUS' });
+    }
+
+    const item = await readListItemService.toggleReadStatus(itemId, user.id, isRead);
+    res.json({ success: true, message: `Item marked as ${isRead ? 'read' : 'unread'}`, data: item });
+  } catch (error) {
+    logDeduplicator.error('Error toggling read status:', { error, id: req.params.itemId, body: req.body });
+    if (error instanceof ReadListError) {
+      return res.status(error.statusCode).json({ success: false, error: error.message, code: error.code });
+    }
+    res.status(500).json({ success: false, error: 'Internal server error', code: 'INTERNAL_SERVER_ERROR' });
   }
 }) as RequestHandler);
 

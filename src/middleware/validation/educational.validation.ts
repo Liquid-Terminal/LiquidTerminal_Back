@@ -20,7 +20,17 @@ export const validateUpdateEducationalCategory = (req: Request, res: Response, n
 };
 
 export const validateEducationalCategoryQuery = (req: Request, res: Response, next: NextFunction) => {
-  return validateRequest(educationalCategoryQuerySchema)(req, res, next);
+  // Pour GET, on valide seulement les query params
+  try {
+    educationalCategoryQuerySchema.parse(req.query);
+    next();
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      error: 'Invalid query parameters',
+      code: 'BAD_REQUEST'
+    });
+  }
 };
 
 // Educational Resource validation middleware
@@ -33,7 +43,17 @@ export const validateUpdateEducationalResource = (req: Request, res: Response, n
 };
 
 export const validateEducationalResourceQuery = (req: Request, res: Response, next: NextFunction) => {
-  return validateRequest(educationalResourceQuerySchema)(req, res, next);
+  // Pour GET, on valide seulement les query params
+  try {
+    educationalResourceQuerySchema.parse(req.query);
+    next();
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      error: 'Invalid query parameters',
+      code: 'BAD_REQUEST'
+    });
+  }
 };
 
 // Educational Resource Category Assignment validation middleware

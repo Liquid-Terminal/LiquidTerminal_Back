@@ -1,18 +1,14 @@
-import { Router, Request, Response, RequestHandler } from 'express';
+import express, { Request, Response, RequestHandler } from 'express';
 import { SpotGlobalStatsService } from '../../services/spot/spotStats.service';
-import { marketRateLimiter } from '../../middleware/apiRateLimiter';
-import { validateRequest } from '../../middleware/validation';
-import { globalSpotStatsQuerySchema } from '../../schemas/spot.schemas';
+import { validateGetRequest } from '../../middleware/validation';
+import { globalSpotStatsGetSchema } from '../../schemas/spot.schemas';
 import { logDeduplicator } from '../../utils/logDeduplicator';
 
-const router = Router();
+const router = express.Router();
 const spotGlobalStatsService = new SpotGlobalStatsService();
 
-// Appliquer le rate limiting et la sanitization
-router.use(marketRateLimiter);
-
 // Appliquer la validation des requêtes
-router.get('/', validateRequest(globalSpotStatsQuerySchema), (async (_req: Request, res: Response) => {
+router.get('/', validateGetRequest(globalSpotStatsGetSchema), (async (_req: Request, res: Response) => {
   try {
     const stats = await spotGlobalStatsService.getSpotGlobalStats();
     logDeduplicator.info('Spot global stats retrieved successfully', { 

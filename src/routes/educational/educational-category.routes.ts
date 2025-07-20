@@ -2,11 +2,16 @@ import express, { Request, Response, RequestHandler } from "express";
 import { EducationalCategoryService } from "../../services/educational/educational-category.service";
 import { marketRateLimiter } from '../../middleware/apiRateLimiter';
 import { validatePrivyToken } from '../../middleware/authMiddleware';
+import { validateGetRequest } from '../../middleware/validation';
 import {
   validateCreateEducationalCategory,
-  validateUpdateEducationalCategory,
-  validateEducationalCategoryQuery
+  validateUpdateEducationalCategory
 } from '../../middleware/validation';
+import {
+  educationalCategoriesGetSchema,
+  educationalCategoryByIdGetSchema,
+  educationalCategoryResourcesGetSchema
+} from '../../schemas/educational.schema';
 import { EducationalError } from '../../errors/educational.errors';
 import { logDeduplicator } from '../../utils/logDeduplicator';
 
@@ -56,7 +61,7 @@ router.post('/', validatePrivyToken, validateCreateEducationalCategory, (async (
 }) as RequestHandler);
 
 // Route pour récupérer toutes les catégories éducatives
-router.get('/', validateEducationalCategoryQuery, (async (req: Request, res: Response) => {
+router.get('/', validateGetRequest(educationalCategoriesGetSchema), (async (req: Request, res: Response) => {
   try {
     const categories = await educationalCategoryService.getAll(req.query);
     res.json({
@@ -84,7 +89,7 @@ router.get('/', validateEducationalCategoryQuery, (async (req: Request, res: Res
 }) as RequestHandler);
 
 // Route pour récupérer une catégorie éducative par son ID
-router.get('/:id', (async (req: Request, res: Response) => {
+router.get('/:id', validateGetRequest(educationalCategoryByIdGetSchema), (async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) {
@@ -120,7 +125,7 @@ router.get('/:id', (async (req: Request, res: Response) => {
 }) as RequestHandler);
 
 // Route pour récupérer les ressources d'une catégorie
-router.get('/:id/resources', (async (req: Request, res: Response) => {
+router.get('/:id/resources', validateGetRequest(educationalCategoryResourcesGetSchema), (async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) {

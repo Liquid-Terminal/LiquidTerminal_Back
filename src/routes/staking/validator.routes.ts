@@ -2,6 +2,8 @@ import { Router, Request, Response } from 'express';
 import { ValidatorSummariesService, SortBy } from '../../services/staking/validator.service';
 import { ValidatorDetailsResponse } from '../../types/staking.types';
 import { marketRateLimiter } from '../../middleware/apiRateLimiter';
+import { validateGetRequest } from '../../middleware/validation';
+import { validatorsGetSchema } from '../../schemas/staking.schema';
 import { ValidatorError } from '../../errors/staking.errors';
 import { logDeduplicator } from '../../utils/logDeduplicator';
 
@@ -16,7 +18,7 @@ router.use(marketRateLimiter);
  * @description Récupère tous les validateurs avec leurs détails et statistiques globales
  * @query sortBy - Critère de tri ('stake' ou 'apr', par défaut 'stake')
  */
-router.get('/', async (req: Request, res: Response) => {
+router.get('/', validateGetRequest(validatorsGetSchema), async (req: Request, res: Response) => {
   try {
     const sortBy = (req.query.sortBy as SortBy) || 'stake';
     logDeduplicator.info('Fetching all validators with stats', { sortBy });
@@ -38,7 +40,9 @@ router.get('/', async (req: Request, res: Response) => {
     
     res.json(response);
   } catch (error) {
-    logDeduplicator.error('Error in /validators route:', { error });
+    logDeduplicator.error('Error in /validators route:', { 
+      error: error instanceof Error ? error.message : String(error)
+    });
     
     if (error instanceof ValidatorError) {
       res.status(error.statusCode).json({

@@ -30,9 +30,9 @@ export const validateRequest = (
 
       // Valider la requête avec le schéma Zod
       await schema.parseAsync({
-        body: { body: req.body },
-        query: { query: req.query },
-        params: { params: req.params },
+        body: req.body,        // ✅ Pas de double wrapping !
+        query: req.query,      // ✅ Pas de double wrapping !
+        params: req.params,    // ✅ Pas de double wrapping !
       });
 
       // Si la validation réussit et qu'on a une clé de cache, on met en cache
@@ -131,5 +131,81 @@ export const validateBody = (
     }
     
     next();
+  };
+}; 
+
+/**
+ * Middleware de validation spécifique pour les routes GET
+ * Ne valide que les query params et les params de route, ignore le body
+ * @param schema Schéma Zod pour valider la requête GET (query et params uniquement)
+ * @param validateCacheKey Clé de cache optionnelle pour stocker les résultats de validation
+ * @param cacheTTL Durée de vie du cache en secondes (par défaut: 300 secondes / 5 minutes)
+ */
+export const validateGetRequest = (
+  schema: AnyZodObject,
+  validateCacheKey?: string,
+  cacheTTL: number = 300
+): RequestHandler => {
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      // Vérifier si nous avons un cache de validation
+      if (validateCacheKey && redisService) {
+        const cacheKey = `validation:${validateCacheKey}:${req.originalUrl}`;
+        const cachedValidation = await redisService.get(cacheKey);
+        
+        if (cachedValidation) {
+          // Si la validation est en cache et valide, on continue
+          next();
+          return;
+        }
+      }
+
+      // Valider seulement query et params pour les routes GET
+      await schema.parseAsync({
+        query: req.query,
+        params: req.params,
+      });
+
+      // Si la validation réussit et qu'on a une clé de cache, on met en cache
+      if (validateCacheKey && redisService) {
+        const cacheKey = `validation:${validateCacheKey}:${req.originalUrl}`;
+        await redisService.set(cacheKey, 'valid', cacheTTL);
+      }
+
+      // Continuer vers le prochain middleware
+      next();
+    } catch (error) {
+      // Gérer les erreurs de validation Zod
+      if (error instanceof ZodError) {
+        const errors = error.errors.map(err => ({
+          path: err.path.join('.'),
+          message: err.message,
+        }));
+
+        logDeduplicator.error('GET request validation error:', { 
+          path: req.path,
+          method: req.method,
+          errors 
+        });
+
+        res.status(400).json({
+          error: 'Validation Error',
+          details: errors,
+        });
+        return;
+      }
+
+      // Gérer les autres erreurs
+      logDeduplicator.error('GET validation middleware error:', { 
+        path: req.path,
+        method: req.method,
+        error: error instanceof Error ? error.message : String(error)
+      });
+
+      res.status(500).json({
+        error: 'Internal Server Error',
+        message: 'An error occurred during request validation',
+      });
+    }
   };
 }; 

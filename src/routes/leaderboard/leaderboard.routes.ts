@@ -1,12 +1,12 @@
-import { Router, Request, Response, RequestHandler } from 'express';
+import express, { Request, Response, RequestHandler } from 'express';
 import { LeaderboardService } from '../../services/leaderboard/leaderboard.service';
 import { marketRateLimiter } from '../../middleware/apiRateLimiter';
-import { validateRequest } from '../../middleware/validation/validation.middleware';
-import { leaderboardQuerySchema } from '../../schemas/leaderboard.schema';
+import { validateGetRequest } from '../../middleware/validation';
+import { leaderboardGetSchema } from '../../schemas/leaderboard.schema';
 import { LeaderboardError } from '../../types/leaderboard.types';
 import { logDeduplicator } from '../../utils/logDeduplicator';
 
-const router = Router();
+const router = express.Router();
 const leaderboardService = LeaderboardService.getInstance();
 
 // Appliquer le rate limiting à toutes les routes
@@ -24,10 +24,18 @@ router.use(marketRateLimiter);
  * - limit: number (default: 20, max: 100)
  */
 router.get('/', 
-  validateRequest(leaderboardQuerySchema),
+  validateGetRequest(leaderboardGetSchema),
   (async (req: Request, res: Response) => {
     try {
-      const params = leaderboardQuerySchema.parse(req.query);
+      const { timeline, sortBy, order, page, limit } = req.query;
+      const params = {
+        timeline: timeline as 'day' | 'week' | 'month' | 'allTime' || 'day',
+        sortBy: sortBy as 'pnl' | 'roi' | 'vlm' || 'pnl',
+        order: order as 'asc' | 'desc' || 'desc',
+        page: page ? Number(page) : 1,
+        limit: limit ? Number(limit) : 20
+      };
+      
       const result = await leaderboardService.getLeaderboard(params);
       
       res.json({
@@ -88,7 +96,9 @@ router.get('/stats', (async (req: Request, res: Response) => {
       data: stats
     });
   } catch (error) {
-    logDeduplicator.error('Error fetching leaderboard stats:', { error });
+    logDeduplicator.error('Error fetching leaderboard stats:', { 
+      error: error instanceof Error ? error.message : String(error)
+    });
     
     if (error instanceof LeaderboardError) {
       return res.status(error.statusCode).json({

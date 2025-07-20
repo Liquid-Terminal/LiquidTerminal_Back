@@ -2,12 +2,17 @@ import express, { Request, Response, RequestHandler } from "express";
 import { EducationalResourceService } from "../../services/educational/educational-resource.service";
 import { marketRateLimiter } from '../../middleware/apiRateLimiter';
 import { validatePrivyToken } from '../../middleware/authMiddleware';
+import { validateGetRequest } from '../../middleware/validation';
 import {
   validateCreateEducationalResource,
   validateUpdateEducationalResource,
-  validateEducationalResourceQuery,
   validateAssignResourceToCategory,
 } from '../../middleware/validation';
+import {
+  educationalResourcesGetSchema,
+  educationalResourceByIdGetSchema,
+  educationalResourcesByCategoryGetSchema
+} from '../../schemas/educational.schema';
 import { EducationalError } from '../../errors/educational.errors';
 import { logDeduplicator } from '../../utils/logDeduplicator';
 
@@ -57,7 +62,7 @@ router.post('/', validatePrivyToken, validateCreateEducationalResource, (async (
 }) as RequestHandler);
 
 // Route pour récupérer toutes les ressources éducatives
-router.get('/', validateEducationalResourceQuery, (async (req: Request, res: Response) => {
+router.get('/', validateGetRequest(educationalResourcesGetSchema), (async (req: Request, res: Response) => {
   try {
     const resources = await educationalResourceService.getAll(req.query);
     res.json({
@@ -85,7 +90,7 @@ router.get('/', validateEducationalResourceQuery, (async (req: Request, res: Res
 }) as RequestHandler);
 
 // Route pour récupérer une ressource éducative par son ID
-router.get('/:id', (async (req: Request, res: Response) => {
+router.get('/:id', validateGetRequest(educationalResourceByIdGetSchema), (async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) {
@@ -291,15 +296,15 @@ router.delete('/:id/categories/:categoryId', validatePrivyToken, (async (req: Re
   }
 }) as RequestHandler);
 
-// Route pour récupérer les ressources d'une catégorie
-router.get('/category/:categoryId', (async (req: Request, res: Response) => {
+// Route pour récupérer les ressources d'une catégorie spécifique
+router.get('/category/:categoryId', validateGetRequest(educationalResourcesByCategoryGetSchema), (async (req: Request, res: Response) => {
   try {
     const categoryId = parseInt(req.params.categoryId, 10);
     if (isNaN(categoryId)) {
       return res.status(400).json({
         success: false,
         error: 'Invalid category ID format',
-        code: 'INVALID_ID_FORMAT'
+        code: 'INVALID_CATEGORY_ID_FORMAT'
       });
     }
 

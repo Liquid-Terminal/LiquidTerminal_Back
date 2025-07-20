@@ -1,19 +1,15 @@
-import { Router, Request, Response } from 'express';
+import express, { Request, Response } from 'express';
 import { VaultsService } from '../../services/vault/vaults.service';
-import { marketRateLimiter } from '../../middleware/apiRateLimiter';
-import { validateRequest } from '../../middleware/validation';
-import { vaultsQuerySchema } from '../../schemas/vault.schemas';
+import { validateGetRequest } from '../../middleware/validation';
+import { vaultsGetSchema } from '../../schemas/vault.schemas';
 import { VaultsError, VaultsTimeoutError } from '../../errors/vault.errors';
 import { logDeduplicator } from '../../utils/logDeduplicator';
 
-const router = Router();
+const router = express.Router();
 const vaultsService = VaultsService.getInstance();
 
-// Appliquer le rate limiting et la validation
-router.use(marketRateLimiter);
 
-
-router.get('/', validateRequest(vaultsQuerySchema), async (req: Request, res: Response): Promise<void> => {
+router.get('/', validateGetRequest(vaultsGetSchema), async (req: Request, res: Response): Promise<void> => {
   try {
     const { 
       sortBy, 

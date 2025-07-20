@@ -205,7 +205,14 @@ export class PrismaReadListRepository implements ReadListRepository {
     return this.executeWithErrorHandling(
       async () => {
         const readList = await this.prismaClient.readList.create({
-          data,
+          data: {
+            name: data.name,
+            description: data.description,
+            isPublic: data.isPublic,
+            creator: {
+              connect: { id: data.userId }
+            }
+          },
           include: this.includeConfig
         });
         return readList;

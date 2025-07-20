@@ -1,13 +1,9 @@
 import express from 'express';
 import readListRoutes from './readlist.routes';
-import readListItemRoutes from './readlist-item.routes';
 
 const router = express.Router();
 
-// Mount readlist routes
+// Mount readlist routes (includes both readlists and items)
 router.use('/', readListRoutes);
-
-// Mount readlist item routes
-router.use('/items', readListItemRoutes);
 
 export default router; 

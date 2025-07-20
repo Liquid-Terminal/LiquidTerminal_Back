@@ -1,18 +1,14 @@
-import { Router, Request, Response, RequestHandler } from 'express';
+import express, { Request, Response, RequestHandler } from 'express';
 import { PerpGlobalStatsService } from '../../services/perp/perpStats.service';
-import { marketRateLimiter } from '../../middleware/apiRateLimiter';
-import { validateRequest } from '../../middleware/validation';
-import { globalPerpStatsQuerySchema } from '../../schemas/perp.schemas';
-import { logDeduplicator } from '../../utils/logDeduplicator';
+import { validateGetRequest } from '../../middleware/validation';
+import { globalPerpStatsGetSchema } from '../../schemas/perp.schemas';
 import { PerpGlobalStatsError } from '../../errors/perp.errors';
+import { logDeduplicator } from '../../utils/logDeduplicator';
 
-const router = Router();
+const router = express.Router();
 const perpGlobalStatsService = PerpGlobalStatsService.getInstance();
 
-// Appliquer le rate limiting et la sanitization
-router.use(marketRateLimiter);
-
-router.get('/', validateRequest(globalPerpStatsQuerySchema), (async (_req: Request, res: Response) => {
+router.get('/', validateGetRequest(globalPerpStatsGetSchema), (async (_req: Request, res: Response) => {
   try {
     const stats = await perpGlobalStatsService.getPerpGlobalStats();
     logDeduplicator.info('Perp global stats retrieved successfully', { 

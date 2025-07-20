@@ -31,8 +31,8 @@ export const educationalCategoryUpdateSchema = educationalCategoryBaseSchema.par
 
 // Schéma pour les requêtes de catégories éducatives (simplifié)
 export const educationalCategoryQuerySchema = z.object({
-  page: z.number().int().positive().optional().default(1),
-  limit: z.number().int().positive().max(100).optional().default(10),
+  page: z.coerce.number().int().positive().optional().default(1),
+  limit: z.coerce.number().int().positive().max(100).optional().default(10),
   sort: z.enum(['createdAt', 'name']).optional().default('createdAt'),
   order: z.enum(['asc', 'desc']).optional().default('desc'),
   search: z.string().max(100, 'Terme de recherche trop long').optional()
@@ -55,8 +55,8 @@ export const educationalResourceUpdateSchema = educationalResourceBaseSchema.par
 
 // Schéma pour les requêtes de ressources éducatives (simplifié)
 export const educationalResourceQuerySchema = z.object({
-  page: z.number().int().positive().optional().default(1),
-  limit: z.number().int().positive().max(100).optional().default(10),
+  page: z.coerce.number().int().positive().optional().default(1),
+  limit: z.coerce.number().int().positive().max(100).optional().default(10),
   sort: z.enum(['createdAt', 'url']).optional().default('createdAt'),
   order: z.enum(['asc', 'desc']).optional().default('desc'),
   search: z.string().max(100, 'Terme de recherche trop long').optional()
@@ -102,6 +102,72 @@ export const assignResourceToCategorySchema = z.object({
   body: educationalResourceCategoryCreateSchema,
   params: z.object({}),
   query: z.object({})
+});
+
+// Schémas pour les routes avec query params
+export const getEducationalCategoriesSchema = z.object({
+  body: z.object({}),
+  params: z.object({}),
+  query: educationalCategoryQuerySchema
+});
+
+export const getEducationalResourcesSchema = z.object({
+  body: z.object({}),
+  params: z.object({}),
+  query: educationalResourceQuerySchema
+});
+
+/**
+ * Schémas GET spécifiques (sans validation de body)
+ */
+export const educationalCategoriesGetSchema = z.object({
+  query: z.object({
+    page: z.coerce.number().int().positive().optional().default(1),
+    limit: z.coerce.number().int().positive().max(100).optional().default(10),
+    sort: z.enum(['createdAt', 'name']).optional().default('createdAt'),
+    order: z.enum(['asc', 'desc']).optional().default('desc'),
+    search: z.string().max(100, 'Terme de recherche trop long').optional()
+  }),
+  params: z.object({})
+});
+
+export const educationalResourcesGetSchema = z.object({
+  query: z.object({
+    page: z.coerce.number().int().positive().optional().default(1),
+    limit: z.coerce.number().int().positive().max(100).optional().default(10),
+    sort: z.enum(['createdAt', 'url']).optional().default('createdAt'),
+    order: z.enum(['asc', 'desc']).optional().default('desc'),
+    search: z.string().max(100, 'Terme de recherche trop long').optional()
+  }),
+  params: z.object({})
+});
+
+export const educationalCategoryByIdGetSchema = z.object({
+  query: z.object({}),
+  params: z.object({
+    id: z.string().transform(val => parseInt(val))
+  })
+});
+
+export const educationalResourceByIdGetSchema = z.object({
+  query: z.object({}),
+  params: z.object({
+    id: z.string().transform(val => parseInt(val))
+  })
+});
+
+export const educationalResourcesByCategoryGetSchema = z.object({
+  query: z.object({}),
+  params: z.object({
+    categoryId: z.string().transform(val => parseInt(val))
+  })
+});
+
+export const educationalCategoryResourcesGetSchema = z.object({
+  query: z.object({}),
+  params: z.object({
+    id: z.string().transform(val => parseInt(val))
+  })
 });
 
  

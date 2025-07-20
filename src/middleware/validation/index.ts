@@ -1,4 +1,4 @@
-import { validateRequest, validateParam, validateBody } from './validation.middleware';
+import { validateRequest, validateParam, validateBody, validateGetRequest } from './validation.middleware';
 import { sanitizeInput } from './sanitization.middleware';
 import {
   validateCreateEducationalCategory,
@@ -12,6 +12,7 @@ import {
 
 export {
   validateRequest,
+  validateGetRequest,
   validateParam,
   validateBody,
   sanitizeInput,

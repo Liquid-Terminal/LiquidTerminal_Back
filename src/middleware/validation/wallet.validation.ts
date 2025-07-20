@@ -1,0 +1,46 @@
+import { Request, Response, NextFunction } from 'express';
+import {
+  walletCreateSchema,
+  walletUpdateSchema,
+  walletQuerySchema
+} from '../../schemas/wallet.schema';
+
+// Wallet validation middleware
+export const validateCreateWallet = (req: Request, res: Response, next: NextFunction) => {
+  try {
+    walletCreateSchema.parse(req.body);
+    next();
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      error: 'Invalid request data',
+      code: 'BAD_REQUEST'
+    });
+  }
+};
+
+export const validateUpdateWallet = (req: Request, res: Response, next: NextFunction) => {
+  try {
+    walletUpdateSchema.parse(req.body);
+    next();
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      error: 'Invalid request data',
+      code: 'BAD_REQUEST'
+    });
+  }
+};
+
+export const validateWalletQuery = (req: Request, res: Response, next: NextFunction) => {
+  try {
+    walletQuerySchema.parse(req.query);
+    next();
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      error: 'Invalid query parameters',
+      code: 'BAD_REQUEST'
+    });
+  }
+}; 

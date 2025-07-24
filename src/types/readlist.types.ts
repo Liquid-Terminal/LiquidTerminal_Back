@@ -54,7 +54,7 @@ export interface ReadListItemResponse {
 
 // Types pour les opérations CRUD des ReadListItems
 export interface ReadListItemCreateInput {
-  readListId: number;
+  readListId?: number;
   resourceId: number;
   notes?: string;
   order?: number;

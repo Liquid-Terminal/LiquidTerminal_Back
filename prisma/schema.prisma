@@ -80,7 +80,9 @@ model EducationalResource {
   url         String    @db.VarChar(500)
   createdAt   DateTime  @default(now()) @db.Timestamp(6)
   addedBy     Int
+  linkPreviewId String?
   creator     User      @relation("EducationalResourceCreator", fields: [addedBy], references: [id])
+  linkPreview LinkPreview? @relation(fields: [linkPreviewId], references: [id])
   categories  EducationalResourceCategory[]
   readListItems ReadListItem[]
 }
@@ -124,4 +126,21 @@ model ReadListItem {
   resource   EducationalResource @relation(fields: [resourceId], references: [id], onDelete: Cascade)
   
   @@unique([readListId, resourceId])
+}
+
+model LinkPreview {
+  id          String   @id @default(cuid())
+  url         String   @unique @db.VarChar(500)
+  title       String?  @db.VarChar(255)
+  description String?  @db.VarChar(500)
+  image       String?  @db.VarChar(500)
+  siteName    String?  @db.VarChar(100)
+  favicon     String?  @db.VarChar(500)
+  createdAt   DateTime @default(now()) @db.Timestamp(6)
+  updatedAt   DateTime @updatedAt
+  
+  // Relation avec EducationalResource
+  resources   EducationalResource[]
+  
+  @@map("link_previews")
 }

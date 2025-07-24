@@ -6,6 +6,7 @@ import { createServer } from 'http';
 import { sanitizeInput } from './middleware/validation';
 import { SECURITY_CONSTANTS } from './constants/security.constants';
 import { securityHeaders } from './middleware/security.middleware';
+
 import { ClientInitializerService } from './core/client.initializer.service';
 import { prisma } from './core/prisma.service';
 
@@ -24,6 +25,7 @@ import projectRoutes from './routes/project/project.routes';
 import categoryRoutes from './routes/project/category.routes';
 import educationalRoutes from './routes/educational';
 import readListRoutes from './routes/readlist';
+import linkPreviewRoutes from './routes/linkPreview/linkPreview.routes';
 
 import validatorRoutes from './routes/staking/validator.routes';
 import trendingValidatorRoutes from './routes/staking/trendingValidator.routes';
@@ -82,6 +84,7 @@ app.use('/projects', projectRoutes);
 app.use('/categories', categoryRoutes);
 app.use('/educational', educationalRoutes);
 app.use('/readlists', readListRoutes);
+app.use('/link-preview', linkPreviewRoutes);
 app.use('/staking/validators', validatorRoutes);
 app.use('/staking/validators/trending', trendingValidatorRoutes);
 app.use('/staking/validations', validationRoutes);

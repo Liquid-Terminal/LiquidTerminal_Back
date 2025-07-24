@@ -60,6 +60,9 @@ export class ReadListItemService extends BaseService<
    * @returns true si l'item existe déjà, false sinon
    */
   protected async checkExists(data: ReadListItemCreateInput): Promise<boolean> {
+    if (!data.readListId) {
+      throw new ReadListItemValidationError('readListId is required');
+    }
     return await this.repository.existsInReadList(data.readListId, data.resourceId);
   }
 
@@ -100,6 +103,10 @@ export class ReadListItemService extends BaseService<
         educationalResourceRepository.setPrismaClient(tx);
 
         // Vérifier que la read list existe et que l'utilisateur y a accès
+        if (!data.readListId) {
+          throw new ReadListItemValidationError('readListId is required');
+        }
+        
         const readList = await readListRepository.findById(data.readListId);
         if (!readList) {
           throw new ReadListNotFoundError();
@@ -313,7 +320,9 @@ export class ReadListItemService extends BaseService<
    */
   async create(data: ReadListItemCreateInput): Promise<ReadListItemResponse> {
     const result = await super.create(data);
-    await this.invalidateReadListItemCache(result.id, data.readListId);
+    if (data.readListId) {
+      await this.invalidateReadListItemCache(result.id, data.readListId);
+    }
     return result;
   }
 

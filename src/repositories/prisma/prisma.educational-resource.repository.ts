@@ -21,6 +21,16 @@ export class PrismaEducationalResourceRepository implements EducationalResourceR
         email: true
       }
     },
+    linkPreview: {
+      select: {
+        id: true,
+        title: true,
+        description: true,
+        image: true,
+        siteName: true,
+        favicon: true
+      }
+    },
     categories: {
       include: {
         category: {

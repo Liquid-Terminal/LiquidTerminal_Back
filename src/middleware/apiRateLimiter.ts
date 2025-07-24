@@ -7,12 +7,12 @@ const RATE_LIMITS = {
   // Limites par seconde pour prévenir les bursts
   BURST_LIMIT: {
     WINDOW: 1,      // 1 seconde
-    MAX_REQUESTS: 50 // 50 requêtes max par seconde pour les pics
+    MAX_REQUESTS: 20 // 20 requêtes max par seconde pour les pics
   },
   // Limites par minute pour le moyen terme
   MINUTE_LIMIT: {
     WINDOW: 60,       // 60 secondes
-    MAX_REQUESTS: 1800 // 30 req/sec en moyenne sur la minute
+    MAX_REQUESTS: 1200 // 20 req/sec en moyenne sur la minute
   },
   // Limites par heure pour détecter les abus
   HOUR_LIMIT: {

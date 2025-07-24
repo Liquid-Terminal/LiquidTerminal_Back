@@ -1,5 +1,5 @@
 import { BaseApiService } from '../../../core/base.api.service';
-import { PerpMarket, PerpAssetContext, PerpMarketData } from '../../../types/market.types';
+import { PerpMarket, PerpAssetContext } from '../../../types/market.types';
 import { CircuitBreakerService } from '../../../core/circuit.breaker.service';
 import { RateLimiterService } from '../../../core/hyperLiquid.ratelimiter.service';
 import { redisService } from '../../../core/redis.service';

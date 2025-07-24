@@ -32,6 +32,7 @@ export interface EducationalResourceResponse {
   url: string;
   createdAt: Date;
   addedBy: number;
+  linkPreviewId?: string;
   creator: {
     id: number;
     name: string | null;
@@ -49,6 +50,7 @@ export interface EducationalResourceCreateInput {
 
 export interface EducationalResourceUpdateInput {
   url?: string;
+  linkPreviewId?: string;
 }
 
 // Types pour la table de liaison

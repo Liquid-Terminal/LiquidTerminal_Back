@@ -158,9 +158,16 @@ export class PrismaReadListItemRepository implements ReadListItemRepository {
         // Si aucun ordre n'est spécifié, utiliser le prochain ordre disponible
         let finalData = { ...data };
         if (finalData.order === undefined || finalData.order === null) {
+          if (!data.readListId) {
+            throw new Error('readListId is required to determine order');
+          }
           finalData.order = await this.getNextOrder(data.readListId);
         }
 
+        if (!data.readListId) {
+          throw new Error('readListId is required');
+        }
+        
         const item = await this.prismaClient.readListItem.create({
           data: {
             notes: finalData.notes,

@@ -302,4 +302,31 @@ export class FeesService {
       throw error;
     }
   }
+
+  public async getRawFeesDataWithConversion(): Promise<Array<Omit<FeeData, 'time'> & { time: string }>> {
+    try {
+      const rawData = await this.getRawFeesDataFromCache();
+      if (!rawData) {
+        throw new FeesError('No raw fees data available');
+      }
+
+      // Convertir les données avec la conversion USD et format de date normal
+      const convertedData = rawData.map(entry => ({
+        time: new Date(entry.time * 1000).toISOString(),
+        total_fees: this.convertToUSD(entry.total_fees),
+        total_spot_fees: this.convertToUSD(entry.total_spot_fees)
+      }));
+
+      logDeduplicator.info('Retrieved raw fees data with conversion', {
+        entriesCount: convertedData.length
+      });
+
+      return convertedData;
+    } catch (error) {
+      logDeduplicator.error('Error fetching raw fees data with conversion:', { 
+        error: error instanceof Error ? error.message : String(error) 
+      });
+      throw error;
+    }
+  }
 }   

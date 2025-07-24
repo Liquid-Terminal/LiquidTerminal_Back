@@ -27,6 +27,7 @@ import { BaseService } from '../../core/crudBase.service';
 import { cacheService } from '../../core/cache.service';
 import { transactionService } from '../../core/transaction.service';
 import { CACHE_TTL } from '../../constants/cache.constants';
+import { LinkPreviewService } from '../linkPreview/linkPreview.service';
 
 type EducationalResourceQueryParams = {
   page?: number;
@@ -124,7 +125,49 @@ export class EducationalResourceService extends BaseService<
 
   async create(data: EducationalResourceCreateInput): Promise<EducationalResourceResponse> {
     await this.validateUrl(data.url);
-    return await super.create(data);
+    
+    return await transactionService.execute(async (tx) => {
+      this.repository.setPrismaClient(tx);
+      
+      try {
+        // 1. Créer la ressource éducative
+        const resource = await super.create(data);
+        
+        // 2. Générer automatiquement la LinkPreview (avec gestion d'erreur)
+        try {
+          const linkPreviewService = LinkPreviewService.getInstance();
+          const linkPreview = await linkPreviewService.generatePreview(data.url);
+          
+          // 3. Mettre à jour la ressource avec le linkPreviewId
+          const updatedResource = await this.repository.update(resource.id, {
+            linkPreviewId: linkPreview.id
+          });
+          
+          logDeduplicator.info('Educational resource created with link preview', { 
+            resourceId: resource.id, 
+            linkPreviewId: linkPreview.id,
+            url: data.url 
+          });
+          
+          return updatedResource;
+        } catch (linkPreviewError) {
+          // Si la génération de LinkPreview échoue, on garde la ressource sans preview
+          logDeduplicator.warn('Failed to generate link preview, keeping resource without preview', { 
+            resourceId: resource.id,
+            url: data.url,
+            error: linkPreviewError 
+          });
+          
+          return resource; // Retourner la ressource sans LinkPreview
+        }
+      } catch (error) {
+        logDeduplicator.error('Error creating educational resource', { 
+          error, 
+          url: data.url 
+        });
+        throw error;
+      }
+    });
   }
 
   async update(id: number, data: EducationalResourceUpdateInput): Promise<EducationalResourceResponse> {
@@ -192,6 +235,52 @@ export class EducationalResourceService extends BaseService<
       logDeduplicator.error('Error fetching resources by category:', { error, categoryId });
       throw error;
     }
+  }
+
+  async delete(id: number): Promise<void> {
+    return await transactionService.execute(async (tx) => {
+      this.repository.setPrismaClient(tx);
+      
+      try {
+        // 1. Récupérer la ressource pour avoir le linkPreviewId
+        const resource = await this.repository.findById(id);
+        if (!resource) {
+          throw new EducationalResourceNotFoundError();
+        }
+        
+        // 2. Supprimer la ressource éducative
+        await super.delete(id);
+        
+        // 3. Vérifier si la LinkPreview est utilisée par d'autres ressources
+        if (resource.linkPreviewId) {
+          const linkPreviewService = LinkPreviewService.getInstance();
+          const isUsedByOthers = await linkPreviewService.isUsedByOtherResources(resource.linkPreviewId, id);
+          
+          // Supprimer la LinkPreview seulement si elle n'est plus utilisée
+          if (!isUsedByOthers) {
+            await linkPreviewService.deleteById(resource.linkPreviewId);
+            logDeduplicator.info('Link preview deleted (no longer used)', { 
+              linkPreviewId: resource.linkPreviewId 
+            });
+          } else {
+            logDeduplicator.info('Link preview kept (still used by other resources)', { 
+              linkPreviewId: resource.linkPreviewId 
+            });
+          }
+        }
+        
+        logDeduplicator.info('Educational resource deleted', { 
+          resourceId: id, 
+          linkPreviewId: resource.linkPreviewId 
+        });
+      } catch (error) {
+        logDeduplicator.error('Error deleting educational resource', { 
+          error, 
+          resourceId: id 
+        });
+        throw error;
+      }
+    });
   }
 
 

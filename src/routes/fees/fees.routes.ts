@@ -36,4 +36,36 @@ router.get('', async (req, res) => {
   }
 });
 
+// Route pour les données brutes avec conversion
+router.get('/raw', async (req, res) => {
+  try {
+    const convertedData = await feesService.getRawFeesDataWithConversion();
+    
+    res.json({
+      success: true,
+      data: convertedData
+    });
+  } catch (error: unknown) {
+    logDeduplicator.error('Error fetching raw fees data:', { error });
+    
+    if (error instanceof FeesError) {
+      res.status(error.statusCode).json({
+        success: false,
+        error: {
+          message: error.message,
+          code: error.code
+        }
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: {
+          message: error instanceof Error ? error.message : 'Internal server error',
+          code: 'INTERNAL_SERVER_ERROR'
+        }
+      });
+    }
+  }
+});
+
 export default router; 

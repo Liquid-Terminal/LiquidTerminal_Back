@@ -6,6 +6,7 @@ export const CACHE_PREFIX = {
   EDUCATIONAL_RESOURCE: 'educational_resource',
   READLIST: 'readlist',
   READLIST_ITEM: 'readlist_item',
+  LINK_PREVIEW: 'link_preview',
   MARKET: 'market',
   STATS: 'stats',
   WALLET: 'wallet'
@@ -35,6 +36,8 @@ export const CACHE_KEYS = {
   READLIST_ITEM: (id: number) => `${CACHE_PREFIX.READLIST_ITEM}:${id}`,
   READLIST_ITEM_LIST: (params: string) => `${CACHE_PREFIX.READLIST_ITEM}:list:${params}`,
   READLIST_ITEMS_BY_LIST: (readListId: number) => `${CACHE_PREFIX.READLIST_ITEM}:list:${readListId}`,
+  LINK_PREVIEW: (id: string) => `${CACHE_PREFIX.LINK_PREVIEW}:${id}`,
+  LINK_PREVIEW_LIST: (params: string) => `${CACHE_PREFIX.LINK_PREVIEW}:list:${params}`,
   MARKET: (id: string) => `${CACHE_PREFIX.MARKET}:${id}`,
   MARKET_LIST: (params: string) => `${CACHE_PREFIX.MARKET}:list:${params}`,
   STATS: (id: string) => `${CACHE_PREFIX.STATS}:${id}`,

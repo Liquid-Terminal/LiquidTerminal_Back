@@ -38,4 +38,15 @@ export class SigningKeyError extends AuthError {
   constructor(message: string = 'Signing key not found') {
     super(message, 500, 'SIGNING_KEY_ERROR');
   }
+}
+
+export class InsufficientPermissionsError extends AuthError {
+  constructor(
+    message: string = 'Insufficient permissions',
+    public statusCode: number = 403,
+    public code: string = 'INSUFFICIENT_PERMISSIONS'
+  ) {
+    super(message, statusCode, code);
+    this.name = 'InsufficientPermissionsError';
+  }
 } 

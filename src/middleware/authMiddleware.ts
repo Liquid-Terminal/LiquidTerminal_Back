@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { AuthService } from '../services/auth/auth.service';
-import { PrivyPayload } from '../types/auth.types';
+import { PrivyPayload, UserRole } from '../types/auth.types';
 import { TokenValidationError } from '../errors/auth.errors';
 import { logDeduplicator } from '../utils/logDeduplicator';
 
@@ -8,6 +8,11 @@ declare global {
   namespace Express {
     interface Request {
       user?: PrivyPayload;
+      currentUser?: {
+        id: number;
+        role: UserRole;
+        privyUserId: string;
+      };
     }
   }
 }

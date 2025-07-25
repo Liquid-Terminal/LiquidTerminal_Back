@@ -6,6 +6,8 @@ import { marketRateLimiter } from '../../middleware/apiRateLimiter';
 import { ProjectNotFoundError, CategoryNotFoundError } from '../../errors/project.errors';
 import { logDeduplicator } from '../../utils/logDeduplicator';
 import { ProjectError } from '../../errors/project.errors';
+import { validatePrivyToken } from '../../middleware/authMiddleware';
+import { requireModerator, requireAdmin } from '../../middleware/roleMiddleware';
 
 const router = express.Router();
 const projectService = new ProjectService();
@@ -14,7 +16,7 @@ const projectService = new ProjectService();
 router.use(marketRateLimiter);
 
 // Route pour créer un nouveau projet
-router.post('/', (async (req: Request, res: Response) => {
+router.post('/', validatePrivyToken, requireModerator, (async (req: Request, res: Response) => {
   try {
     const project = await projectService.create(req.body);
     res.status(201).json({
@@ -106,7 +108,7 @@ router.get('/:id', (async (req: Request, res: Response) => {
 }) as RequestHandler);
 
 // Route pour mettre à jour un projet
-router.put('/:id', (async (req: Request, res: Response) => {
+router.put('/:id', validatePrivyToken, requireModerator, (async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) {
@@ -143,7 +145,7 @@ router.put('/:id', (async (req: Request, res: Response) => {
 }) as RequestHandler);
 
 // Route pour supprimer un projet
-router.delete('/:id', (async (req: Request, res: Response) => {
+router.delete('/:id', validatePrivyToken, requireAdmin, (async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) {
@@ -179,7 +181,7 @@ router.delete('/:id', (async (req: Request, res: Response) => {
 }) as RequestHandler);
 
 // Mettre à jour la catégorie d'un projet
-router.put("/:id/category", validateRequest(projectCategoryUpdateSchema), (async (req: Request, res: Response) => {
+router.put("/:id/category", validatePrivyToken, requireModerator, validateRequest(projectCategoryUpdateSchema), (async (req: Request, res: Response) => {
   try {
     const projectId = parseInt(req.params.id);
     if (isNaN(projectId)) {

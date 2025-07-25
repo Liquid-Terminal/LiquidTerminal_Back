@@ -2,6 +2,7 @@ import express, { Request, Response, RequestHandler } from "express";
 import { EducationalResourceService } from "../../services/educational/educational-resource.service";
 import { marketRateLimiter } from '../../middleware/apiRateLimiter';
 import { validatePrivyToken } from '../../middleware/authMiddleware';
+import { requireModerator, requireAdmin } from '../../middleware/roleMiddleware';
 import { validateGetRequest } from '../../middleware/validation';
 import {
   validateCreateEducationalResource,
@@ -23,7 +24,7 @@ const educationalResourceService = new EducationalResourceService();
 router.use(marketRateLimiter);
 
 // Route pour créer une nouvelle ressource éducative
-router.post('/', validatePrivyToken, validateCreateEducationalResource, (async (req: Request, res: Response) => {
+router.post('/', validatePrivyToken, requireModerator, validateCreateEducationalResource, (async (req: Request, res: Response) => {
   try {
     const userId = req.user?.id;
     if (!userId) {
@@ -126,7 +127,7 @@ router.get('/:id', validateGetRequest(educationalResourceByIdGetSchema), (async 
 }) as RequestHandler);
 
 // Route pour mettre à jour une ressource éducative
-router.put('/:id', validatePrivyToken, validateUpdateEducationalResource, (async (req: Request, res: Response) => {
+router.put('/:id', validatePrivyToken, requireModerator, validateUpdateEducationalResource, (async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) {
@@ -163,7 +164,7 @@ router.put('/:id', validatePrivyToken, validateUpdateEducationalResource, (async
 }) as RequestHandler);
 
 // Route pour supprimer une ressource éducative
-router.delete('/:id', validatePrivyToken, (async (req: Request, res: Response) => {
+router.delete('/:id', validatePrivyToken, requireAdmin, (async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) {

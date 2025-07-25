@@ -7,11 +7,18 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum UserRole {
+  USER
+  MODERATOR
+  ADMIN
+}
+
 model User {
   id                              Int                           @id @default(autoincrement())
   privyUserId                     String                        @unique
   name                            String?                       @db.VarChar(255)
   email                           String?                       @unique @db.VarChar(255)
+  role                            UserRole                      @default(USER)
   createdAt                       DateTime                      @default(now()) @db.Timestamp(6)
   verified                        Boolean                       @default(false)
   UserWallets                     UserWallet[]

@@ -33,7 +33,7 @@ export class ProjectService extends BaseService<ProjectResponse, ProjectCreateIn
   protected validationSchemas = {
     create: projectCreateSchema,
     update: projectUpdateSchema,
-    query: projectQuerySchema
+    query: projectQuerySchema as any
   };
   protected errorClasses = {
     notFound: ProjectNotFoundError,

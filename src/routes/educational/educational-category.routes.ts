@@ -2,6 +2,7 @@ import express, { Request, Response, RequestHandler } from "express";
 import { EducationalCategoryService } from "../../services/educational/educational-category.service";
 import { marketRateLimiter } from '../../middleware/apiRateLimiter';
 import { validatePrivyToken } from '../../middleware/authMiddleware';
+import { requireModerator, requireAdmin } from '../../middleware/roleMiddleware';
 import { validateGetRequest } from '../../middleware/validation';
 import {
   validateCreateEducationalCategory,
@@ -22,7 +23,7 @@ const educationalCategoryService = new EducationalCategoryService();
 router.use(marketRateLimiter);
 
 // Route pour créer une nouvelle catégorie éducative
-router.post('/', validatePrivyToken, validateCreateEducationalCategory, (async (req: Request, res: Response) => {
+router.post('/', validatePrivyToken, requireModerator, validateCreateEducationalCategory, (async (req: Request, res: Response) => {
   try {
     const userId = req.user?.id;
     if (!userId) {
@@ -161,7 +162,7 @@ router.get('/:id/resources', validateGetRequest(educationalCategoryResourcesGetS
 }) as RequestHandler);
 
 // Route pour mettre à jour une catégorie éducative
-router.put('/:id', validatePrivyToken, validateUpdateEducationalCategory, (async (req: Request, res: Response) => {
+router.put('/:id', validatePrivyToken, requireModerator, validateUpdateEducationalCategory, (async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) {
@@ -198,7 +199,7 @@ router.put('/:id', validatePrivyToken, validateUpdateEducationalCategory, (async
 }) as RequestHandler);
 
 // Route pour supprimer une catégorie éducative
-router.delete('/:id', validatePrivyToken, (async (req: Request, res: Response) => {
+router.delete('/:id', validatePrivyToken, requireAdmin, (async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) {

@@ -3,6 +3,8 @@ import { CategoryService } from '../../services/project/category.service';
 import { marketRateLimiter } from '../../middleware/apiRateLimiter';
 import { CategoryNotFoundError, CategoryError } from '../../errors/project.errors';
 import { logDeduplicator } from '../../utils/logDeduplicator';
+import { validatePrivyToken } from '../../middleware/authMiddleware';
+import { requireModerator, requireAdmin } from '../../middleware/roleMiddleware';
 
 const router = Router();
 const categoryService = new CategoryService();
@@ -104,7 +106,7 @@ router.get('/:id/projects', (async (req: Request, res: Response) => {
 }) as RequestHandler);
 
 // Créer une nouvelle catégorie
-router.post('/', (async (req: Request, res: Response) => {
+router.post('/', validatePrivyToken, requireModerator, (async (req: Request, res: Response) => {
   try {
     const category = await categoryService.create(req.body);
     res.status(201).json({
@@ -132,7 +134,7 @@ router.post('/', (async (req: Request, res: Response) => {
 }) as RequestHandler);
 
 // Mettre à jour une catégorie
-router.put('/:id', (async (req: Request, res: Response) => {
+router.put('/:id', validatePrivyToken, requireModerator, (async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) {
@@ -169,7 +171,7 @@ router.put('/:id', (async (req: Request, res: Response) => {
 }) as RequestHandler);
 
 // Supprimer une catégorie
-router.delete('/:id', (async (req: Request, res: Response) => {
+router.delete('/:id', validatePrivyToken, requireAdmin, (async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) {

@@ -7,7 +7,10 @@ export const requireRole = (allowedRoles: UserRole[]) => {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const privyUserId = req.user?.sub;
+      console.log('Role middleware - privyUserId:', privyUserId);
+      
       if (!privyUserId) {
+        console.log('Role middleware - No privyUserId found');
         res.status(401).json({ 
           success: false, 
           error: 'User not authenticated', 
@@ -17,6 +20,7 @@ export const requireRole = (allowedRoles: UserRole[]) => {
       }
 
       // Récupérer l'utilisateur avec son rôle
+      console.log('Role middleware - Looking for user with privyUserId:', privyUserId);
       const user = await prisma.user.findUnique({
         where: { privyUserId },
         select: {
@@ -26,7 +30,10 @@ export const requireRole = (allowedRoles: UserRole[]) => {
         }
       });
 
+      console.log('Role middleware - User found:', user);
+
       if (!user) {
+        console.log('Role middleware - User not found in database');
         res.status(401).json({ 
           success: false, 
           error: 'User not found', 
@@ -35,7 +42,10 @@ export const requireRole = (allowedRoles: UserRole[]) => {
         return;
       }
 
+      console.log('Role middleware - User role:', user.role, 'Required roles:', allowedRoles);
+      
       if (!allowedRoles.includes(user.role)) {
+        console.log('Role middleware - Insufficient permissions');
         logDeduplicator.warn('Insufficient permissions', {
           privyUserId,
           userRole: user.role,

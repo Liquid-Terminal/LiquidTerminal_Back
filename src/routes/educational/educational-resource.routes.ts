@@ -26,7 +26,7 @@ router.use(marketRateLimiter);
 // Route pour créer une nouvelle ressource éducative
 router.post('/', validatePrivyToken, requireModerator, validateCreateEducationalResource, (async (req: Request, res: Response) => {
   try {
-    const userId = req.user?.id;
+    const userId = req.currentUser?.id;
     if (!userId) {
       return res.status(401).json({
         success: false,

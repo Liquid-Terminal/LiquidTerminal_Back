@@ -20,7 +20,19 @@ export interface Project {
 export interface ProjectCreateInput {
   title: string;
   desc: string;
-  logo: string;
+  logo?: string; // Rendu optionnel pour supporter les uploads
+  twitter?: string;
+  discord?: string;
+  telegram?: string;
+  website?: string;
+  categoryId?: number;
+}
+
+// Type pour la création avec upload de fichier
+export interface ProjectCreateWithUploadInput {
+  title: string;
+  desc: string;
+  logo?: string; // URL optionnelle si pas de fichier uploadé
   twitter?: string;
   discord?: string;
   telegram?: string;

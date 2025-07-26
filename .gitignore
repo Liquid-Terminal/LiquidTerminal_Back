@@ -33,3 +33,6 @@ yarn-error.log*
 
 # Test coverage
 coverage/
+
+# Uploads (fichiers uploadés par les utilisateurs)
+uploads/

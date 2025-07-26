@@ -88,14 +88,52 @@ const urlSchema = z.string()
   .regex(/^https:\/\//i, 'Seules les URLs HTTPS sont autorisées')
   .optional();
 
-// Schéma de validation pour les images
+// Schéma de validation pour les images (URL ou fichier uploadé)
 const imageUrlSchema = z.string()
   .url('URL d\'image invalide')
   .max(255, 'URL d\'image trop longue')
   .regex(/^https:\/\//i, 'Seules les URLs HTTPS sont autorisées')
-  .regex(/\.(jpg|jpeg|png|gif|webp)$/i, 'Format d\'image non supporté');
+  .optional();
 
-// Schéma de validation pour la création de projet
+// Schéma de validation pour les projets avec upload de fichier
+export const projectCreateWithUploadSchema = z.object({
+  body: z.object({
+    title: z.string()
+      .min(3, 'Le titre doit contenir au moins 3 caractères')
+      .max(255, 'Le titre ne doit pas dépasser 255 caractères')
+      .trim()
+      .regex(/^[a-zA-Z0-9\s\-_.,!?]+$/, 'Le titre contient des caractères non autorisés'),
+    
+    desc: z.string()
+      .min(10, 'La description doit contenir au moins 10 caractères')
+      .max(1000, 'La description ne doit pas dépasser 1000 caractères')
+      .trim(),
+    
+    // Le logo peut être soit une URL, soit un objet vide (FormData), soit absent
+    logo: z.union([
+      imageUrlSchema,
+      z.object({}).optional(), // Pour les objets vides de FormData
+      z.string().optional()
+    ]).optional(),
+    
+    twitter: urlSchema,
+    discord: urlSchema,
+    telegram: urlSchema,
+    website: urlSchema,
+    
+    categoryId: z.union([z.string(), z.number()]).transform(val => {
+      if (typeof val === 'string') {
+        const num = parseInt(val, 10);
+        return isNaN(num) ? undefined : num;
+      }
+      return val;
+    }).optional()
+  }),
+  params: z.object({}),
+  query: z.object({})
+});
+
+// Schéma de validation pour la création de projet (avec URL de logo)
 export const projectCreateSchema = z.object({
   title: z.string()
     .min(3, 'Le titre doit contenir au moins 3 caractères')
@@ -108,7 +146,7 @@ export const projectCreateSchema = z.object({
     .max(1000, 'La description ne doit pas dépasser 1000 caractères')
     .trim(),
   
-  logo: imageUrlSchema,
+  logo: imageUrlSchema.optional(),
   
   twitter: urlSchema,
   discord: urlSchema,

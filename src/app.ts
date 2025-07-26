@@ -9,6 +9,7 @@ import { securityHeaders } from './middleware/security.middleware';
 
 import { ClientInitializerService } from './core/client.initializer.service';
 import { prisma } from './core/prisma.service';
+import { FileCleanupService } from './utils/fileCleanup';
 
 import authRoutes from './routes/auth.routes';
 
@@ -72,6 +73,9 @@ app.use(express.urlencoded({ extended: true }));
 // Appliquer la sanitization globalement
 app.use(sanitizeInput);
 
+// Servir les fichiers statiques (uploads)
+app.use('/uploads', express.static('uploads'));
+
 // Routes Pages
 app.use('/auth', authRoutes);
 app.use('/market/spot', marketSpotRoutes);
@@ -101,6 +105,10 @@ const PORT = process.env.PORT || 3002;
 // Initialiser les clients avant de démarrer le serveur
 const clientInitializer = ClientInitializerService.getInstance();
 clientInitializer.initialize();
+
+// Démarrer le service de nettoyage automatique des fichiers
+const fileCleanupService = FileCleanupService.getInstance();
+fileCleanupService.startAutoCleanup();
 
 server.listen(PORT, () => {
   logDeduplicator.info(`Server is running on port ${PORT}`);

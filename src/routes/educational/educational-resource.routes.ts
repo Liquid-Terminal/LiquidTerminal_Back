@@ -200,7 +200,7 @@ router.delete('/:id', validatePrivyToken, requireAdmin, (async (req: Request, re
 }) as RequestHandler);
 
 // Route pour assigner une ressource à une catégorie
-router.post('/:id/categories', validatePrivyToken, validateAssignResourceToCategory, (async (req: Request, res: Response) => {
+router.post('/:id/categories', validatePrivyToken, requireModerator, validateAssignResourceToCategory, (async (req: Request, res: Response) => {
   try {
     const resourceId = parseInt(req.params.id, 10);
     if (isNaN(resourceId)) {
@@ -255,7 +255,7 @@ router.post('/:id/categories', validatePrivyToken, validateAssignResourceToCateg
 }) as RequestHandler);
 
 // Route pour retirer une ressource d'une catégorie
-router.delete('/:id/categories/:categoryId', validatePrivyToken, (async (req: Request, res: Response) => {
+router.delete('/:id/categories/:categoryId', validatePrivyToken, requireModerator, (async (req: Request, res: Response) => {
   try {
     const resourceId = parseInt(req.params.id, 10);
     const categoryId = parseInt(req.params.categoryId, 10);

@@ -1,4 +1,4 @@
-import { ProjectCreateInput, ProjectUpdateInput, ProjectResponse } from '../../types/project.types';
+import { ProjectCreateInput, ProjectUpdateInput, ProjectResponse, ProjectCreateWithUploadInput } from '../../types/project.types';
 import { 
   ProjectNotFoundError, 
   ProjectAlreadyExistsError,
@@ -16,6 +16,7 @@ import {
 import { projectRepository, categoryRepository } from '../../repositories';
 import { transactionService } from '../../core/transaction.service';
 import { BaseService } from '../../core/crudBase.service';
+import { deleteUploadedFile } from '../../middleware/upload.middleware';
 
 // Type pour les paramètres de requête
 type ProjectQueryParams = {
@@ -137,6 +138,56 @@ export class ProjectService extends BaseService<ProjectResponse, ProjectCreateIn
   }
 
   /**
+   * Crée un projet avec gestion d'upload de fichier
+   * @param data Données du projet avec logo optionnel
+   * @returns Projet créé
+   */
+  public async createWithUpload(data: ProjectCreateWithUploadInput) {
+    try {
+      // Nettoyer les données
+      const cleanData = { ...data };
+      
+      // Si logo est un objet vide ou undefined, le supprimer
+      if (!cleanData.logo || (typeof cleanData.logo === 'object' && Object.keys(cleanData.logo).length === 0)) {
+        delete cleanData.logo;
+      }
+      
+      // Convertir categoryId en number si c'est une string
+      if (cleanData.categoryId && typeof cleanData.categoryId === 'string') {
+        cleanData.categoryId = parseInt(cleanData.categoryId, 10);
+      }
+      
+      // Si pas de logo, utiliser une image par défaut
+      const projectData: ProjectCreateInput = {
+        ...cleanData,
+        logo: cleanData.logo || 'https://via.placeholder.com/150x150.png?text=No+Logo'
+      };
+
+      // Vérifier si un projet avec le même titre existe déjà
+      const exists = await this.checkExists(projectData);
+      if (exists) {
+        throw new ProjectAlreadyExistsError();
+      }
+
+      // Créer le projet directement avec le repository (sans validation du service de base)
+      const project = await this.repository.create(projectData);
+      
+      // Invalider le cache
+      await this.invalidateEntityListCache();
+
+      logDeduplicator.info('Project created with upload successfully', { 
+        id: project.id, 
+        title: project.title 
+      });
+
+      return project;
+    } catch (error) {
+      logDeduplicator.error('Error creating project with upload:', { error, data });
+      throw error;
+    }
+  }
+
+  /**
    * Récupère tous les projets d'une catégorie
    * @param categoryId ID de la catégorie
    * @returns Liste des projets de la catégorie
@@ -163,6 +214,55 @@ export class ProjectService extends BaseService<ProjectResponse, ProjectCreateIn
         throw error;
       }
       logDeduplicator.error('Error fetching projects by category:', { error, categoryId });
+      throw error;
+    }
+  }
+
+  /**
+   * Supprime un projet et son fichier uploadé associé
+   * @param id ID du projet à supprimer
+   * @throws Erreur si le projet n'existe pas
+   */
+  async delete(id: number) {
+    try {
+      // Récupérer le projet avant suppression pour avoir l'URL du logo
+      const project = await this.repository.findById(id);
+      if (!project) {
+        throw new this.errorClasses.notFound();
+      }
+
+      // Utiliser le service de transaction pour la suppression
+      await transactionService.execute(async (tx) => {
+        // Configurer le repository pour utiliser le client transactionnel
+        this.repository.setPrismaClient(tx);
+        
+        // Vérifier si l'entité peut être supprimée
+        await this.checkCanDelete(id);
+
+        // Supprimer l'entité
+        await this.repository.delete(id);
+      });
+
+      // Réinitialiser le client Prisma
+      this.repository.resetPrismaClient();
+
+      // Supprimer le fichier uploadé s'il existe et n'est pas l'image par défaut
+      if (project.logo && 
+          project.logo !== 'https://via.placeholder.com/150x150.png?text=No+Logo' &&
+          project.logo.includes('/uploads/project-logos/')) {
+        deleteUploadedFile(project.logo);
+      }
+
+      // Invalider le cache
+      await this.invalidateEntityCache(id);
+      await this.invalidateEntityListCache();
+
+      logDeduplicator.info('Project deleted successfully with file cleanup', { id, logo: project.logo });
+    } catch (error) {
+      if (error instanceof this.errorClasses.notFound) {
+        throw error;
+      }
+      logDeduplicator.error('Error deleting project:', { error, id });
       throw error;
     }
   }

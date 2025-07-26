@@ -1,13 +1,14 @@
 import express, { Request, Response, RequestHandler } from "express";
 import { ProjectService } from "../../services/project/project.service";
 import { validateRequest } from '../../middleware/validation/validation.middleware';
-import {  projectCategoryUpdateSchema } from '../../schemas/project.schema';
+import {  projectCategoryUpdateSchema, projectCreateWithUploadSchema } from '../../schemas/project.schema';
 import { marketRateLimiter } from '../../middleware/apiRateLimiter';
 import { ProjectNotFoundError, CategoryNotFoundError } from '../../errors/project.errors';
 import { logDeduplicator } from '../../utils/logDeduplicator';
 import { ProjectError } from '../../errors/project.errors';
 import { validatePrivyToken } from '../../middleware/authMiddleware';
 import { requireModerator, requireAdmin } from '../../middleware/roleMiddleware';
+import { uploadProjectLogo, handleUploadError, getFileUrl, validateUploadedFile } from '../../middleware/upload.middleware';
 
 const router = express.Router();
 const projectService = new ProjectService();
@@ -15,7 +16,55 @@ const projectService = new ProjectService();
 // Appliquer le rate limiting à toutes les routes
 router.use(marketRateLimiter);
 
-// Route pour créer un nouveau projet
+// Route pour créer un nouveau projet avec upload de logo
+router.post('/with-upload', 
+  validatePrivyToken, 
+  requireModerator, 
+  uploadProjectLogo,
+  handleUploadError,
+  validateUploadedFile,
+    validateRequest(projectCreateWithUploadSchema),
+  (async (req: Request, res: Response) => {
+
+
+  try {
+      // Si un fichier a été uploadé, utiliser son URL
+      if (req.file) {
+        req.body.logo = getFileUrl(req.file.filename);
+        logDeduplicator.info('File uploaded successfully', { 
+          filename: req.file.filename,
+          originalName: req.file.originalname,
+          size: req.file.size
+        });
+      }
+
+      const project = await projectService.createWithUpload(req.body);
+      res.status(201).json({
+        success: true,
+        message: 'Project created successfully',
+        data: project
+      });
+    } catch (error) {
+      logDeduplicator.error('Error creating project with upload:', { error, body: req.body });
+      
+      if (error instanceof ProjectError) {
+        return res.status(error.statusCode).json({
+          success: false,
+          error: error.message,
+          code: error.code
+        });
+      }
+
+      res.status(500).json({
+        success: false,
+        error: 'Internal server error',
+        code: 'INTERNAL_SERVER_ERROR'
+      });
+    }
+  }) as RequestHandler
+);
+
+// Route pour créer un nouveau projet (sans upload)
 router.post('/', validatePrivyToken, requireModerator, (async (req: Request, res: Response) => {
   try {
     const project = await projectService.create(req.body);

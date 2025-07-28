@@ -1,8 +1,8 @@
 // import { importJWK, jwtVerify } from "jose"; // Supprimé pour import dynamique
-import { prisma } from "../../core/prisma.service";
 import { PrivyPayload } from "../../types/auth.types";
 import { JWKSError, SigningKeyError, TokenValidationError, UserNotFoundError } from "../../errors/auth.errors";
 import { logDeduplicator } from "../../utils/logDeduplicator";
+import { userRepository } from "../../repositories/user.repository";
 
 const JWKS_URL = process.env.JWKS_URL!;
 
@@ -104,15 +104,8 @@ export class AuthService {
         username
       });
 
-      const user = await prisma.user.upsert({
-        where: { privyUserId },
-        update: {
-          name: username,
-        },
-        create: {
-          privyUserId,
-          name: username,
-        },
+      const user = await userRepository.findOrCreate(privyUserId, {
+        name: username,
       });
 
       logDeduplicator.info('User found or created', {

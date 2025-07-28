@@ -28,4 +28,34 @@ export const authResponseSchema = z.object({
     updatedAt: z.date().optional(),
   }).optional(),
   error: z.string().optional(),
-}).strict(); 
+}).strict();
+
+// ========== ADMIN SCHEMAS ==========
+
+// Schéma pour les requêtes de liste d'utilisateurs admin
+export const adminUsersQuerySchema = z.object({
+  page: z.number().int().positive().optional(),
+  limit: z.number().int().positive().optional(),
+  search: z.string().optional(),
+  verified: z.enum(['true', 'false']).optional(),
+}).strict();
+
+// Schéma pour la mise à jour d'un utilisateur par admin
+export const adminUserUpdateSchema = z.object({
+  name: z.string().min(1, 'Name must be non-empty').max(100, 'Name must be less than 100 characters').optional(),
+  email: z.string().email('Invalid email format').nullable().optional(),
+  role: z.enum(['USER', 'MODERATOR', 'ADMIN']).optional(),
+  verified: z.boolean().optional(),
+}).strict().refine(data => Object.keys(data).length > 0, {
+  message: 'At least one field must be provided for update'
+});
+
+// Schéma pour les paramètres d'utilisateur admin
+export const adminUserParamsSchema = z.object({
+  userId: z.string().regex(/^\d+$/, 'User ID must be a number'),
+}).strict();
+
+// Types
+export type AdminUsersQueryInput = z.infer<typeof adminUsersQuerySchema>;
+export type AdminUserUpdateInput = z.infer<typeof adminUserUpdateSchema>;
+export type AdminUserParamsInput = z.infer<typeof adminUserParamsSchema>; 

@@ -1,15 +1,13 @@
 import { Router, Request, Response } from "express";
-import { AuthService } from "../services/auth/auth.service";
-import { validatePrivyToken } from "../middleware/authMiddleware";
-import { validateLogin, validateUserParams } from "../middleware/validation/authValidation.middleware";
-import { marketRateLimiter } from "../middleware/apiRateLimiter";
-import { UserNotFoundError } from "../errors/auth.errors";
-import { PrismaClient } from "@prisma/client";
-import { logDeduplicator } from "../utils/logDeduplicator";
+import { AuthService } from "../../services/auth/auth.service";
+import { validatePrivyToken } from "../../middleware/authMiddleware";
+import { validateLogin, validateUserParams } from "../../middleware/validation/authValidation.middleware";
+import { marketRateLimiter } from "../../middleware/apiRateLimiter";
+import { UserNotFoundError } from "../../errors/auth.errors";
+import { logDeduplicator } from "../../utils/logDeduplicator";
 
 const router = Router();
 const authService = AuthService.getInstance();
-const prisma = new PrismaClient();
 
 // Appliquer le rate limiting à toutes les routes d'authentification
 router.use(marketRateLimiter);
@@ -111,66 +109,45 @@ router.get("/me", validatePrivyToken, (req: Request, res: Response): void => {
       return;
     }
 
-    prisma.user.findUnique({
-      where: { privyUserId },
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        role: true,
-        privyUserId: true,
-        createdAt: true,
-        verified: true
-      }
-    })
-    .then(user => {
-      if (!user) {
-        logDeduplicator.warn('User not found in /me', { privyUserId, path: req.path });
-        res.status(404).json({
-          success: false,
-          message: 'User not found',
-          code: 'USER_NOT_FOUND'
+    authService.findOrCreateUser({ sub: privyUserId } as any, '')
+      .then(user => {
+        logDeduplicator.info('User info retrieved successfully', { 
+          privyUserId,
+          userId: user.id,
+          role: user.role,
+          path: req.path 
         });
-        return;
-      }
-      
-      logDeduplicator.info('User info retrieved successfully', { 
-        privyUserId,
-        userId: user.id,
-        role: user.role,
-        path: req.path 
-      });
-      
-      res.status(200).json({
-        success: true,
-        message: 'User info retrieved successfully',
-        data: {
-          user: {
-            id: user.id,
-            name: user.name,
-            email: user.email,
-            role: user.role,
-            privyUserId: user.privyUserId,
-            createdAt: user.createdAt,
-            verified: user.verified
+        
+        res.status(200).json({
+          success: true,
+          message: 'User info retrieved successfully',
+          data: {
+            user: {
+              id: user.id,
+              name: user.name,
+              email: user.email,
+              role: user.role,
+              privyUserId: user.privyUserId,
+              createdAt: user.createdAt,
+              verified: user.verified
+            }
           }
-        }
+        });
+      })
+      .catch(error => {
+        logDeduplicator.error("Error retrieving user info", { 
+          error: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack : undefined,
+          privyUserId,
+          path: req.path 
+        });
+        
+        res.status(500).json({
+          success: false,
+          message: 'Internal server error',
+          code: 'INTERNAL_SERVER_ERROR'
+        });
       });
-    })
-    .catch(error => {
-      logDeduplicator.error("Error retrieving user info", { 
-        error: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : undefined,
-        privyUserId,
-        path: req.path 
-      });
-      
-      res.status(500).json({
-        success: false,
-        message: 'Internal server error',
-        code: 'INTERNAL_SERVER_ERROR'
-      });
-    });
   } catch (error) {
     logDeduplicator.error("Unexpected error in /me", { 
       error: error instanceof Error ? error.message : String(error),
@@ -203,24 +180,8 @@ router.get("/user/:privyUserId", validatePrivyToken, validateUserParams, (req: R
     return;
   }
 
-  prisma.user.findUnique({
-    where: { privyUserId: req.params.privyUserId }
-  })
+  authService.findOrCreateUser({ sub: req.params.privyUserId } as any, '')
     .then(user => {
-      if (!user) {
-        logDeduplicator.warn('User not found', { 
-          privyUserId: req.params.privyUserId,
-          path: req.path 
-        });
-        
-        res.status(404).json({ 
-          success: false,
-          message: "User not found",
-          code: "USER_NOT_FOUND"
-        });
-        return;
-      }
-      
       logDeduplicator.info('User retrieved successfully', { 
         privyUserId: req.params.privyUserId,
         userId: user.id,

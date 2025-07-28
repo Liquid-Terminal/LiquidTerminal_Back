@@ -11,7 +11,8 @@ import { ClientInitializerService } from './core/client.initializer.service';
 import { prisma } from './core/prisma.service';
 import { FileCleanupService } from './utils/fileCleanup';
 
-import authRoutes from './routes/auth.routes';
+import authRoutes from './routes/auth/auth.routes';
+import userAuthRoutes from './routes/auth/user.auth.routes';
 
 import marketSpotRoutes from './routes/spot/marketSpot.routes';
 import marketPerpRoutes from './routes/perp/marketPerp.routes';
@@ -78,6 +79,7 @@ app.use('/uploads', express.static('uploads'));
 
 // Routes Pages
 app.use('/auth', authRoutes);
+app.use('/user', userAuthRoutes);
 app.use('/market/spot', marketSpotRoutes);
 app.use('/market/perp', marketPerpRoutes);
 app.use('/market/auction', auctionRoutes);

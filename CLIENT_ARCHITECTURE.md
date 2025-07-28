@@ -1,56 +1,56 @@
-# Architecture des Clients - Guide Complet
+# Client Architecture - Complete Guide
 
-## Vue d'ensemble
+## Overview
 
-Cette documentation explique l'architecture complète des clients dans l'application, depuis les clients API jusqu'aux routes, en passant par les services et middlewares.
+This documentation explains the complete client architecture in the application, from API clients to routes, including services and middlewares.
 
-## Structure Générale
+## General Structure
 
 ```
 src/
-├── clients/           # Clients API externes
-├── core/             # Services de base et utilitaires
-├── services/         # Couche métier
-├── routes/           # Points d'entrée API
-├── middleware/       # Middlewares de validation, auth, etc.
-├── repositories/     # Accès aux données
-├── types/           # Types TypeScript
-└── schemas/         # Schémas de validation Zod
+├── clients/           # External API clients
+├── core/             # Base services and utilities
+├── services/         # Business layer
+├── routes/           # API entry points
+├── middleware/       # Validation, auth, etc. middlewares
+├── repositories/     # Data access
+├── types/           # TypeScript types
+└── schemas/         # Zod validation schemas
 ```
 
-## 1. Couche Clients (src/clients/)
+## 1. Client Layer (src/clients/)
 
-### Structure des Clients
+### Client Structure
 
-Tous les clients héritent de `BaseApiService` et suivent le pattern Singleton :
+All clients inherit from `BaseApiService` and follow the Singleton pattern:
 
 ```typescript
-// BaseApiService fournit :
-- fetchWithTimeout<T>() : gestion des timeouts
-- withRetry() : mécanisme de retry
-- post<T>() / get<T>() : méthodes HTTP
-- handleError() : gestion d'erreurs
+// BaseApiService provides:
+- fetchWithTimeout<T>() : timeout management
+- withRetry() : retry mechanism
+- post<T>() / get<T>() : HTTP methods
+- handleError() : error handling
 ```
 
-### Types de Clients
+### Client Types
 
-#### A. Clients Hyperliquid (src/clients/hyperliquid/)
-- **Spot** : `HyperliquidSpotClient`
-- **Perp** : `HyperliquidPerpClient`
-- **Vault** : `HyperliquidVaultClient`, `HyperliquidVaultsClient`
-- **Staking** : `ValidatorClient`
-- **Deploy** : `HyperliquidSpotDeployClient`
-- **Token Info** : `HyperliquidTokenInfoClient`
-- **Stats** : `HyperliquidSpotStatsClient`, `HyperliquidGlobalStatsClient`
+#### A. Hyperliquid Clients (src/clients/hyperliquid/)
+- **Spot**: `HyperliquidSpotClient`
+- **Perp**: `HyperliquidPerpClient`
+- **Vault**: `HyperliquidVaultClient`, `HyperliquidVaultsClient`
+- **Staking**: `ValidatorClient`
+- **Deploy**: `HyperliquidSpotDeployClient`
+- **Token Info**: `HyperliquidTokenInfoClient`
+- **Stats**: `HyperliquidSpotStatsClient`, `HyperliquidGlobalStatsClient`
 
-#### B. Clients Hypurrscan (src/clients/hypurrscan/)
-- **Auction** : `HypurrscanClient`
-- **Validation** : `HypurrscanValidationClient`
-- **Unstaking** : `HypurrscanUnstakingClient`
-- **Spot USDC** : `SpotUSDCClient`
-- **Fees** : `HypurrscanFeesClient`
+#### B. Hypurrscan Clients (src/clients/hypurrscan/)
+- **Auction**: `HypurrscanClient`
+- **Validation**: `HypurrscanValidationClient`
+- **Unstaking**: `HypurrscanUnstakingClient`
+- **Spot USDC**: `SpotUSDCClient`
+- **Fees**: `HypurrscanFeesClient`
 
-### Pattern Client Standard
+### Standard Client Pattern
 
 ```typescript
 export class ExampleClient extends BaseApiService {
@@ -59,13 +59,13 @@ export class ExampleClient extends BaseApiService {
   private static readonly REQUEST_WEIGHT = 20;
   private static readonly MAX_WEIGHT_PER_MINUTE = 1200;
 
-  // Cache et polling
+  // Cache and polling
   private readonly CACHE_KEY = 'example:data';
   private readonly UPDATE_CHANNEL = 'example:updated';
   private readonly UPDATE_INTERVAL = 10000;
   private pollingInterval: NodeJS.Timeout | null = null;
 
-  // Services intégrés
+  // Integrated services
   private circuitBreaker: CircuitBreakerService;
   private rateLimiter: RateLimiterService;
 
@@ -86,11 +86,11 @@ export class ExampleClient extends BaseApiService {
   }
 
   public startPolling(): void {
-    // Logique de polling avec mise en cache Redis
+    // Polling logic with Redis caching
   }
 
   private async updateData(): Promise<void> {
-    // Récupération et mise en cache des données
+    // Data retrieval and caching
   }
 
   public checkRateLimit(ip: string): boolean {
@@ -99,44 +99,44 @@ export class ExampleClient extends BaseApiService {
 }
 ```
 
-## 2. Initialisation des Clients
+## 2. Client Initialization
 
 ### ClientInitializerService
 
-Le service `ClientInitializerService` centralise l'initialisation :
+The `ClientInitializerService` centralizes initialization:
 
 ```typescript
-// Dans src/core/client.initializer.service.ts
+// In src/core/client.initializer.service.ts
 export class ClientInitializerService {
   private static instance: ClientInitializerService;
   private clients: Map<string, any> = new Map();
 
   public initialize(): void {
-    // Initialise tous les clients
+    // Initialize all clients
     const spotClient = HyperliquidSpotClient.getInstance();
     this.clients.set('spot', spotClient);
     
-    // ... autres clients
+    // ... other clients
     
-    // Démarre le polling pour tous
+    // Start polling for all
     this.startAllPolling();
   }
 }
 ```
 
-### Intégration dans l'Application
+### Integration into the Application
 
 ```typescript
-// Dans src/app.ts
+// In src/app.ts
 const clientInitializer = ClientInitializerService.getInstance();
 clientInitializer.initialize();
 ```
 
-## 3. Couche Services (src/services/)
+## 3. Service Layer (src/services/)
 
-### Pattern Service Standard
+### Standard Service Pattern
 
-Les services utilisent le pattern Singleton et héritent souvent de `BaseService` :
+Services use the Singleton pattern and often inherit from `BaseService` :
 
 ```typescript
 export class ExampleService extends BaseService<
@@ -168,64 +168,64 @@ export class ExampleService extends BaseService<
 }
 ```
 
-### Types de Services
+### Service Types
 
-#### A. Services Métier
-- **Market Data** : `SpotAssetContextService`, `PerpAssetContextService`
-- **Staking** : `ValidationService`, `UnstakingService`
-- **Vault** : `VaultsService`
-- **Auth** : `AuthService`
-- **Wallet** : `WalletService`
-- **Project** : `ProjectService`, `CategoryService`
+#### A. Business Services
+- **Market Data**: `SpotAssetContextService`, `PerpAssetContextService`
+- **Staking**: `ValidationService`, `UnstakingService`
+- **Vault**: `VaultsService`
+- **Auth**: `AuthService`
+- **Wallet**: `WalletService`
+- **Project**: `ProjectService`, `CategoryService`
 
-#### B. Services Utilitaires
-- **Global Stats** : `DashboardGlobalStatsService`
-- **Fees** : `FeesService`
-- **Bridged USDC** : `BridgedUsdcService`
+#### B. Utility Services
+- **Global Stats**: `DashboardGlobalStatsService`
+- **Fees**: `FeesService`
+- **Bridged USDC**: `BridgedUsdcService`
 
-### Connection Client-Service
+### Client-Service Connection
 
 ```typescript
-// Exemple : Service utilisant un client
+// Example: Service using a client
 export class ExampleService {
   private readonly client: ExampleClient;
   
   constructor() {
     this.client = ExampleClient.getInstance();
-    this.setupSubscriptions(); // Écoute les mises à jour du client
+    this.setupSubscriptions(); // Listen for client updates
   }
   
   private setupSubscriptions(): void {
     redisService.subscribe(this.UPDATE_CHANNEL, (message) => {
-      // Traiter les mises à jour du client
+      // Process client updates
     });
   }
 }
 ```
 
-## 4. Couche Routes (src/routes/)
+## 4. Route Layer (src/routes/)
 
-### Structure des Routes
+### Route Structure
 
 ```
 src/routes/
-├── auth.routes.ts          # Authentification
-├── globalStats.routes.ts   # Stats globales
-├── health.routes.ts        # Santé de l'app
-├── spot/                   # Routes Spot
+├── auth.routes.ts          # Authentication
+├── globalStats.routes.ts   # Global stats
+├── health.routes.ts        # App health
+├── spot/                   # Spot routes
 │   ├── marketSpot.routes.ts
 │   ├── spotStats.routes.ts
 │   └── auction.routes.ts
-├── perp/                   # Routes Perp
-├── vault/                  # Routes Vault
-├── staking/                # Routes Staking
-├── wallet/                 # Routes Wallet
-├── project/                # Routes Project
-├── educational/            # Routes Educational
-└── fees/                   # Routes Fees
+├── perp/                   # Perp routes
+├── vault/                  # Vault routes
+├── staking/                # Staking routes
+├── wallet/                 # Wallet routes
+├── project/                # Project routes
+├── educational/            # Educational routes
+└── fees/                   # Fees routes
 ```
 
-### Pattern Route Standard
+### Standard Route Pattern
 
 ```typescript
 import { Router, Request, Response, RequestHandler } from 'express';
@@ -238,10 +238,10 @@ import { exampleSchema } from '../schemas/example.schema';
 const router = Router();
 const exampleService = ExampleService.getInstance();
 
-// Middlewares globaux pour toutes les routes
+// Global middlewares for all routes
 router.use(marketRateLimiter);
 
-// Route avec validation et authentification
+// Route with validation and authentication
 router.post('/example', 
   validatePrivyToken,                    // Auth middleware
   validateRequest(exampleSchema),        // Validation middleware
@@ -253,7 +253,7 @@ router.post('/example',
         data: result
       });
     } catch (error) {
-      // Gestion d'erreurs standardisée
+      // Standard error handling
       if (error instanceof ExampleError) {
         return res.status(error.statusCode).json({
           success: false,
@@ -273,16 +273,16 @@ router.post('/example',
 export default router;
 ```
 
-## 5. Couche Middleware (src/middleware/)
+## 5. Middleware Layer (src/middleware/)
 
-### Types de Middlewares
+### Middleware Types
 
-#### A. Authentification
+#### A. Authentication
 ```typescript
 // src/middleware/authMiddleware.ts
 export const validatePrivyToken = (req: Request, res: Response, next: NextFunction): void => {
-  // Validation des tokens Privy
-  // Injection de req.user
+  // Privy token validation
+  // req.user injection
 }
 ```
 
@@ -290,8 +290,8 @@ export const validatePrivyToken = (req: Request, res: Response, next: NextFuncti
 ```typescript
 // src/middleware/validation/validation.middleware.ts
 export const validateRequest = (schema: AnyZodObject): RequestHandler => {
-  // Validation avec Zod
-  // Mise en cache des validations
+  // Zod validation
+  // Caching of validations
 }
 ```
 
@@ -299,16 +299,16 @@ export const validateRequest = (schema: AnyZodObject): RequestHandler => {
 ```typescript
 // src/middleware/apiRateLimiter.ts
 export const marketRateLimiter = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  // Rate limiting multi-niveaux (burst, minute, hour)
-  // Utilisation de Redis pour le comptage
+  // Multi-level rate limiting (burst, minute, hour)
+  // Redis for counting
 }
 ```
 
-#### D. Sécurité
+#### D. Security
 ```typescript
 // src/middleware/security.middleware.ts
 export const securityHeaders = (req: Request, res: Response, next: NextFunction) => {
-  // Headers de sécurité (CSP, HSTS, etc.)
+  // Security headers (CSP, HSTS, etc.)
 }
 ```
 
@@ -316,60 +316,60 @@ export const securityHeaders = (req: Request, res: Response, next: NextFunction)
 ```typescript
 // src/middleware/validation/sanitization.middleware.ts
 export const sanitizeInput = (req: Request, res: Response, next: NextFunction) => {
-  // Nettoyage des entrées utilisateur
+  // User input sanitization
 }
 ```
 
-## 6. Flux de Données Complet
+## 6. Complete Data Flow
 
-### Exemple : Route Spot Markets
+### Example: Spot Markets Route
 
 ```
-1. Client fait une requête → GET /api/spot/markets
-2. Middlewares appliqués :
+1. Client makes a request → GET /api/spot/markets
+2. Middlewares applied:
    - securityHeaders
    - marketRateLimiter
    - sanitizeInput
-3. Route handler appelé
+3. Route handler called
 4. Service SpotAssetContextService.getMarkets()
-5. Service lit depuis Redis (cache du client)
-6. Si cache vide, déclenche mise à jour du client
-7. Client HyperliquidSpotClient fait l'appel API
-8. Données traitées et mises en cache
-9. Service retourne les données
-10. Route retourne la réponse JSON
+5. Service reads from Redis (client cache)
+6. If cache empty, trigger client update
+7. HyperliquidSpotClient makes API call
+8. Data processed and cached
+9. Service returns data
+10. Route returns JSON response
 ```
 
-### Polling et Mise à Jour
+### Polling and Updates
 
 ```
-1. Client démarre le polling (setInterval)
-2. Client fait l'appel API externe
-3. Données traitées et stockées dans Redis
-4. Message publié sur le canal Redis
-5. Services abonnés reçoivent la notification
-6. Mise à jour des caches locaux si nécessaire
+1. Client starts polling (setInterval)
+2. Client makes external API call
+3. Data processed and stored in Redis
+4. Message published on Redis channel
+5. Subscribed services receive notification
+6. Local caches updated if necessary
 ```
 
-## 7. Gestion des Erreurs
+## 7. Error Handling
 
-### Hiérarchie d'Erreurs
+### Error Hierarchy
 
 ```typescript
-// Erreurs de base
+// Base errors
 export class BaseError extends Error {
   public readonly statusCode: number;
   public readonly code: string;
 }
 
-// Erreurs spécifiques par domaine
+// Domain-specific errors
 export class SpotError extends BaseError {}
 export class PerpError extends BaseError {}
 export class VaultError extends BaseError {}
 // etc.
 ```
 
-### Gestion dans les Routes
+### Error Handling in Routes
 
 ```typescript
 try {
@@ -391,54 +391,54 @@ try {
 }
 ```
 
-## 8. Patterns et Bonnes Pratiques
+## 8. Patterns and Best Practices
 
 ### A. Singleton Pattern
-- Tous les clients et services principaux
-- Évite les instances multiples
-- Partage d'état et de ressources
+- All major clients and services
+- Avoid multiple instances
+- Share state and resources
 
 ### B. Circuit Breaker
-- Protection contre les APIs externes défaillantes
-- Fail-fast en cas de problème
-- Récupération automatique
+- Protection against failed external APIs
+- Fail-fast in case of issues
+- Automatic recovery
 
 ### C. Rate Limiting
-- Protection contre les abus
-- Limites par IP et par endpoint
-- Multi-niveaux (burst, minute, hour)
+- Protection against abuse
+- IP and endpoint-based limits
+- Multi-level (burst, minute, hour)
 
 ### D. Caching Strategy
-- Redis pour le cache distribué
-- Invalidation intelligente
-- TTL appropriés selon les données
+- Redis for distributed cache
+- Intelligent invalidation
+- Appropriate TTLs based on data
 
 ### E. Polling Strategy
-- Intervalles optimisés par type de données
-- Gestion des erreurs avec retry
-- Évitement des appels concurrents
+- Optimized intervals by data type
+- Error handling with retry
+- Avoiding concurrent calls
 
-## 9. Comment Ajouter une Nouvelle Route
+## 9. How to Add a New Route
 
-### Étapes Standard
+### Standard Steps
 
-1. **Créer le Client** (si nécessaire)
+1. **Create the Client** (if necessary)
 ```typescript
 // src/clients/provider/new.client.ts
 export class NewClient extends BaseApiService {
-  // Pattern standard
+  // Standard pattern
 }
 ```
 
-2. **Créer le Service**
+2. **Create the Service**
 ```typescript
 // src/services/new.service.ts
 export class NewService extends BaseService {
-  // Pattern standard
+  // Standard pattern
 }
 ```
 
-3. **Créer le Repository** (si base de données)
+3. **Create the Repository** (if database)
 ```typescript
 // src/repositories/new.repository.ts
 export class NewRepository implements BaseRepository {
@@ -446,23 +446,23 @@ export class NewRepository implements BaseRepository {
 }
 ```
 
-4. **Créer les Types**
+4. **Create Types**
 ```typescript
 // src/types/new.types.ts
 export interface NewData {
-  // Structure des données
+  // Data structure
 }
 ```
 
-5. **Créer les Schémas**
+5. **Create Schemas**
 ```typescript
 // src/schemas/new.schema.ts
 export const newSchema = z.object({
-  // Validation Zod
+  // Zod validation
 });
 ```
 
-6. **Créer les Routes**
+6. **Create Routes**
 ```typescript
 // src/routes/new.routes.ts
 const router = Router();
@@ -477,36 +477,36 @@ router.get('/', async (req, res) => {
 export default router;
 ```
 
-7. **Intégrer dans l'App**
+7. **Integrate into the App**
 ```typescript
 // src/app.ts
 import newRoutes from './routes/new.routes';
 app.use('/api/new', newRoutes);
 ```
 
-8. **Ajouter au ClientInitializer** (si client)
+8. **Add to ClientInitializer** (if client)
 ```typescript
 // src/core/client.initializer.service.ts
 const newClient = NewClient.getInstance();
 this.clients.set('new', newClient);
 ```
 
-## 10. Debugging et Monitoring
+## 10. Debugging and Monitoring
 
 ### Logs
-- `logDeduplicator` pour éviter les logs dupliqués
-- Logs structurés avec contexte
-- Niveaux appropriés (info, warn, error)
+- `logDeduplicator` to avoid duplicate logs
+- Structured logs with context
+- Appropriate levels (info, warn, error)
 
-### Métriques
-- Rate limiting par IP
-- Temps de réponse des APIs
-- Erreurs par endpoint
-- Utilisation du cache
+### Metrics
+- Rate limiting by IP
+- API response times
+- Errors by endpoint
+- Cache utilization
 
 ### Health Checks
-- Route `/health` pour vérifier l'état
-- Vérification des services externes
-- État des clients et connexions
+- Route `/health` to check status
+- External service checks
+- Client and connection status
 
-Cette architecture permet une extensibilité facile et une maintenance simplifiée. Chaque couche a sa responsabilité et les patterns sont cohérents à travers l'application. 
+This architecture allows for easy extensibility and simplified maintenance. Each layer has its responsibility and patterns are consistent across the application. 

@@ -1,69 +1,69 @@
-# Sécurité
+# Security
 
-Ce document décrit les mesures de sécurité implémentées dans ce projet.
+This document describes the security measures implemented in this project.
 
-## 🔒 Mesures de Sécurité Implémentées
+## 🔒 Implemented Security Measures
 
-### Authentification
-- **JWT Privy** : Authentification sécurisée avec validation cryptographique
-- **Middleware d'authentification** : Toutes les routes sensibles protégées
-- **Gestion des rôles** : Système de permissions USER/MODERATOR/ADMIN
-- **Validation des tokens** : Vérification cryptographique des signatures
+### Authentication
+- **JWT Privy**: Secure authentication with cryptographic validation
+- **Authentication middleware**: All sensitive routes protected
+- **Role management**: USER/MODERATOR/ADMIN permission system
+- **Token validation**: Cryptographic signature verification
 
-### Protection des Données
-- **Validation Zod** : Validation stricte de toutes les entrées utilisateur
-- **Sanitization** : Nettoyage des inputs avec `sanitize-html`
-- **Masquage des données sensibles** : Emails et Privy IDs masqués dans les réponses API
-- **Logs sécurisés** : Aucune donnée sensible dans les logs
+### Data Protection
+- **Zod validation**: Strict validation of all user inputs
+- **Sanitization**: Input cleaning with `sanitize-html`
+- **Sensitive data masking**: Emails and Privy IDs masked in API responses
+- **Secure logging**: No sensitive data in logs
 
-### Sécurité Web
-- **Headers de sécurité** : CSP, HSTS, XSS Protection, etc.
-- **CORS configuré** : Origines autorisées strictement définies
-- **Rate limiting** : Protection contre les attaques par déni de service
-- **Validation des uploads** : Scan de sécurité des fichiers uploadés
+### Web Security
+- **Security headers**: CSP, HSTS, XSS Protection, etc.
+- **CORS configured**: Strictly defined allowed origins
+- **Rate limiting**: Protection against denial of service attacks
+- **Upload validation**: Security scanning of uploaded files
 
-### Base de Données
-- **Prisma ORM** : Protection contre les injections SQL
-- **Transactions** : Intégrité des données garantie
-- **Paramètres validés** : Toutes les requêtes utilisent des paramètres
-- **Pas de requêtes brutes** : Aucune requête SQL directe
+### Database
+- **Prisma ORM**: Protection against SQL injections
+- **Transactions**: Guaranteed data integrity
+- **Validated parameters**: All queries use parameters
+- **No raw queries**: No direct SQL queries
 
-## 🛡️ Routes Protégées
+## 🛡️ Protected Routes
 
-### Routes Publiques
-- `GET /health` - Santé de l'application
-- `GET /market/*` - Données de marché (lecture seule)
-- `GET /vaults/*` - Données de vaults (lecture seule)
-- `GET /staking/*` - Données de staking (lecture seule)
+### Public Routes
+- `GET /health` - Application health
+- `GET /market/*` - Market data (read-only)
+- `GET /vaults/*` - Vault data (read-only)
+- `GET /staking/*` - Staking data (read-only)
 
-### Routes Authentifiées
-- `POST /auth/login` - Connexion utilisateur
-- `GET /auth/me` - Informations utilisateur connecté
-- `GET /auth/user/:id` - Informations utilisateur (propriétaire uniquement)
-- `GET /wallet/my-wallets` - Wallets de l'utilisateur
-- `POST /wallet/*` - Gestion des wallets
-- `GET /readlist/*` - Listes de lecture
-- `POST /readlist/*` - Gestion des listes de lecture
+### Authenticated Routes
+- `POST /auth/login` - User login
+- `GET /auth/me` - Connected user information
+- `GET /auth/user/:id` - User information (owner only)
+- `GET /wallet/my-wallets` - User wallets
+- `POST /wallet/*` - Wallet management
+- `GET /readlist/*` - Reading lists
+- `POST /readlist/*` - Reading list management
 
-### Routes Admin (ADMIN uniquement)
-- `GET /auth/admin/users` - Liste des utilisateurs
-- `GET /auth/admin/users/:id` - Détails utilisateur
-- `PUT /auth/admin/users/:id` - Modification utilisateur
-- `DELETE /auth/admin/users/:id` - Suppression utilisateur
+### Admin Routes (ADMIN only)
+- `GET /auth/admin/users` - User list
+- `GET /auth/admin/users/:id` - User details
+- `PUT /auth/admin/users/:id` - User modification
+- `DELETE /auth/admin/users/:id` - User deletion
 
-## 🔐 Variables d'Environnement Sécurisées
+## 🔐 Secure Environment Variables
 
-Toutes les données sensibles sont stockées dans des variables d'environnement :
+All sensitive data is stored in environment variables:
 
 ```bash
-# Base de données
+# Database
 DATABASE_URL=postgresql://user:password@host:port/db
 
 # Redis
 REDIS_URL=redis://localhost:6379
 REDIS_PASSWORD=your_redis_password
 
-# Authentification
+# Authentication
 JWKS_URL=https://auth.privy.io/.well-known/jwks.json
 NEXT_PUBLIC_PRIVY_AUDIENCE=your_audience
 
@@ -71,58 +71,54 @@ NEXT_PUBLIC_PRIVY_AUDIENCE=your_audience
 FIRST_ADMIN_PRIVY_USER_ID=admin_user_id
 ```
 
-## 🚨 Reporting de Vulnérabilités
+## 🚨 Vulnerability Reporting
 
-Si vous découvrez une vulnérabilité de sécurité :
+If you discover a security vulnerability:
 
-1. **Ne pas ouvrir d'issue publique**
-2. **Contacter directement** : [votre-email@domain.com]
-3. **Décrire la vulnérabilité** avec des détails techniques
-4. **Attendre la réponse** avant de divulguer publiquement
+1. **Do not open a public issue**
+2. **Contact directly**: [your-email@domain.com]
+3. **Describe the vulnerability** with technical details
+4. **Wait for response** before public disclosure
 
-## 🔍 Audit de Sécurité
+## 🔍 Security Audit
 
-### Vérifications Automatiques
-- **ESLint** : Détection de patterns dangereux
-- **TypeScript** : Vérification de types pour éviter les erreurs
-- **Prisma** : Validation des schémas de base de données
-- **Zod** : Validation runtime des données
+### Automatic Checks
+- **ESLint**: Detection of dangerous patterns
+- **TypeScript**: Type checking to avoid errors
+- **Prisma**: Database schema validation
+- **Zod**: Runtime data validation
 
-### Tests de Sécurité
+### Security Tests
 ```bash
-# Lancer les tests
+# Run tests
 npm test
 
-# Vérification des types
+# Type checking
 npm run type-check
 
 # Linting
 npm run lint
 ```
 
-## 📋 Checklist de Sécurité
+## 📋 Security Checklist
 
-- [x] Authentification JWT sécurisée
-- [x] Validation des entrées utilisateur
-- [x] Protection contre les injections SQL
-- [x] Headers de sécurité configurés
-- [x] Rate limiting implémenté
-- [x] CORS configuré
-- [x] Logs sans données sensibles
-- [x] Variables d'environnement pour les secrets
-- [x] Uploads de fichiers sécurisés
-- [x] Gestion des erreurs sécurisée
+- [x] Secure JWT authentication
+- [x] User input validation
+- [x] Protection against SQL injections
+- [x] Security headers configured
+- [x] Rate limiting implemented
+- [x] CORS configured
+- [x] Logs without sensitive data
+- [x] Environment variables for secrets
+- [x] Secure file uploads
+- [x] Secure error handling
 
-## 🔄 Mises à Jour de Sécurité
+## 🔄 Security Updates
 
-- **Dépendances** : Mises à jour régulières via `npm audit`
-- **Base de données** : Migrations sécurisées avec Prisma
-- **Code** : Reviews de sécurité avant merge
-- **Infrastructure** : Monitoring des logs et métriques
+This section will be updated as new security measures are implemented.
 
-## 📞 Support Sécurité
+## 📚 Additional Resources
 
-Pour toute question concernant la sécurité :
-- **Email** : [security@domain.com]
-- **Documentation** : Consultez ce fichier et `ENVIRONMENT.md`
-- **Issues** : Utilisez le template "Security Issue" si disponible 
+- [OWASP Top 10](https://owasp.org/www-project-top-ten/)
+- [Node.js Security Best Practices](https://nodejs.org/en/docs/guides/security/)
+- [Express Security Best Practices](https://expressjs.com/en/advanced/best-practices-security.html) 

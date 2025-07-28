@@ -19,7 +19,10 @@
     "clean": "rimraf dist node_modules/.cache",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate deploy",
-    "prisma:studio": "prisma studio"
+    "prisma:studio": "prisma studio",
+    "cleanup-logs": "tsx scripts/cleanup-logs.ts cleanup",
+    "log-stats": "tsx scripts/cleanup-logs.ts stats",
+    "test-logs": "tsx scripts/test-log-rotation.ts"
   },
   "keywords": [],
   "author": "",

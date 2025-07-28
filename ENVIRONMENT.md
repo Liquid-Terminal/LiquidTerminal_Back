@@ -1,85 +1,85 @@
-# Configuration des Variables d'Environnement
+# Environment Variables Configuration
 
-Ce document décrit toutes les variables d'environnement requises pour faire fonctionner l'application.
+This document describes all the environment variables required to run the application.
 
-## Variables Requises
+## Required Variables
 
-### Base de Données
+### Database
 ```bash
 DATABASE_URL=postgresql://username:password@localhost:5432/database_name?schema=public
 ```
-- URL de connexion PostgreSQL avec Prisma
+- PostgreSQL connection URL with Prisma
 - Format: `postgresql://user:password@host:port/database?schema=public`
 
-### Redis (Cache et Rate Limiting)
+### Redis (Cache and Rate Limiting)
 ```bash
 REDIS_URL=redis://localhost:6379
 REDIS_HOST=localhost
 REDIS_PORT=6379
 REDIS_PASSWORD=
 ```
-- Configuration Redis pour le cache et le rate limiting
-- `REDIS_URL` prend la priorité sur les autres variables Redis
+- Redis configuration for cache and rate limiting
+- `REDIS_URL` takes priority over other Redis variables
 
-### Authentification Privy
+### Privy Authentication
 ```bash
 JWKS_URL=https://auth.privy.io/.well-known/jwks.json
 NEXT_PUBLIC_PRIVY_AUDIENCE=your-privy-audience
 ```
-- Configuration pour l'authentification JWT avec Privy
-- `JWKS_URL`: URL des clés publiques Privy
-- `NEXT_PUBLIC_PRIVY_AUDIENCE`: Audience de votre application Privy
+- Configuration for JWT authentication with Privy
+- `JWKS_URL`: URL of Privy public keys
+- `NEXT_PUBLIC_PRIVY_AUDIENCE`: Your Privy application audience
 
-### Configuration du Serveur
+### Server Configuration
 ```bash
 PORT=3002
 NODE_ENV=development
 BASE_URL=http://localhost:3002
 ```
-- `PORT`: Port d'écoute du serveur (défaut: 3002)
-- `NODE_ENV`: Environnement (development/production)
-- `BASE_URL`: URL de base pour les uploads de fichiers
+- `PORT`: Server listening port (default: 3002)
+- `NODE_ENV`: Environment (development/production)
+- `BASE_URL`: Base URL for file uploads
 
-### Configuration Admin
+### Admin Configuration
 ```bash
 FIRST_ADMIN_PRIVY_USER_ID=your-first-admin-privy-user-id
 ```
-- ID Privy du premier administrateur
-- Utilisé par le script `scripts/assign-first-admin.ts`
+- Privy ID of the first administrator
+- Used by the `scripts/assign-first-admin.ts` script
 
-## Fichier .env
+## .env File
 
-Créez un fichier `.env` à la racine du projet avec ces variables :
+Create a `.env` file at the project root with these variables:
 
 ```bash
-# Copiez ce fichier et remplissez vos valeurs
+# Copy this file and fill in your values
 cp .env.example .env
 ```
 
-## Sécurité
+## Security
 
-⚠️ **Important** :
-- Ne jamais commiter le fichier `.env` dans Git
-- Le fichier `.env` est déjà dans `.gitignore`
-- Utilisez des mots de passe forts pour la base de données
-- En production, utilisez des services de gestion de secrets
+⚠️ **Important**:
+- Never commit the `.env` file to Git
+- The `.env` file is already in `.gitignore`
+- Use strong passwords for the database
+- In production, use secret management services
 
-## Développement Local
+## Local Development
 
-Pour le développement local, vous pouvez utiliser :
+For local development, you can use:
 
 ```bash
-# Base de données locale
+# Local database
 DATABASE_URL=postgresql://yaugourt:password@localhost:5432/hyperinsight?schema=public
 
-# Redis local
+# Local Redis
 REDIS_URL=redis://localhost:6379
 
-# Privy (créez un projet sur privy.io)
+# Privy (create a project on privy.io)
 JWKS_URL=https://auth.privy.io/.well-known/jwks.json
 NEXT_PUBLIC_PRIVY_AUDIENCE=your-project-id
 
-# Serveur local
+# Local server
 PORT=3002
 NODE_ENV=development
 BASE_URL=http://localhost:3002

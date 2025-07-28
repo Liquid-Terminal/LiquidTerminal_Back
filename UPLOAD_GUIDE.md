@@ -1,67 +1,67 @@
-# Guide d'Upload de Fichiers
+# File Upload Guide
 
-## Routes disponibles
+## Available Routes
 
-### 1. Créer un projet avec upload de logo
+### 1. Create a project with logo upload
 ```
 POST /project/with-upload
 ```
 
-**Headers requis :**
+**Required Headers:**
 ```
 Authorization: Bearer <token>
 Content-Type: multipart/form-data
 ```
 
-**Body (FormData) :**
-- `title` (string) - Titre du projet
-- `desc` (string) - Description du projet  
-- `logo` (file) - Image du logo (JPG, PNG, GIF, WebP, max 5MB)
-- `twitter` (string, optionnel) - URL Twitter
-- `discord` (string, optionnel) - URL Discord
-- `telegram` (string, optionnel) - URL Telegram
-- `website` (string, optionnel) - URL du site web
-- `categoryId` (number, optionnel) - ID de la catégorie
+**Body (FormData):**
+- `title` (string) - Project title
+- `desc` (string) - Project description  
+- `logo` (file) - Logo image (JPG, PNG, GIF, WebP, max 5MB)
+- `twitter` (string, optional) - Twitter URL
+- `discord` (string, optional) - Discord URL
+- `telegram` (string, optional) - Telegram URL
+- `website` (string, optional) - Website URL
+- `categoryId` (number, optional) - Category ID
 
-### 2. Créer un projet avec URL de logo
+### 2. Create a project with logo URL
 ```
 POST /project
 ```
 
-**Headers requis :**
+**Required Headers:**
 ```
 Authorization: Bearer <token>
 Content-Type: application/json
 ```
 
-**Body (JSON) :**
+**Body (JSON):**
 ```json
 {
-  "title": "Mon Projet",
-  "desc": "Description du projet",
+  "title": "My Project",
+  "desc": "Project description",
   "logo": "https://example.com/logo.png",
   "categoryId": 1
 }
 ```
 
-## Différence entre les routes
+## Difference between routes
 
 | Aspect | `/project/with-upload` | `/project` |
 |--------|----------------------|------------|
 | **Content-Type** | `multipart/form-data` | `application/json` |
-| **Logo** | Fichier uploadé | URL de l'image |
-| **Validation** | Scan de sécurité + validation | Validation standard |
-| **Stockage** | Fichier sur serveur | URL externe |
-| **Utilisation** | Upload direct | Lien vers image existante |
+| **Logo** | Uploaded file | Image URL |
+| **Validation** | Security scan + validation | Standard validation |
+| **Storage** | File on server | External URL |
+| **Usage** | Direct upload | Link to existing image |
 
-## Exemple d'utilisation côté frontend
+## Frontend usage example
 
-### Avec FormData (upload de fichier)
+### With FormData (file upload)
 ```javascript
 const formData = new FormData();
-formData.append('title', 'Mon Projet');
-formData.append('desc', 'Description du projet');
-formData.append('logo', fileInput.files[0]); // Fichier sélectionné
+formData.append('title', 'My Project');
+formData.append('desc', 'Project description');
+formData.append('logo', fileInput.files[0]); // Selected file
 formData.append('categoryId', '1');
 
 const response = await fetch('/project/with-upload', {
@@ -73,7 +73,7 @@ const response = await fetch('/project/with-upload', {
 });
 ```
 
-### Avec JSON (URL de logo)
+### With JSON (logo URL)
 ```javascript
 const response = await fetch('/project', {
   method: 'POST',
@@ -82,54 +82,54 @@ const response = await fetch('/project', {
     'Content-Type': 'application/json'
   },
   body: JSON.stringify({
-    title: 'Mon Projet',
-    desc: 'Description du projet',
+    title: 'My Project',
+    desc: 'Project description',
     logo: 'https://example.com/logo.png',
     categoryId: 1
   })
 });
 ```
 
-## Formats de fichiers supportés
+## Supported file formats
 - JPG/JPEG
 - PNG  
 - GIF
 - WebP
 
 ## Limitations
-- Taille maximum : 5MB
-- 1 fichier par requête
-- Seules les images sont autorisées
+- Maximum size: 5MB
+- 1 file per request
+- Only images are allowed
 
-## Sécurité
+## Security
 
-### Mesures de sécurité implémentées :
+### Implemented security measures:
 
-1. **Validation des types MIME** : Vérification stricte des types MIME autorisés
-2. **Validation des extensions** : Seules les extensions d'images sont acceptées
-3. **Vérification des signatures de fichiers** : Analyse des magic bytes pour détecter les faux positifs
-4. **Scan de contenu malveillant** : Détection de code exécutable caché
-5. **Noms de fichiers sécurisés** : Génération de noms uniques avec hash
-6. **Nettoyage automatique** : Suppression des anciens fichiers (7 jours par défaut)
-7. **Logging de sécurité** : Traçabilité complète des uploads
+1. **MIME type validation**: Strict verification of allowed MIME types
+2. **Extension validation**: Only image extensions are accepted
+3. **File signature verification**: Magic bytes analysis to detect false positives
+4. **Malicious content scanning**: Detection of hidden executable code
+5. **Secure filenames**: Generation of unique names with hash
+6. **Automatic cleanup**: Deletion of old files (7 days by default)
+7. **Security logging**: Complete traceability of uploads
 
-### Types de fichiers autorisés :
+### Allowed file types:
 - JPG/JPEG (signature: FF D8 FF)
 - PNG (signature: 89 50 4E 47)
 - GIF (signature: 47 49 46)
 - WebP (signature: 52 49 46 46)
 
-### Contenu interdit :
-- Code PHP (`<?php`)
-- Scripts JavaScript (`<script`, `javascript:`)
+### Forbidden content:
+- PHP code (`<?php`)
+- JavaScript scripts (`<script`, `javascript:`)
 - VBScript (`vbscript:`)
-- Événements HTML (`onload=`, `onerror=`)
+- HTML events (`onload=`, `onerror=`)
 
-## Stockage
-Les fichiers sont stockés dans `uploads/project-logos/` avec un nom unique généré automatiquement.
+## Storage
+Files are stored in `uploads/project-logos/` with a unique name generated automatically.
 
-## URLs générées
-Les URLs des fichiers uploadés suivent le format :
+## Generated URLs
+Uploaded file URLs follow the format:
 ```
 http://localhost:3000/uploads/project-logos/project-logo-1234567890-123456789.png
 ``` 

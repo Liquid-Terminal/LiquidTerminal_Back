@@ -1,12 +1,11 @@
 import { User, UserRole } from '@prisma/client';
 import { userRepository } from '../../repositories/user.repository';
 import { logDeduplicator } from '../../utils/logDeduplicator';
-import { AdminUserUpdateInput } from '../../schemas/auth.schema';
 
 export class UserService {
   private static instance: UserService;
 
-  private constructor() { }
+  private constructor() {}
 
   public static getInstance(): UserService {
     if (!UserService.instance) {
@@ -16,60 +15,100 @@ export class UserService {
   }
 
   /**
-   * Récupère la liste des utilisateurs avec pagination et filtres
+   * Masque les données sensibles d'un utilisateur pour les réponses API
+   */
+  private maskSensitiveData(user: User): Omit<User, 'email' | 'privyUserId'> & {
+    email?: string;
+    privyUserId?: string;
+  } {
+    return {
+      id: user.id,
+      name: user.name,
+      role: user.role,
+      createdAt: user.createdAt,
+      verified: user.verified,
+      // Masquer email et privyUserId par défaut
+      email: undefined,
+      privyUserId: undefined
+    };
+  }
+
+  /**
+   * Masque les données sensibles pour les listes d'utilisateurs
+   */
+  private maskUserListData(users: User[]): Array<Omit<User, 'email' | 'privyUserId'> & {
+    email?: string;
+    privyUserId?: string;
+  }> {
+    return users.map(user => this.maskSensitiveData(user));
+  }
+
+  /**
+   * Récupère les utilisateurs avec pagination et masquage des données sensibles
    */
   async getUsers(options: {
     page?: number;
     limit?: number;
     search?: string;
     verified?: boolean;
-  }): Promise<{ users: User[]; total: number; pages: number }> {
-    const page = options.page || 1;
-    const limit = options.limit || 20;
+  }) {
+    const { page = 1, limit = 20, search, verified } = options;
     const skip = (page - 1) * limit;
 
     try {
-      const [users, total] = await Promise.all([
-        userRepository.findMany({
-          skip,
-          take: limit,
-          search: options.search,
-          verified: options.verified,
-          orderBy: { createdAt: 'desc' }
-        }),
-        userRepository.count({
-          search: options.search,
-          verified: options.verified
-        })
-      ]);
+      const users = await userRepository.findMany({
+        skip,
+        take: limit,
+        search,
+        verified,
+        orderBy: { createdAt: 'desc' }
+      });
+
+      const total = await userRepository.count({ search, verified });
+      const pages = Math.ceil(total / limit);
+
+      // Masquer les données sensibles
+      const maskedUsers = this.maskUserListData(users);
+
+      logDeduplicator.info('Users list retrieved', { 
+        count: maskedUsers.length,
+        total,
+        page,
+        pages
+      });
 
       return {
-        users,
+        users: maskedUsers,
         total,
-        pages: Math.ceil(total / limit)
+        pages
       };
     } catch (error) {
-      logDeduplicator.error('Error getting users list', {
-        error: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : undefined,
-        options
-      });
+      logDeduplicator.error('Error retrieving users list', { error });
       throw error;
     }
   }
 
   /**
-   * Récupère un utilisateur par son ID
+   * Récupère un utilisateur par ID avec masquage des données sensibles
    */
-  async getUserById(userId: number): Promise<User | null> {
+  async getUserById(userId: number) {
     try {
-      return await userRepository.findById(userId);
-    } catch (error) {
-      logDeduplicator.error('Error getting user by ID', {
-        error: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : undefined,
-        userId
+      const user = await userRepository.findById(userId);
+      if (!user) {
+        return null;
+      }
+
+      // Masquer les données sensibles
+      const maskedUser = this.maskSensitiveData(user);
+
+      logDeduplicator.info('User retrieved by ID', { 
+        userId,
+        role: maskedUser.role
       });
+
+      return maskedUser;
+    } catch (error) {
+      logDeduplicator.error('Error retrieving user by ID', { error, userId });
       throw error;
     }
   }
@@ -77,24 +116,26 @@ export class UserService {
   /**
    * Met à jour un utilisateur
    */
-  async updateUser(userId: number, updateData: AdminUserUpdateInput): Promise<User> {
+  async updateUser(userId: number, data: {
+    name?: string;
+    email?: string | null;
+    role?: UserRole;
+    verified?: boolean;
+  }) {
     try {
-      // Validation des données avant mise à jour
-      if (updateData.email !== undefined && updateData.email !== null) {
-        const emailExists = await userRepository.existsByEmail(updateData.email, userId);
-        if (emailExists) {
-          throw new Error('Email already exists');
-        }
-      }
+      const updatedUser = await userRepository.update(userId, data);
+      
+      // Masquer les données sensibles
+      const maskedUser = this.maskSensitiveData(updatedUser);
 
-      return await userRepository.update(userId, updateData);
-    } catch (error) {
-      logDeduplicator.error('Error updating user', {
-        error: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : undefined,
+      logDeduplicator.info('User updated', { 
         userId,
-        updateData
+        updatedFields: Object.keys(data)
       });
+
+      return maskedUser;
+    } catch (error) {
+      logDeduplicator.error('Error updating user', { error, userId });
       throw error;
     }
   }
@@ -102,23 +143,30 @@ export class UserService {
   /**
    * Supprime un utilisateur
    */
-  async deleteUser(userId: number): Promise<User> {
+  async deleteUser(userId: number) {
     try {
-      return await userRepository.delete(userId);
-    } catch (error) {
-      logDeduplicator.error('Error deleting user', {
-        error: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : undefined,
-        userId
+      const deletedUser = await userRepository.delete(userId);
+      
+      // Masquer les données sensibles
+      const maskedUser = this.maskSensitiveData(deletedUser);
+
+      logDeduplicator.info('User deleted', { 
+        userId,
+        userName: maskedUser.name
       });
+
+      return maskedUser;
+    } catch (error) {
+      logDeduplicator.error('Error deleting user', { error, userId });
       throw error;
     }
   }
 
   /**
-   * Vérifie si un utilisateur peut être supprimé (pas d'admin qui se supprime lui-même)
+   * Vérifie si un utilisateur peut être supprimé
    */
-  canDeleteUser(userId: number, currentAdminId: number): boolean {
-    return userId !== currentAdminId;
+  canDeleteUser(targetUserId: number, adminId: number): boolean {
+    // Empêcher l'admin de se supprimer lui-même
+    return targetUserId !== adminId;
   }
 } 

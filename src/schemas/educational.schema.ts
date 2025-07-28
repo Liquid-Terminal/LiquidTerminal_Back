@@ -23,7 +23,7 @@ export const educationalCategoryBaseSchema = z.object({
 // Schéma pour la création de catégorie éducative
 export const educationalCategoryCreateSchema = z.object({
   ...educationalCategoryBaseSchema.shape,
-  createdBy: z.number().int().positive('ID utilisateur invalide').optional()
+  createdBy: z.number().int().positive('ID utilisateur invalide')
 });
 
 // Schéma pour la mise à jour de catégorie éducative
@@ -46,7 +46,7 @@ export const educationalResourceBaseSchema = z.object({
 // Schéma pour la création de ressource éducative
 export const educationalResourceCreateSchema = z.object({
   ...educationalResourceBaseSchema.shape,
-  addedBy: z.number().int().positive('ID utilisateur invalide').optional(),
+  addedBy: z.number().int().positive('ID utilisateur invalide'),
   categoryIds: z.array(z.number().int().positive()).optional()
 });
 

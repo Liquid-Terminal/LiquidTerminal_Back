@@ -26,8 +26,8 @@ router.get("/admin/users", validatePrivyToken, requireAdmin, (req: Request, res:
         page,
         limit,
         total: result.total,
-        search,
-        verified
+        hasSearch: !!search,
+        hasVerifiedFilter: verified !== undefined
       });
       
       res.status(200).json({
@@ -90,7 +90,8 @@ router.get("/admin/users/:userId", validatePrivyToken, requireAdmin, (req: Reque
       
       logDeduplicator.info('Admin retrieved user details', { 
         adminId: req.currentUser?.id,
-        targetUserId: userId
+        targetUserId: userId,
+        userRole: user.role
       });
       
       res.status(200).json({
@@ -134,7 +135,7 @@ router.put("/admin/users/:userId", validatePrivyToken, requireAdmin, validateAdm
         adminId: req.currentUser?.id,
         targetUserId: userId,
         updatedFields: Object.keys(req.body),
-        verified: req.body.verified
+        hasVerifiedUpdate: 'verified' in req.body
       });
       
       res.status(200).json({
@@ -206,7 +207,7 @@ router.delete("/admin/users/:userId", validatePrivyToken, requireAdmin, (req: Re
       logDeduplicator.info('Admin deleted user', { 
         adminId: req.currentUser?.id,
         targetUserId: userId,
-        deletedUserName: deletedUser.name
+        deletedUserRole: deletedUser.role
       });
       
       res.status(200).json({

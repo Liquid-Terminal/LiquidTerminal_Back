@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { AuthService } from '../services/auth/auth.service';
-import { PrivyPayload, UserRole } from '../types/auth.types';
+import { PrivyPayload } from '../types/auth.types';
+import { UserRole } from '@prisma/client';
 import { TokenValidationError } from '../errors/auth.errors';
 import { logDeduplicator } from '../utils/logDeduplicator';
 

@@ -129,8 +129,21 @@ export class PrismaProjectRepository implements ProjectRepository {
     try {
       logDeduplicator.info('Creating project', { title: data.title });
       
+      if (!data.logo) {
+        throw new Error('Logo is required for project creation');
+      }
+
       const project = await this.prismaClient.project.create({
-        data
+        data: {
+          title: data.title,
+          desc: data.desc,
+          logo: data.logo,
+          twitter: data.twitter || null,
+          discord: data.discord || null,
+          telegram: data.telegram || null,
+          website: data.website || null,
+          categoryId: data.categoryId || null
+        }
       });
 
       logDeduplicator.info('Project created successfully', { id: project.id, title: project.title });

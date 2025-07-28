@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction, RequestHandler } from 'express';
-import { AnyZodObject, ZodError } from 'zod';
+import { ZodObject, ZodError } from 'zod';
 import { redisService } from '../../core/redis.service';
 import { logDeduplicator } from '../../utils/logDeduplicator';
 
@@ -10,7 +10,7 @@ import { logDeduplicator } from '../../utils/logDeduplicator';
  * @param cacheTTL Durée de vie du cache en secondes (par défaut: 300 secondes / 5 minutes)
  */
 export const validateRequest = (
-  schema: AnyZodObject,
+  schema: ZodObject<any>,
   validateCacheKey?: string,
   cacheTTL: number = 300
 ): RequestHandler => {
@@ -46,7 +46,7 @@ export const validateRequest = (
     } catch (error) {
       // Gérer les erreurs de validation Zod
       if (error instanceof ZodError) {
-        const errors = error.errors.map(err => ({
+        const errors = error.issues.map((err: any) => ({
           path: err.path.join('.'),
           message: err.message,
         }));
@@ -142,7 +142,7 @@ export const validateBody = (
  * @param cacheTTL Durée de vie du cache en secondes (par défaut: 300 secondes / 5 minutes)
  */
 export const validateGetRequest = (
-  schema: AnyZodObject,
+  schema: ZodObject<any>,
   validateCacheKey?: string,
   cacheTTL: number = 300
 ): RequestHandler => {
@@ -177,7 +177,7 @@ export const validateGetRequest = (
     } catch (error) {
       // Gérer les erreurs de validation Zod
       if (error instanceof ZodError) {
-        const errors = error.errors.map(err => ({
+        const errors = error.issues.map((err: any) => ({
           path: err.path.join('.'),
           message: err.message,
         }));

@@ -17,16 +17,15 @@ router.post("/login", validatePrivyToken, validateLogin, (req: Request, res: Res
   const { privyUserId, name } = req.body;
 
   logDeduplicator.info('Login request received', { 
-    privyUserId,
-    name,
-    hasUser: !!req.user,
-    userSub: req.user?.sub 
+    hasPrivyUserId: !!privyUserId,
+    hasName: !!name,
+    hasUser: !!req.user
   });
 
   if (!req.user) {
     logDeduplicator.warn('Login attempt without authentication', { 
-      privyUserId, 
-      name,
+      hasPrivyUserId: !!privyUserId, 
+      hasName: !!name,
       path: req.path 
     });
     
@@ -40,9 +39,9 @@ router.post("/login", validatePrivyToken, validateLogin, (req: Request, res: Res
 
   if (req.user.sub !== privyUserId) {
     logDeduplicator.warn('Login attempt with invalid Privy User ID', { 
-      tokenSub: req.user.sub, 
-      providedSub: privyUserId, 
-      name,
+      hasTokenSub: !!req.user.sub, 
+      hasProvidedSub: !!privyUserId, 
+      hasName: !!name,
       path: req.path 
     });
     
@@ -57,9 +56,8 @@ router.post("/login", validatePrivyToken, validateLogin, (req: Request, res: Res
   authService.findOrCreateUser(req.user, name)
     .then(user => {
       logDeduplicator.info('User authenticated successfully', { 
-        privyUserId, 
-        name,
-        userId: user.id 
+        userId: user.id,
+        userRole: user.role
       });
       
       res.status(200).json({ 
@@ -112,7 +110,6 @@ router.get("/me", validatePrivyToken, (req: Request, res: Response): void => {
     authService.findOrCreateUser({ sub: privyUserId } as any, '')
       .then(user => {
         logDeduplicator.info('User info retrieved successfully', { 
-          privyUserId,
           userId: user.id,
           role: user.role,
           path: req.path 
@@ -138,7 +135,6 @@ router.get("/me", validatePrivyToken, (req: Request, res: Response): void => {
         logDeduplicator.error("Error retrieving user info", { 
           error: error instanceof Error ? error.message : String(error),
           stack: error instanceof Error ? error.stack : undefined,
-          privyUserId,
           path: req.path 
         });
         
@@ -167,8 +163,8 @@ router.get("/me", validatePrivyToken, (req: Request, res: Response): void => {
 router.get("/user/:privyUserId", validatePrivyToken, validateUserParams, (req: Request, res: Response): void => {
   if (req.user?.sub !== req.params.privyUserId) {
     logDeduplicator.warn('Unauthorized access attempt', { 
-      tokenSub: req.user?.sub, 
-      requestedSub: req.params.privyUserId,
+      hasTokenSub: !!req.user?.sub, 
+      hasRequestedSub: !!req.params.privyUserId,
       path: req.path 
     });
     
@@ -183,8 +179,8 @@ router.get("/user/:privyUserId", validatePrivyToken, validateUserParams, (req: R
   authService.findOrCreateUser({ sub: req.params.privyUserId } as any, '')
     .then(user => {
       logDeduplicator.info('User retrieved successfully', { 
-        privyUserId: req.params.privyUserId,
         userId: user.id,
+        userRole: user.role,
         path: req.path 
       });
       
@@ -198,7 +194,6 @@ router.get("/user/:privyUserId", validatePrivyToken, validateUserParams, (req: R
       logDeduplicator.error("Error retrieving user", { 
         error: error instanceof Error ? error.message : String(error),
         stack: error instanceof Error ? error.stack : undefined,
-        privyUserId: req.params.privyUserId,
         path: req.path 
       });
       

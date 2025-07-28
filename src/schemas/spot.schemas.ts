@@ -11,10 +11,10 @@ export const marketSpotGetSchema = z.object({
     sortOrder: z.enum(['asc', 'desc']).optional().default('desc'),
     limit: z.string().regex(/^\d+$/).transform(Number).refine(val => val > 0 && val <= 1000, {
       message: 'Limit must be between 1 and 1000'
-    }).optional().default('20'),
+    }).optional().default(20),
     page: z.string().regex(/^\d+$/).transform(Number).refine(val => val >= 1, {
       message: 'Page must be a positive number (starting from 1)'
-    }).optional().default('1'),
+    }).optional().default(1),
   }),
   params: z.object({}),
 });
@@ -30,10 +30,10 @@ export const marketSpotQuerySchema = z.object({
     sortOrder: z.enum(['asc', 'desc']).optional().default('desc'),
     limit: z.string().regex(/^\d+$/).transform(Number).refine(val => val > 0 && val <= 1000, {
       message: 'Limit must be between 1 and 1000'
-    }).optional().default('20'),
+    }).optional().default(20),
     page: z.string().regex(/^\d+$/).transform(Number).refine(val => val >= 1, {
       message: 'Page must be a positive number (starting from 1)'
-    }).optional().default('1'),
+    }).optional().default(1),
   }),
   params: z.object({}),
   body: z.object({}),

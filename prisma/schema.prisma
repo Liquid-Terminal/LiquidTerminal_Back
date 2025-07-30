@@ -16,11 +16,20 @@ enum UserRole {
 model User {
   id                              Int                           @id @default(autoincrement())
   privyUserId                     String                        @unique
-  name                            String?                       @db.VarChar(255)
+  name                            String?                       @unique @db.VarChar(255)
   email                           String?                       @unique @db.VarChar(255)
   role                            UserRole                      @default(USER)
   createdAt                       DateTime                      @default(now()) @db.Timestamp(6)
   verified                        Boolean                       @default(false)
+  
+  // Système de referral
+  referredBy                      String?                       @db.VarChar(255)
+  referralCount                   Int                           @default(0)
+  
+  // Relations
+  referrals                       User[]                        @relation("UserReferrals")
+  referrer                        User?                         @relation("UserReferrals", fields: [referredBy], references: [name])
+  
   UserWallets                     UserWallet[]
   createdEducationalCategories    EducationalCategory[]         @relation("EducationalCategoryCreator")
   addedEducationalResources       EducationalResource[]         @relation("EducationalResourceCreator")

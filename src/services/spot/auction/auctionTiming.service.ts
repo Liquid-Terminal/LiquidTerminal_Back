@@ -1,7 +1,7 @@
 import { AuctionTimingInfo } from '../../../types/auction.types';
 import { HyperliquidSpotDeployClient } from '../../../clients/hyperliquid/spot/spot.deploy.client';
 import { AuctionError, InvalidAuctionDataError } from '../../../errors/spot.errors';
-import { logDeduplicator } from '@/utils/logDeduplicator';
+import { logDeduplicator } from '../../../utils/logDeduplicator';
 
 export class SpotDeployStateApiService {
   private static instance: SpotDeployStateApiService; // Ajout pour Singleton

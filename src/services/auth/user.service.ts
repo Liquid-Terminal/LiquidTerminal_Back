@@ -27,6 +27,8 @@ export class UserService {
       role: user.role,
       createdAt: user.createdAt,
       verified: user.verified,
+      referredBy: user.referredBy,
+      referralCount: user.referralCount,
       // Masquer email et privyUserId par défaut
       email: undefined,
       privyUserId: undefined

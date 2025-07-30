@@ -1,60 +1,29 @@
-import { Redis } from 'ioredis';
+import Redis from 'ioredis';
 import { logDeduplicator } from '../utils/logDeduplicator';
 
+const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
+
+// Configuration des listeners d'erreur
+redis.on('error', (err) => {
+  logDeduplicator.error('Redis Error', { 
+    error: err instanceof Error ? err.message : String(err),
+    stack: err instanceof Error ? err.stack : undefined
+  });
+});
+
+redis.on('connect', () => {
+  logDeduplicator.info('Redis connected successfully');
+});
+
+// Service wrapper pour maintenir la compatibilité
 export class RedisService {
-  private client: Redis;
-  private subscriber: Redis;
-  private static instance: RedisService;
-  private readonly DEFAULT_EXPIRATION = 60 * 5; // 5 minutes
-
-  private constructor() {
-    // Configuration Redis avec support de REDIS_URL
-    const redisConfig = process.env.REDIS_URL 
-      ? { url: process.env.REDIS_URL }
-      : {
-          host: process.env.REDIS_HOST || 'localhost',
-          port: parseInt(process.env.REDIS_PORT || '6379'),
-          password: process.env.REDIS_PASSWORD,
-        };
-
-    this.client = new Redis({
-      ...redisConfig,
-      retryStrategy: (times) => {
-        const delay = Math.min(times * 50, 2000);
-        return delay;
-      }
-    });
-
-    this.subscriber = new Redis(redisConfig);
-
-    // Augmenter la limite de listeners pour le client subscriber
-    this.subscriber.setMaxListeners(20); // Permet jusqu'à 20 abonnements sans avertissement
-
-    this.client.on('error', (err) => {
-      logDeduplicator.error('Redis Client Error', { 
-        error: err instanceof Error ? err.message : String(err),
-        stack: err instanceof Error ? err.stack : undefined
-      });
-    });
-
-    this.subscriber.on('error', (err) => {
-      logDeduplicator.error('Redis Subscriber Error', { 
-        error: err instanceof Error ? err.message : String(err),
-        stack: err instanceof Error ? err.stack : undefined
-      });
-    });
-  }
-
   public static getInstance(): RedisService {
-    if (!RedisService.instance) {
-      RedisService.instance = new RedisService();
-    }
-    return RedisService.instance;
+    return new RedisService();
   }
 
   public async get(key: string): Promise<string | null> {
     try {
-      return await this.client.get(key);
+      return await redis.get(key);
     } catch (error) {
       logDeduplicator.error('Redis get error', { 
         key,
@@ -68,9 +37,9 @@ export class RedisService {
   public async set(key: string, value: string, ttl?: number): Promise<void> {
     try {
       if (ttl) {
-        await this.client.set(key, value, 'EX', ttl);
+        await redis.set(key, value, 'EX', ttl);
       } else {
-        await this.client.set(key, value);
+        await redis.set(key, value);
       }
     } catch (error) {
       logDeduplicator.error('Redis set error', { 
@@ -83,7 +52,7 @@ export class RedisService {
 
   public async delete(key: string): Promise<void> {
     try {
-      await this.client.del(key);
+      await redis.del(key);
     } catch (error) {
       logDeduplicator.error('Redis delete error', { 
         key,
@@ -95,7 +64,7 @@ export class RedisService {
 
   public async keys(pattern: string): Promise<string[]> {
     try {
-      return await this.client.keys(pattern);
+      return await redis.keys(pattern);
     } catch (error) {
       logDeduplicator.error('Redis keys error', { 
         pattern,
@@ -108,7 +77,7 @@ export class RedisService {
 
   public async publish(channel: string, message: string): Promise<void> {
     try {
-      await this.client.publish(channel, message);
+      await redis.publish(channel, message);
     } catch (error) {
       logDeduplicator.error('Redis publish error', { 
         channel,
@@ -120,8 +89,8 @@ export class RedisService {
 
   public async subscribe(channel: string, callback: (message: string) => void): Promise<void> {
     try {
-      await this.subscriber.subscribe(channel);
-      this.subscriber.on('message', (receivedChannel, message) => {
+      await redis.subscribe(channel);
+      redis.on('message', (receivedChannel, message) => {
         if (receivedChannel === channel) {
           callback(message);
         }
@@ -137,7 +106,7 @@ export class RedisService {
 
   public async unsubscribe(channel: string): Promise<void> {
     try {
-      await this.subscriber.unsubscribe(channel);
+      await redis.unsubscribe(channel);
     } catch (error) {
       logDeduplicator.error('Redis unsubscribe error', { 
         channel,
@@ -149,7 +118,7 @@ export class RedisService {
 
   public async flushAll(): Promise<void> {
     try {
-      await this.client.flushall();
+      await redis.flushall();
     } catch (error) {
       logDeduplicator.error('Redis flushall error', { 
         error: error instanceof Error ? error.message : String(error),
@@ -160,8 +129,7 @@ export class RedisService {
 
   public async disconnect(): Promise<void> {
     try {
-      await this.client.quit();
-      await this.subscriber.quit();
+      await redis.quit();
     } catch (error) {
       logDeduplicator.error('Redis disconnect error', { 
         error: error instanceof Error ? error.message : String(error),
@@ -170,20 +138,8 @@ export class RedisService {
     }
   }
 
-  public async reconnect(): Promise<void> {
-    try {
-      await this.client.connect();
-      await this.subscriber.connect();
-    } catch (error) {
-      logDeduplicator.error('Redis reconnect error', { 
-        error: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : undefined
-      });
-    }
-  }
-
-  multi() {
-    return this.client.multi();
+  public multi() {
+    return redis.multi();
   }
 }
 

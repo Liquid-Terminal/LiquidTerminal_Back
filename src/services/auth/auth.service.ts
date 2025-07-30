@@ -3,11 +3,14 @@ import { PrivyPayload } from "../../types/auth.types";
 import { JWKSError, SigningKeyError, TokenValidationError, UserNotFoundError } from "../../errors/auth.errors";
 import { logDeduplicator } from "../../utils/logDeduplicator";
 import { userRepository } from "../../repositories/user.repository";
+import { ReferralService } from "./referral.service";
 
 const JWKS_URL = process.env.JWKS_URL!;
 
 export class AuthService {
   private static instance: AuthService;
+  private referralService = ReferralService.getInstance();
+  private jwksCache = new Map<string, { key: CryptoKey; expiresAt: number }>();
 
   private constructor() { }
 
@@ -20,6 +23,13 @@ export class AuthService {
 
   private async getSigningKey(header: { kid: string }): Promise<CryptoKey> {
     try {
+      // Vérifier le cache d'abord
+      const cached = this.jwksCache.get(header.kid);
+      if (cached && cached.expiresAt > Date.now()) {
+        logDeduplicator.info('Using cached JWKS', { kid: header.kid });
+        return cached.key;
+      }
+
       logDeduplicator.info('Fetching JWKS', { kid: header.kid });
 
       const response = await fetch(JWKS_URL);
@@ -45,7 +55,15 @@ export class AuthService {
 
       logDeduplicator.info('Signing key found', { kid: header.kid });
       const { importJWK } = await import('jose'); // Import dynamique de importJWK
-      return (await importJWK(signingKey, "ES256")) as CryptoKey;
+      const key = (await importJWK(signingKey, "ES256")) as CryptoKey;
+      
+      // Mettre en cache pour 1 heure
+      this.jwksCache.set(header.kid, {
+        key,
+        expiresAt: Date.now() + 60 * 60 * 1000 // 1 heure
+      });
+      
+      return key;
     } catch (error) {
       if (error instanceof JWKSError || error instanceof SigningKeyError) {
         throw error;
@@ -87,13 +105,13 @@ export class AuthService {
     }
   }
 
-  public async findOrCreateUser(payload: PrivyPayload, username: string) {
+  public async findOrCreateUser(payload: PrivyPayload, name: string, referrerName?: string) {
     const privyUserId = payload.sub;
 
     if (!privyUserId) {
       logDeduplicator.error('Missing Privy User ID in token', {
         payload,
-        username
+        name
       });
       throw new TokenValidationError("Missing Privy User ID in token");
     }
@@ -101,17 +119,37 @@ export class AuthService {
     try {
       logDeduplicator.info('Finding or creating user', {
         privyUserId,
-        username
+        name,
+        referrerName
       });
 
       const user = await userRepository.findOrCreate(privyUserId, {
-        name: username,
+        name: name,
       });
+
+      // Associer le parrain si fourni
+      if (referrerName && referrerName !== name) {
+        try {
+          await this.referralService.assignReferrer(user.id, referrerName);
+          logDeduplicator.info('Referrer assigned successfully', { 
+            userId: user.id, 
+            referrerName 
+          });
+        } catch (error) {
+          // Log l'erreur mais ne pas faire échouer la création de l'utilisateur
+          logDeduplicator.warn('Failed to assign referrer', {
+            userId: user.id,
+            referrerName,
+            error: error instanceof Error ? error.message : String(error)
+          });
+        }
+      }
 
       logDeduplicator.info('User found or created', {
         userId: user.id,
         privyUserId,
-        username,
+        name,
+        referrerName,
         isNewUser: user.createdAt === user.createdAt
       });
 
@@ -121,7 +159,8 @@ export class AuthService {
         error: error instanceof Error ? error.message : String(error),
         stack: error instanceof Error ? error.stack : undefined,
         privyUserId,
-        username
+        name,
+        referrerName
       });
       throw new UserNotFoundError("Error finding or creating user");
     }

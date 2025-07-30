@@ -9,6 +9,7 @@ export const privyTokenSchema = z.object({
 export const loginSchema = z.object({
   privyUserId: z.string().min(1, 'Privy User ID is required'),
   name: z.string().min(1, 'Name is required').max(100, 'Name must be less than 100 characters'),
+  referrerName: z.string().optional(),
 }).strict();
 
 // Schéma pour la validation des paramètres de route

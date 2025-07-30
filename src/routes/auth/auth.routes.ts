@@ -1,5 +1,7 @@
 import { Router, Request, Response } from "express";
 import { AuthService } from "../../services/auth/auth.service";
+import { ReferralService } from "../../services/auth/referral.service";
+import { userRepository } from "../../repositories/user.repository";
 import { validatePrivyToken } from "../../middleware/authMiddleware";
 import { validateLogin, validateUserParams } from "../../middleware/validation/authValidation.middleware";
 import { marketRateLimiter } from "../../middleware/apiRateLimiter";
@@ -8,13 +10,14 @@ import { logDeduplicator } from "../../utils/logDeduplicator";
 
 const router = Router();
 const authService = AuthService.getInstance();
+const referralService = ReferralService.getInstance();
 
 // Appliquer le rate limiting à toutes les routes d'authentification
 router.use(marketRateLimiter);
 
 // Route de connexion
 router.post("/login", validatePrivyToken, validateLogin, (req: Request, res: Response): void => {
-  const { privyUserId, name } = req.body;
+  const { privyUserId, name, referrerName } = req.body;
 
   logDeduplicator.info('Login request received', { 
     hasPrivyUserId: !!privyUserId,
@@ -53,7 +56,7 @@ router.post("/login", validatePrivyToken, validateLogin, (req: Request, res: Res
     return;
   }
 
-  authService.findOrCreateUser(req.user, name)
+  authService.findOrCreateUser(req.user, name, referrerName)
     .then(user => {
       logDeduplicator.info('User authenticated successfully', { 
         userId: user.id,
@@ -107,8 +110,18 @@ router.get("/me", validatePrivyToken, (req: Request, res: Response): void => {
       return;
     }
 
-    authService.findOrCreateUser({ sub: privyUserId } as any, '')
+    userRepository.findByPrivyUserId(privyUserId)
       .then(user => {
+        if (!user) {
+          logDeduplicator.warn('User not found in /me', { privyUserId, path: req.path });
+          res.status(404).json({
+            success: false,
+            message: 'User not found',
+            code: 'USER_NOT_FOUND'
+          });
+          return;
+        }
+
         logDeduplicator.info('User info retrieved successfully', { 
           userId: user.id,
           role: user.role,
@@ -126,7 +139,9 @@ router.get("/me", validatePrivyToken, (req: Request, res: Response): void => {
               role: user.role,
               privyUserId: user.privyUserId,
               createdAt: user.createdAt,
-              verified: user.verified
+              verified: user.verified,
+              referralCount: user.referralCount,
+              referredBy: user.referredBy
             }
           }
         });
@@ -176,8 +191,18 @@ router.get("/user/:privyUserId", validatePrivyToken, validateUserParams, (req: R
     return;
   }
 
-  authService.findOrCreateUser({ sub: req.params.privyUserId } as any, '')
+  userRepository.findByPrivyUserId(req.params.privyUserId)
     .then(user => {
+      if (!user) {
+        logDeduplicator.warn('User not found in /user/:id', { privyUserId: req.params.privyUserId, path: req.path });
+        res.status(404).json({
+          success: false,
+          message: 'User not found',
+          code: 'USER_NOT_FOUND'
+        });
+        return;
+      }
+
       logDeduplicator.info('User retrieved successfully', { 
         userId: user.id,
         userRole: user.role,
@@ -212,6 +237,89 @@ router.get("/user/:privyUserId", validatePrivyToken, validateUserParams, (req: R
         code: "INTERNAL_SERVER_ERROR"
       });
     });
+});
+
+// Route pour récupérer les statistiques de referral
+router.get("/referral/stats", validatePrivyToken, async (req: Request, res: Response) => {
+  try {
+    const privyUserId = req.user?.sub;
+    
+    if (!privyUserId) {
+      logDeduplicator.warn('Referral stats request without authentication', { path: req.path });
+      res.status(401).json({
+        success: false,
+        message: 'User not authenticated',
+        code: 'UNAUTHENTICATED'
+      });
+      return;
+    }
+
+    const user = await userRepository.findByPrivyUserId(privyUserId);
+    if (!user) {
+      logDeduplicator.warn('User not found in /referral/stats', { privyUserId, path: req.path });
+      res.status(404).json({
+        success: false,
+        message: 'User not found',
+        code: 'USER_NOT_FOUND'
+      });
+      return;
+    }
+    const stats = await referralService.getReferralStats(user.id);
+    
+    logDeduplicator.info('Referral stats retrieved successfully', { 
+      userId: user.id,
+      referralCount: stats.referralCount
+    });
+    
+    res.status(200).json({
+      success: true,
+      message: 'Referral stats retrieved successfully',
+      data: stats
+    });
+  } catch (error) {
+    logDeduplicator.error("Error retrieving referral stats", { 
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+      path: req.path 
+    });
+    
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      code: 'INTERNAL_SERVER_ERROR'
+    });
+  }
+});
+
+// Route pour valider un name de parrain
+router.get("/referral/validate/:name", validatePrivyToken, async (req: Request, res: Response) => {
+  try {
+    const name = req.params.name;
+    const isValid = await referralService.validateReferrerName(name);
+    
+    logDeduplicator.info('Referrer validation completed', { 
+      name, 
+      isValid 
+    });
+    
+    res.status(200).json({
+      success: true,
+      message: 'Referrer validation completed',
+      data: { isValid }
+    });
+  } catch (error) {
+    logDeduplicator.error("Error validating referrer", { 
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+      path: req.path 
+    });
+    
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      code: 'INTERNAL_SERVER_ERROR'
+    });
+  }
 });
 
 export default router;

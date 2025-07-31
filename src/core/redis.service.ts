@@ -3,6 +3,9 @@ import { logDeduplicator } from '../utils/logDeduplicator';
 
 // Configuration adaptée pour Railway
 const redisConfig = {
+  // ✅ SOLUTION Railway : Dual stack IPv4/IPv6
+  family: 0, // 0 = dual stack (IPv4 + IPv6)
+  
   // URL de connexion
   ...(process.env.REDIS_URL ? {} : { 
     host: 'localhost', 

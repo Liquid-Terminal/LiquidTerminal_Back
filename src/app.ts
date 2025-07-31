@@ -106,7 +106,9 @@ const PORT = process.env.PORT || 3002;
 
 // Initialiser les clients avant de démarrer le serveur
 const clientInitializer = ClientInitializerService.getInstance();
-clientInitializer.initialize();
+clientInitializer.initialize().catch((error) => {
+  logDeduplicator.error('Failed to initialize clients:', { error });
+});
 
 // Démarrer le service de nettoyage automatique des fichiers
 const fileCleanupService = FileCleanupService.getInstance();

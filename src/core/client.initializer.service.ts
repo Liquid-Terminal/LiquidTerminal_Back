@@ -15,12 +15,16 @@ import { HyperliquidGlobalStatsClient } from '../clients/hyperliquid/globalstats
 import { HyperliquidLeaderboardClient } from '../clients/hyperliquid/leaderboard/leaderboard.client';
 import { HypurrscanStakedHoldersClient } from '../clients/hypurrscan/stakedHolders.client';
 import { logDeduplicator } from '../utils/logDeduplicator';
+import { RedisService } from './redis.service';
 
 export class ClientInitializerService {
   private static instance: ClientInitializerService;
   private clients: Map<string, any> = new Map();
+  private redisService: RedisService;
 
-  private constructor() {}
+  private constructor() {
+    this.redisService = RedisService.getInstance();
+  }
 
   public static getInstance(): ClientInitializerService {
     if (!ClientInitializerService.instance) {
@@ -60,8 +64,15 @@ export class ClientInitializerService {
     // Implementation of initializeGlobalStatsLiquid
   }
 
-  public initialize(): void {
+  public async initialize(): Promise<void> {
     try {
+      logDeduplicator.info('Starting client initialization...');
+      
+      // ✅ ATTENDRE QUE REDIS SOIT PRÊT AVANT D'INITIALISER LES CLIENTS
+      logDeduplicator.info('Waiting for Redis to be ready...');
+      await this.redisService.waitForReady();
+      logDeduplicator.info('Redis is ready, initializing clients...');
+
       // Initialiser le client Spot
       const spotClient = HyperliquidSpotClient.getInstance();
       this.clients.set('spot', spotClient);
@@ -124,7 +135,7 @@ export class ClientInitializerService {
       this.clients.set('stakedHolders', stakedHoldersClient);
 
       // Démarrer le polling pour tous les clients
-      this.startAllPolling();
+      await this.startAllPolling();
 
       logDeduplicator.info('All clients initialized successfully');
     } catch (error) {
@@ -133,7 +144,9 @@ export class ClientInitializerService {
     }
   }
 
-  private startAllPolling(): void {
+  private async startAllPolling(): Promise<void> {
+    logDeduplicator.info('Starting polling for all clients...');
+    
     for (const [name, client] of this.clients.entries()) {
       if ('startPolling' in client) {
         try {
@@ -144,6 +157,8 @@ export class ClientInitializerService {
         }
       }
     }
+    
+    logDeduplicator.info('All client polling started successfully');
   }
 
   public stopAllPolling(): void {

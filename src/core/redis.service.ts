@@ -21,7 +21,7 @@
     // Timeouts
     connectTimeout: 30000,
     commandTimeout: 10000,
-    enableOfflineQueue: false,
+    enableOfflineQueue: true, // ✅ ACTIVER pour permettre les commandes pendant la connexion
     // Pour les connexions instables
     keepAlive: 30000,
     
@@ -94,12 +94,53 @@
 
   // Service wrapper pour maintenir la compatibilité
   export class RedisService {
+    private static instance: RedisService;
+    private isReady = false;
+
     public static getInstance(): RedisService {
-      return new RedisService();
+      if (!RedisService.instance) {
+        RedisService.instance = new RedisService();
+      }
+      return RedisService.instance;
+    }
+
+    constructor() {
+      // Écouter l'événement ready pour marquer le service comme prêt
+      redis.on('ready', () => {
+        this.isReady = true;
+      });
+      
+      redis.on('close', () => {
+        this.isReady = false;
+      });
+    }
+
+    // ✅ Méthode pour attendre que Redis soit prêt
+    public async waitForReady(timeout = 30000): Promise<void> {
+      if (this.isReady) return;
+      
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          reject(new Error('Redis connection timeout'));
+        }, timeout);
+
+        const checkReady = () => {
+          if (this.isReady) {
+            clearTimeout(timer);
+            resolve();
+          } else {
+            setTimeout(checkReady, 100);
+          }
+        };
+        
+        checkReady();
+      });
     }
 
     public async get(key: string): Promise<string | null> {
       try {
+        // ✅ Attendre que Redis soit prêt avant d'exécuter la commande
+        await this.waitForReady();
         return await redis.get(key);
       } catch (error) {
         logDeduplicator.error('Redis get error', { 
@@ -113,6 +154,8 @@
 
     public async set(key: string, value: string, ttl?: number): Promise<void> {
       try {
+        // ✅ Attendre que Redis soit prêt avant d'exécuter la commande
+        await this.waitForReady();
         if (ttl) {
           await redis.set(key, value, 'EX', ttl);
         } else {

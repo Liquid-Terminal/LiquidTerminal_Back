@@ -147,18 +147,17 @@ export class ClientInitializerService {
     logDeduplicator.info('Starting polling for all clients...');
     
     // ✅ TEMPORAIREMENT DÉSACTIVÉ pour éviter les blocages API
-    logDeduplicator.info('Polling temporarily disabled to avoid API timeouts');
     
-    // for (const [name, client] of this.clients.entries()) {
-    //   if ('startPolling' in client) {
-    //     try {
-    //       client.startPolling();
-    //       logDeduplicator.info(`Started polling for ${name} client`);
-    //     } catch (error) {
-    //       logDeduplicator.error(`Error starting polling for ${name} client:`, { error });
-    //     }
-    //   }
-    // }
+     for (const [name, client] of this.clients.entries()) {
+       if ('startPolling' in client) {
+         try {
+           client.startPolling();
+         logDeduplicator.info(`Started polling for ${name} client`);
+        } catch (error) {
+          logDeduplicator.error(`Error starting polling for ${name} client:`, { error });
+        }
+      }
+     }
     
     logDeduplicator.info('All client polling temporarily disabled');
   }

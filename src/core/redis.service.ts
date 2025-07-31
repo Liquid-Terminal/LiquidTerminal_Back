@@ -26,35 +26,40 @@
     keepAlive: 30000,
     
     // ✅ Configuration TLS pour Railway
-    ...(process.env.NODE_ENV === 'production' && {
-      tls: {
-        rejectUnauthorized: false, // Important pour Railway
-      },
-    }),
+    // ...(process.env.NODE_ENV === 'production' && {
+    //   tls: {
+    //     rejectUnauthorized: false, // Important pour Railway
+    //   },
+    // }),
   };
 
   // ✅ Diagnostic de l'URL Redis
   console.log('🔧 Redis Configuration:');
   console.log('  - REDIS_URL:', process.env.REDIS_URL ? 'SET' : 'NOT SET');
+  console.log('  - REDIS_PUBLIC_URL:', process.env.REDIS_PUBLIC_URL ? 'SET' : 'NOT SET');
   console.log('  - NODE_ENV:', process.env.NODE_ENV);
   console.log('  - TLS enabled:', process.env.NODE_ENV === 'production');
   
-  if (process.env.REDIS_URL) {
-    const url = new URL(process.env.REDIS_URL);
+  // ✅ Utiliser REDIS_PUBLIC_URL en priorité
+  const redisUrl = process.env.REDIS_PUBLIC_URL || process.env.REDIS_URL;
+  
+  if (redisUrl) {
+    const url = new URL(redisUrl);
     console.log('  - Redis host:', url.hostname);
     console.log('  - Redis port:', url.port);
     console.log('  - Redis protocol:', url.protocol);
+    console.log('  - Using URL type:', process.env.REDIS_PUBLIC_URL ? 'PUBLIC' : 'INTERNAL');
   }
 
-  // ✅ Création de l'instance Redis avec fallback
+  // ✅ Création de l'instance Redis avec REDIS_PUBLIC_URL en priorité
   let redis: Redis;
   
   try {
-    redis = process.env.REDIS_URL 
-      ? new Redis(process.env.REDIS_URL, redisConfig)
+    redis = redisUrl 
+      ? new Redis(redisUrl, redisConfig)
       : new Redis(redisConfig);
   } catch (error) {
-    console.error('❌ Failed to create Redis instance with TLS, trying without TLS...');
+    console.error('❌ Failed to create Redis instance, trying fallback...');
     
     // Fallback: essayer sans TLS
     const fallbackConfig = {
@@ -62,8 +67,8 @@
       tls: undefined // Désactiver TLS
     };
     
-    redis = process.env.REDIS_URL 
-      ? new Redis(process.env.REDIS_URL, fallbackConfig)
+    redis = redisUrl 
+      ? new Redis(redisUrl, fallbackConfig)
       : new Redis(fallbackConfig);
   }
 

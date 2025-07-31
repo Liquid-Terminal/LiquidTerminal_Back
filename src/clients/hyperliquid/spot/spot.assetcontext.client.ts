@@ -124,7 +124,11 @@ export class HyperliquidSpotClient extends BaseApiService {
         tokensWithoutPairs: tokensWithoutPairs.length,
       });
     } catch (error) {
-      logDeduplicator.error('Failed to update spot data:', { error });
+      logDeduplicator.error('Failed to update spot data:', { 
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        type: error instanceof Error ? error.constructor.name : typeof error
+      });
     }
   }
 

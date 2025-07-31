@@ -1,7 +1,7 @@
 import { logDeduplicator } from '../utils/logDeduplicator';
 
 export abstract class BaseApiService {
-    private readonly API_TIMEOUT = 5000; // 5 secondes
+    private readonly API_TIMEOUT = 30000; // 30 secondes au lieu de 5
     private readonly MAX_RETRIES = 3;
     private readonly RETRY_DELAY = 1000; // 1 seconde
   
@@ -17,6 +17,12 @@ export abstract class BaseApiService {
       endpoint: string, 
       options: RequestInit
     ): Promise<T> {
+      logDeduplicator.info('Making API request', {
+        url: `${this.baseUrl}${endpoint}`,
+        method: options.method,
+        timeout: this.API_TIMEOUT
+      });
+      
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), this.API_TIMEOUT);
   
@@ -30,10 +36,15 @@ export abstract class BaseApiService {
           },
         });
   
-        if (!response.ok) {
+                if (!response.ok) {
           throw new Error(`API error: ${response.status} - ${await response.text()}`);
         }
-  
+
+        logDeduplicator.info('API request successful', {
+          url: `${this.baseUrl}${endpoint}`,
+          status: response.status
+        });
+
         return response.json();
       } catch (error) {
         if (error instanceof Error) {

@@ -74,12 +74,16 @@ export class ClientInitializerService {
       logDeduplicator.info('Redis is ready, initializing clients...');
 
       // Initialiser le client Spot
+      logDeduplicator.info('Initializing Spot client...');
       const spotClient = HyperliquidSpotClient.getInstance();
       this.clients.set('spot', spotClient);
+      logDeduplicator.info('Spot client initialized successfully');
 
       // Initialiser le client Perp
+      logDeduplicator.info('Initializing Perp client...');
       const perpClient = HyperliquidPerpClient.getInstance();
       this.clients.set('perp', perpClient);
+      logDeduplicator.info('Perp client initialized successfully');
 
       // Initialiser le client Spot Deploy
       const spotDeployClient = HyperliquidSpotDeployClient.getInstance();
@@ -135,6 +139,7 @@ export class ClientInitializerService {
       this.clients.set('stakedHolders', stakedHoldersClient);
 
       // Démarrer le polling pour tous les clients
+      logDeduplicator.info('All clients created, starting polling...');
       await this.startAllPolling();
 
       logDeduplicator.info('All clients initialized successfully');

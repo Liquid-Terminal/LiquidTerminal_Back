@@ -106,17 +106,24 @@ const PORT = process.env.PORT || 3002;
 
 // Initialiser les clients avant de démarrer le serveur
 const clientInitializer = ClientInitializerService.getInstance();
-clientInitializer.initialize().catch((error) => {
-  logDeduplicator.error('Failed to initialize clients:', { error });
-});
 
-// Démarrer le service de nettoyage automatique des fichiers
-const fileCleanupService = FileCleanupService.getInstance();
-fileCleanupService.startAutoCleanup();
+// ✅ Attendre l'initialisation avant de démarrer le serveur
+clientInitializer.initialize()
+  .then(() => {
+    logDeduplicator.info('All clients initialized, starting server...');
+    
+    // Démarrer le service de nettoyage automatique des fichiers
+    const fileCleanupService = FileCleanupService.getInstance();
+    fileCleanupService.startAutoCleanup();
 
-server.listen(PORT, () => {
-  logDeduplicator.info(`Server is running on port ${PORT}`);
-});
+    server.listen(PORT, () => {
+      logDeduplicator.info(`Server is running on port ${PORT}`);
+    });
+  })
+  .catch((error) => {
+    logDeduplicator.error('Failed to initialize clients:', { error });
+    process.exit(1); // Arrêter l'app si l'initialisation échoue
+  });
 
 // Gestion de l'arrêt propre de l'application
 process.on('SIGINT', async () => {

@@ -15,16 +15,12 @@ import { HyperliquidGlobalStatsClient } from '../clients/hyperliquid/globalstats
 import { HyperliquidLeaderboardClient } from '../clients/hyperliquid/leaderboard/leaderboard.client';
 import { HypurrscanStakedHoldersClient } from '../clients/hypurrscan/stakedHolders.client';
 import { logDeduplicator } from '../utils/logDeduplicator';
-import { RedisService } from './redis.service';
 
 export class ClientInitializerService {
   private static instance: ClientInitializerService;
   private clients: Map<string, any> = new Map();
-  private redisService: RedisService;
 
-  private constructor() {
-    this.redisService = RedisService.getInstance();
-  }
+  private constructor() {}
 
   public static getInstance(): ClientInitializerService {
     if (!ClientInitializerService.instance) {
@@ -68,9 +64,7 @@ export class ClientInitializerService {
     try {
       logDeduplicator.info('Starting client initialization...');
       
-      // ✅ ATTENDRE QUE REDIS SOIT PRÊT AVANT D'INITIALISER LES CLIENTS
-      logDeduplicator.info('Waiting for Redis to be ready...');
-      await this.redisService.waitForReady();
+      // ✅ Redis est déjà prêt, on peut initialiser les clients directement
       logDeduplicator.info('Redis is ready, initializing clients...');
 
       // Initialiser le client Spot

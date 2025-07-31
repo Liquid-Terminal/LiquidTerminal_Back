@@ -146,18 +146,21 @@ export class ClientInitializerService {
   private async startAllPolling(): Promise<void> {
     logDeduplicator.info('Starting polling for all clients...');
     
-    for (const [name, client] of this.clients.entries()) {
-      if ('startPolling' in client) {
-        try {
-          client.startPolling();
-          logDeduplicator.info(`Started polling for ${name} client`);
-        } catch (error) {
-          logDeduplicator.error(`Error starting polling for ${name} client:`, { error });
-        }
-      }
-    }
+    // ✅ TEMPORAIREMENT DÉSACTIVÉ pour éviter les blocages API
+    logDeduplicator.info('Polling temporarily disabled to avoid API timeouts');
     
-    logDeduplicator.info('All client polling started successfully');
+    // for (const [name, client] of this.clients.entries()) {
+    //   if ('startPolling' in client) {
+    //     try {
+    //       client.startPolling();
+    //       logDeduplicator.info(`Started polling for ${name} client`);
+    //     } catch (error) {
+    //       logDeduplicator.error(`Error starting polling for ${name} client:`, { error });
+    //     }
+    //   }
+    // }
+    
+    logDeduplicator.info('All client polling temporarily disabled');
   }
 
   public stopAllPolling(): void {

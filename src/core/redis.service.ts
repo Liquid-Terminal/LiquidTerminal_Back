@@ -75,6 +75,20 @@
       : new Redis(fallbackConfig);
   }
 
+  // ✅ Connexion Redis séparée pour les opérations normales (éviter le mode subscriber)
+  let redisNormal: Redis;
+  
+  try {
+    redisNormal = redisUrl 
+      ? new Redis(redisUrl, redisConfig)
+      : new Redis(redisConfig);
+    
+    redisNormal.setMaxListeners(20);
+  } catch (error) {
+    console.error('❌ Failed to create normal Redis instance, using main instance');
+    redisNormal = redis;
+  }
+
   // Configuration des listeners d'événements pour le diagnostic
   redis.on('ready', () => {
     console.log('✅ Redis is ready');
@@ -181,7 +195,7 @@
       try {
         // ✅ Attendre que Redis soit prêt avant d'exécuter la commande
         await this.waitForReady();
-        return await redis.get(key);
+        return await redisNormal.get(key);
       } catch (error) {
         logDeduplicator.error('Redis get error', { 
           key,
@@ -197,9 +211,9 @@
         // ✅ Attendre que Redis soit prêt avant d'exécuter la commande
         await this.waitForReady();
         if (ttl) {
-          await redis.set(key, value, 'EX', ttl);
+          await redisNormal.set(key, value, 'EX', ttl);
         } else {
-          await redis.set(key, value);
+          await redisNormal.set(key, value);
         }
       } catch (error) {
         logDeduplicator.error('Redis set error', { 

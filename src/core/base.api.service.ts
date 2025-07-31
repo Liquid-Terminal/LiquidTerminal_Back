@@ -47,6 +47,12 @@ export abstract class BaseApiService {
 
         return response.json();
       } catch (error) {
+        logDeduplicator.error('API request failed', {
+          url: `${this.baseUrl}${endpoint}`,
+          error: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack : undefined
+        });
+        
         if (error instanceof Error) {
           if (error.name === 'AbortError') {
             throw new Error('Request timeout');

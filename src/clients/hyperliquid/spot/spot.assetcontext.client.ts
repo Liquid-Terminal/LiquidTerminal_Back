@@ -59,30 +59,58 @@ export class HyperliquidSpotClient extends BaseApiService {
   private async updateSpotData(): Promise<void> {
     try {
       logDeduplicator.info('Making API call to Hyperliquid...');
-      
-      // ✅ TEST : Désactiver temporairement l'appel API
-      logDeduplicator.info('API call disabled for testing - using mock data');
-      
-      // Mock data pour tester
-      const mockMarkets = [
-        {
-          name: "BTC",
-          logo: "https://app.hyperliquid.xyz/coins/BTC_USDC.svg",
-          price: 50000,
-          marketCap: 1000000000,
-          volume: 1000000,
-          change24h: 2.5,
-          liquidity: 50000,
-          supply: 20000,
-          marketIndex: 1,
-        }
-      ];
-      
-      logDeduplicator.info('Caching mock data to Redis...');
+      const [spotContext, assetContexts] = await this.circuitBreaker.execute(() =>
+        this.post<[SpotContext, AssetContext[]]>('', {
+          type: 'spotMetaAndAssetCtxs',
+        })
+      );
+      logDeduplicator.info('API call successful, processing data...');
+
+      const tokenMap = spotContext.tokens.reduce((acc, token) => {
+        acc[token.index] = token;
+        return acc;
+      }, {} as Record<number, Token>);
+
+      const markets: MarketData[] = spotContext.universe.map((market: Market) => {
+        const ctx = assetContexts.find((a) => a.coin === market.name);
+        if (!ctx) return null;
+
+        const tokenIndex = market.tokens[0];
+        const token = tokenMap[tokenIndex];
+        if (!token) return null;
+
+        const current = Number(ctx.markPx);
+        const previous = Number(ctx.prevDayPx);
+        const change = previous !== 0 ? Number((((current - previous) / previous) * 100).toFixed(2)) : 0;
+
+        const displayName = unitTokens[token.name as keyof typeof unitTokens] || token.name;
+        const logoName = displayName;
+
+        return {
+          name: displayName,
+          logo: `https://app.hyperliquid.xyz/coins/${logoName}_USDC.svg`,
+          price: current,
+          marketCap: current * Number(ctx.circulatingSupply),
+          volume: Number(ctx.dayNtlVlm),
+          change24h: change,
+          liquidity: Number(ctx.midPx),
+          supply: Number(ctx.circulatingSupply),
+          marketIndex: market.index,
+        };
+      }).filter(Boolean) as MarketData[];
+
+      // Trier les marchés par volume décroissant
+      markets.sort((a, b) => b.volume - a.volume);
+
+      const tokensWithoutPairs = spotContext.tokens
+        .filter(token => !spotContext.universe.some(market => market.tokens[0] === token.index))
+        .map(token => token.name);
+
+      logDeduplicator.info('Caching data to Redis...');
       await Promise.all([
-        redisService.set(this.CACHE_KEY_RAW, JSON.stringify([])),
-        redisService.set(this.CACHE_KEY_MARKETS, JSON.stringify(mockMarkets)),
-        redisService.set(this.CACHE_KEY_TOKENS, JSON.stringify([]))
+        redisService.set(this.CACHE_KEY_RAW, JSON.stringify([spotContext, assetContexts])),
+        redisService.set(this.CACHE_KEY_MARKETS, JSON.stringify(markets)),
+        redisService.set(this.CACHE_KEY_TOKENS, JSON.stringify(tokensWithoutPairs))
       ]);
 
       logDeduplicator.info('Publishing update event...');
@@ -91,9 +119,9 @@ export class HyperliquidSpotClient extends BaseApiService {
         timestamp: Date.now(),
       }));
 
-      logDeduplicator.info('Spot data updated & cached (MOCK)', {
-        markets: mockMarkets.length,
-        tokensWithoutPairs: 0,
+      logDeduplicator.info('Spot data updated & cached', {
+        markets: markets.length,
+        tokensWithoutPairs: tokensWithoutPairs.length,
       });
     } catch (error) {
       logDeduplicator.error('Failed to update spot data:', { 

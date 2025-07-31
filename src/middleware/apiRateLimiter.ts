@@ -78,25 +78,27 @@ export const marketRateLimiter = async (req: Request, res: Response, next: NextF
 };
 
 async function incrementAndGetCount(key: string, now: number, window: number): Promise<number> {
-  const multi = redisService.multi();
-  
-  // Ajouter le timestamp actuel au sorted set
-  multi.zadd(key, now, `${now}`);
-  
-  // Nettoyer les anciennes entrées
-  multi.zremrangebyscore(key, 0, now - window);
-  
-  // Compter les entrées restantes
-  multi.zcard(key);
-  
-  // Définir une expiration sur la clé
-  multi.expire(key, window * 2);
-  
-  const results = await multi.exec();
-  if (!results) return 0;
-  
-  const [, , countResult] = results;
-  return countResult ? Number(countResult[1]) : 0;
+  try {
+    // ✅ Utiliser directement les commandes Redis au lieu de multi()
+    const redis = (redisService as any).redisNormal || (redisService as any).redis;
+    
+    // Ajouter le timestamp actuel au sorted set
+    await redis.zadd(key, now, `${now}`);
+    
+    // Nettoyer les anciennes entrées
+    await redis.zremrangebyscore(key, 0, now - window);
+    
+    // Compter les entrées restantes
+    const count = await redis.zcard(key);
+    
+    // Définir une expiration sur la clé
+    await redis.expire(key, window * 2);
+    
+    return count;
+  } catch (error) {
+    logDeduplicator.error('Rate limiter Redis error', { error });
+    return 0;
+  }
 }
 
 function sendLimitExceededResponse(res: Response, message: string): void {

@@ -25,15 +25,47 @@
     // Pour les connexions instables
     keepAlive: 30000,
     
-    // Options SSL si nécessaire (Railway peut l'exiger)
+    // ✅ Configuration TLS pour Railway
     ...(process.env.NODE_ENV === 'production' && {
-      tls: {},
+      tls: {
+        rejectUnauthorized: false, // Important pour Railway
+      },
     }),
   };
 
-  const redis = process.env.REDIS_URL 
-    ? new Redis(process.env.REDIS_URL, redisConfig)
-    : new Redis(redisConfig);
+  // ✅ Diagnostic de l'URL Redis
+  console.log('🔧 Redis Configuration:');
+  console.log('  - REDIS_URL:', process.env.REDIS_URL ? 'SET' : 'NOT SET');
+  console.log('  - NODE_ENV:', process.env.NODE_ENV);
+  console.log('  - TLS enabled:', process.env.NODE_ENV === 'production');
+  
+  if (process.env.REDIS_URL) {
+    const url = new URL(process.env.REDIS_URL);
+    console.log('  - Redis host:', url.hostname);
+    console.log('  - Redis port:', url.port);
+    console.log('  - Redis protocol:', url.protocol);
+  }
+
+  // ✅ Création de l'instance Redis avec fallback
+  let redis: Redis;
+  
+  try {
+    redis = process.env.REDIS_URL 
+      ? new Redis(process.env.REDIS_URL, redisConfig)
+      : new Redis(redisConfig);
+  } catch (error) {
+    console.error('❌ Failed to create Redis instance with TLS, trying without TLS...');
+    
+    // Fallback: essayer sans TLS
+    const fallbackConfig = {
+      ...redisConfig,
+      tls: undefined // Désactiver TLS
+    };
+    
+    redis = process.env.REDIS_URL 
+      ? new Redis(process.env.REDIS_URL, fallbackConfig)
+      : new Redis(fallbackConfig);
+  }
 
   // Configuration des listeners d'événements pour le diagnostic
   redis.on('ready', () => {

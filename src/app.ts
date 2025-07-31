@@ -56,6 +56,12 @@ app.use(cors({
     else if (!origin || SECURITY_CONSTANTS.ALLOWED_ORIGINS.includes(origin as typeof SECURITY_CONSTANTS.ALLOWED_ORIGINS[number])) {
       callback(null, true);
     } else {
+      // ✅ TEMPORAIRE : Log pour debug CORS
+      logDeduplicator.warn('CORS blocked origin', { 
+        origin, 
+        allowedOrigins: SECURITY_CONSTANTS.ALLOWED_ORIGINS,
+        nodeEnv: process.env.NODE_ENV 
+      });
       callback(new Error('Not allowed by CORS'));
     }
   },

@@ -17,6 +17,12 @@ router.use(marketRateLimiter);
 
 // Route de connexion
 router.post("/login", validatePrivyToken, validateLogin, (req: Request, res: Response): void => {
+  logDeduplicator.info('POST /auth/login called', { 
+    method: req.method,
+    headers: req.headers,
+    body: req.body 
+  });
+  
   const { privyUserId, name, referrerName } = req.body;
 
   logDeduplicator.info('Login request received', { 
@@ -93,6 +99,21 @@ router.post("/login", validatePrivyToken, validateLogin, (req: Request, res: Res
         code: "INTERNAL_SERVER_ERROR"
       });
     });
+});
+
+// ✅ Handler pour les mauvaises méthodes sur /login
+router.all("/login", (req: Request, res: Response): void => {
+  logDeduplicator.warn('Wrong method on /auth/login', { 
+    method: req.method,
+    path: req.path,
+    headers: req.headers 
+  });
+  
+  res.status(405).json({ 
+    success: false,
+    message: `Method ${req.method} not allowed`,
+    code: "METHOD_NOT_ALLOWED"
+  });
 });
 
 // Route pour récupérer les infos de l'utilisateur connecté

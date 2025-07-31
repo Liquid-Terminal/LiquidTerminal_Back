@@ -101,20 +101,7 @@ router.post("/login", validatePrivyToken, validateLogin, (req: Request, res: Res
     });
 });
 
-// ✅ Handler pour les mauvaises méthodes sur /login
-router.all("/login", (req: Request, res: Response): void => {
-  logDeduplicator.warn('Wrong method on /auth/login', { 
-    method: req.method,
-    path: req.path,
-    headers: req.headers 
-  });
-  
-  res.status(405).json({ 
-    success: false,
-    message: `Method ${req.method} not allowed`,
-    code: "METHOD_NOT_ALLOWED"
-  });
-});
+// ✅ Handler pour les mauvaises méthodes sur /login (déplacé à la fin)
 
 // Route pour récupérer les infos de l'utilisateur connecté
 router.get("/me", validatePrivyToken, (req: Request, res: Response): void => {
@@ -341,6 +328,21 @@ router.get("/referral/validate/:name", validatePrivyToken, async (req: Request, 
       code: 'INTERNAL_SERVER_ERROR'
     });
   }
+});
+
+// ✅ Handler pour les mauvaises méthodes sur /login (à la fin)
+router.all("/login", (req: Request, res: Response): void => {
+  logDeduplicator.warn('Wrong method on /auth/login', { 
+    method: req.method,
+    path: req.path,
+    headers: req.headers 
+  });
+  
+  res.status(405).json({ 
+    success: false,
+    message: `Method ${req.method} not allowed`,
+    code: "METHOD_NOT_ALLOWED"
+  });
 });
 
 export default router;

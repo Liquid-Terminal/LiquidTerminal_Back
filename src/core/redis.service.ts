@@ -58,6 +58,9 @@
     redis = redisUrl 
       ? new Redis(redisUrl, redisConfig)
       : new Redis(redisConfig);
+    
+    // ✅ Corriger le warning de MaxListeners
+    redis.setMaxListeners(20);
   } catch (error) {
     console.error('❌ Failed to create Redis instance, trying fallback...');
     

@@ -58,11 +58,13 @@ export class HyperliquidSpotClient extends BaseApiService {
 
   private async updateSpotData(): Promise<void> {
     try {
+      logDeduplicator.info('Making API call to Hyperliquid...');
       const [spotContext, assetContexts] = await this.circuitBreaker.execute(() =>
         this.post<[SpotContext, AssetContext[]]>('', {
           type: 'spotMetaAndAssetCtxs',
         })
       );
+      logDeduplicator.info('API call successful, processing data...');
 
       const tokenMap = spotContext.tokens.reduce((acc, token) => {
         acc[token.index] = token;
@@ -104,12 +106,14 @@ export class HyperliquidSpotClient extends BaseApiService {
         .filter(token => !spotContext.universe.some(market => market.tokens[0] === token.index))
         .map(token => token.name);
 
+      logDeduplicator.info('Caching data to Redis...');
       await Promise.all([
         redisService.set(this.CACHE_KEY_RAW, JSON.stringify([spotContext, assetContexts])),
         redisService.set(this.CACHE_KEY_MARKETS, JSON.stringify(markets)),
         redisService.set(this.CACHE_KEY_TOKENS, JSON.stringify(tokensWithoutPairs))
       ]);
 
+      logDeduplicator.info('Publishing update event...');
       await redisService.publish(this.UPDATE_CHANNEL, JSON.stringify({
         type: 'DATA_UPDATED',
         timestamp: Date.now(),

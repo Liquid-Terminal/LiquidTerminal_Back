@@ -5,7 +5,8 @@ import { validatePrivyToken } from "../../middleware/authMiddleware";
 import { 
   WalletAlreadyExistsError, 
   UserNotFoundError,
-  WalletError 
+  WalletError,
+  WalletLimitExceededError
 } from "../../errors/wallet.errors";
 import {
   validateCreateWallet,
@@ -66,11 +67,12 @@ router.post("/", validatePrivyToken, validateCreateWallet, (async (req: Request,
     logDeduplicator.error('Error adding wallet:', { error, body: req.body });
     
     if (error instanceof WalletAlreadyExistsError ||
-        error instanceof UserNotFoundError) {
-      return res.status(error.statusCode).json({
+        error instanceof UserNotFoundError ||
+        error instanceof WalletLimitExceededError) {
+      return res.status((error as any).statusCode).json({
         success: false,
-        error: error.message,
-        code: error.code
+        error: (error as any).message,
+        code: (error as any).code
       });
     }
 

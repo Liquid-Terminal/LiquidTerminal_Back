@@ -35,4 +35,11 @@ export class UserNotFoundError extends WalletError {
     super(message, 404, 'USER_NOT_FOUND');
     this.name = 'UserNotFoundError';
   }
+}
+
+export class WalletLimitExceededError extends WalletError {
+  constructor(message: string = 'Maximum number of wallets reached (5 wallets per user)') {
+    super(message, 400, 'WALLET_LIMIT_EXCEEDED');
+    this.name = 'WalletLimitExceededError';
+  }
 } 

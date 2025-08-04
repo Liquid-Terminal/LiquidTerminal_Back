@@ -30,13 +30,13 @@ export const readListUpdateSchema = z.object({
 
 // Schéma pour les requêtes de ReadLists
 export const readListQuerySchema = z.object({
-  page: z.number().int().positive().optional(),
-  limit: z.number().int().positive().optional(),
+  page: z.coerce.number().int().positive().optional(),
+  limit: z.coerce.number().int().positive().optional(),
   sort: z.string().optional(),
   order: z.enum(['asc', 'desc']).optional(),
   search: z.string().optional(),
-  isPublic: z.boolean().optional(),
-  userId: z.number().int().positive().optional()
+  isPublic: z.coerce.boolean().optional(),
+  userId: z.coerce.number().int().positive().optional()
 });
 
 // Schéma pour la création de ReadListItem
@@ -63,11 +63,11 @@ export const readListItemUpdateSchema = z.object({
 
 // Schéma pour les requêtes de ReadListItems
 export const readListItemQuerySchema = z.object({
-  page: z.number().int().positive().optional(),
-  limit: z.number().int().positive().optional(),
+  page: z.coerce.number().int().positive().optional(),
+  limit: z.coerce.number().int().positive().optional(),
   sort: z.string().optional(),
   order: z.enum(['asc', 'desc']).optional(),
-  isRead: z.boolean().optional(),
+  isRead: z.coerce.boolean().optional(),
   search: z.string().optional()
 });
 

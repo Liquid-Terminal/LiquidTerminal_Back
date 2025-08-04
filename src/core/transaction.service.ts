@@ -51,7 +51,9 @@ export class TransactionService {
       this.isTransactionInProgress = true;
       logDeduplicator.info('Starting transaction', { timestamp: new Date().toISOString() });
       
-      const result = await this.prismaClient.$transaction(operation);
+      const result = await this.prismaClient.$transaction(operation, {
+        timeout: 30000 // 30 secondes au lieu de 5 secondes par défaut
+      });
       
       logDeduplicator.info('Transaction completed successfully', { 
         timestamp: new Date().toISOString(),

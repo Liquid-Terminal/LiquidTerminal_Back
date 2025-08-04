@@ -96,8 +96,7 @@ export class WalletService extends BaseService<WalletResponse, WalletCreateInput
         if (!wallet) {
           // Créer le wallet s'il n'existe pas
           wallet = await this.repository.create({
-            address,
-            name
+            address
           });
         } else {
           // Vérifier si l'utilisateur a déjà ce wallet
@@ -185,7 +184,6 @@ export class WalletService extends BaseService<WalletResponse, WalletCreateInput
           wallet: {
             id: uw.Wallet.id,
             address: uw.Wallet.address,
-            name: uw.Wallet.name,
             addedAt: uw.Wallet.addedAt
           }
         })),

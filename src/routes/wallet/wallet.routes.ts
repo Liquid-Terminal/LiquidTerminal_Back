@@ -55,7 +55,7 @@ router.post("/", validatePrivyToken, validateCreateWallet, (async (req: Request,
       address: userWallet.Wallet.address,
       userId: userWallet.userId,
       walletId: userWallet.walletId,
-      name: userWallet.Wallet.name
+      name: userWallet.name
     });
     
     res.status(201).json({ 

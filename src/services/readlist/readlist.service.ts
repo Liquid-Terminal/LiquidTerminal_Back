@@ -8,7 +8,8 @@ import {
   ReadListNotFoundError, 
   ReadListAlreadyExistsError,
   ReadListValidationError,
-  ReadListPermissionError
+  ReadListPermissionError,
+  ReadListError
 } from '../../errors/readlist.errors';
 import { logDeduplicator } from '../../utils/logDeduplicator';
 import { CACHE_PREFIX, CACHE_KEYS } from '../../constants/cache.constants';
@@ -21,6 +22,7 @@ import { readListRepository } from '../../repositories';
 import { BaseService } from '../../core/crudBase.service';
 import { cacheService } from '../../core/cache.service';
 import { CACHE_TTL } from '../../constants/cache.constants';
+import { ReadListItemService } from './readlist-item.service';
 
 // Type pour les paramètres de requête
 type ReadListQueryParams = {
@@ -230,5 +232,83 @@ export class ReadListService extends BaseService<
     const existingReadList = await this.repository.findById(id);
     await super.delete(id);
     await this.invalidateReadListCache(id, existingReadList?.userId);
+  }
+
+  /**
+   * Copie une read list publique dans les read lists de l'utilisateur
+   * @param readListId ID de la read list à copier
+   * @param userId ID de l'utilisateur qui copie
+   * @returns La nouvelle read list copiée
+   */
+  async copyReadList(readListId: number, userId: number): Promise<ReadListResponse> {
+    try {
+      logDeduplicator.info('Copying read list', { readListId, userId });
+
+      // 1. Récupérer la read list originale avec ses items
+      const originalReadList = await this.repository.findById(readListId);
+      if (!originalReadList) {
+        throw new ReadListNotFoundError();
+      }
+
+      // 2. Vérifier que la read list est publique
+      if (!originalReadList.isPublic) {
+        throw new ReadListError('Cannot copy private read list', 403, 'ACCESS_DENIED');
+      }
+
+      // 3. Vérifier que l'utilisateur ne copie pas sa propre read list
+      if (originalReadList.creator.id === userId) {
+        throw new ReadListError('Cannot copy your own read list', 400, 'INVALID_OPERATION');
+      }
+
+      // 4. Créer une nouvelle read list avec un nom unique
+      const newName = `${originalReadList.name} (Copy)`;
+      const newDescription = originalReadList.description ? 
+        `${originalReadList.description}\n\nCopied from: ${originalReadList.creator.name}` : 
+        `Copied from: ${originalReadList.creator.name}`;
+
+      const newReadList = await this.create({
+        name: newName,
+        description: newDescription,
+        userId: userId,
+        isPublic: false // Par défaut, la copie est privée
+      });
+
+      // 5. Copier tous les items de la read list originale
+      if (originalReadList.items && originalReadList.items.length > 0) {
+        const readListItemService = new ReadListItemService();
+        
+        for (const item of originalReadList.items) {
+          await readListItemService.create({
+            readListId: newReadList.id,
+            resourceId: item.resource.id,
+            notes: item.notes || undefined,
+            order: item.order || undefined
+          });
+        }
+
+        logDeduplicator.info('Read list items copied successfully', { 
+          originalReadListId: readListId, 
+          newReadListId: newReadList.id, 
+          itemsCount: originalReadList.items.length 
+        });
+      }
+
+      // 6. Récupérer la read list complète avec les items copiés
+      const completeReadList = await this.repository.findById(newReadList.id);
+      if (!completeReadList) {
+        throw new ReadListError('Failed to retrieve copied read list', 500, 'INTERNAL_ERROR');
+      }
+
+      logDeduplicator.info('Read list copied successfully', { 
+        originalReadListId: readListId, 
+        newReadListId: newReadList.id,
+        userId 
+      });
+
+      return completeReadList;
+    } catch (error) {
+      logDeduplicator.error('Error copying read list:', { error, readListId, userId });
+      throw error;
+    }
   }
 } 

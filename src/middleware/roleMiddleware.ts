@@ -68,6 +68,13 @@ export const requireRole = (allowedRoles: UserRole[]) => {
         role: user.role,
         privyUserId: user.privyUserId
       };
+      
+      logDeduplicator.info('DEBUG: requireModerator calling next()', { 
+        userId: user.id, 
+        role: user.role,
+        path: req.path 
+      });
+      
       next();
     } catch (error) {
       logDeduplicator.error('Role middleware error', { error });

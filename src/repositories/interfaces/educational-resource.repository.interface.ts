@@ -85,4 +85,14 @@ export interface EducationalResourceRepository extends BaseRepository {
    * Récupère toutes les assignations d'une ressource
    */
   getResourceAssignments(resourceId: number): Promise<EducationalResourceCategoryResponse[]>;
+
+  /**
+   * Trouve une ressource par son URL
+   */
+  findByUrl(url: string): Promise<EducationalResourceResponse | null>;
+
+  /**
+   * Récupère les catégories d'une ressource
+   */
+  getResourceCategories(resourceId: number): Promise<any[]>;
 } 

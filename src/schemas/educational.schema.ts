@@ -12,7 +12,7 @@ export const educationalCategoryBaseSchema = z.object({
     .min(2, 'Le nom doit contenir au moins 2 caractères')
     .max(100, 'Le nom ne doit pas dépasser 100 caractères')
     .trim()
-    .regex(/^[a-zA-Z0-9\s\-_À-ÿ]+$/, 'Le nom contient des caractères non autorisés'),
+    .regex(/^[a-zA-Z0-9\s\-_:()À-ÿ]+$/, 'Le nom contient des caractères non autorisés'),
   
   description: z.string()
     .max(255, 'La description ne doit pas dépasser 255 caractères')

@@ -428,4 +428,50 @@ export class PrismaEducationalResourceRepository implements EducationalResourceR
       throw error;
     }
   }
+
+  async findByUrl(url: string): Promise<EducationalResourceResponse | null> {
+    try {
+      logDeduplicator.info('Finding resource by URL', { url });
+      
+      const resource = await this.prismaClient.educationalResource.findFirst({
+        where: { url },
+        include: this.includeConfig
+      });
+
+      logDeduplicator.info('Resource by URL search completed', { url, found: !!resource });
+      
+      return resource;
+    } catch (error) {
+      logDeduplicator.error('Error finding resource by URL', { error, url });
+      throw error;
+    }
+  }
+
+  async getResourceCategories(resourceId: number): Promise<any[]> {
+    try {
+      logDeduplicator.info('Getting resource categories', { resourceId });
+      
+      const assignments = await this.prismaClient.educationalResourceCategory.findMany({
+        where: { resourceId },
+        include: {
+          category: {
+            select: {
+              id: true,
+              name: true,
+              description: true
+            }
+          }
+        }
+      });
+
+      const categories = assignments.map((assignment: any) => assignment.category);
+
+      logDeduplicator.info('Resource categories retrieved successfully', { resourceId, count: categories.length });
+      
+      return categories;
+    } catch (error) {
+      logDeduplicator.error('Error getting resource categories', { error, resourceId });
+      throw error;
+    }
+  }
 } 

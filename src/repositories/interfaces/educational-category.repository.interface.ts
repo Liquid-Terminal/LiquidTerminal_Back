@@ -62,4 +62,9 @@ export interface EducationalCategoryRepository extends BaseRepository {
    * Récupère les catégories éducatives créées par un utilisateur
    */
   findByCreator(userId: number): Promise<EducationalCategoryResponse[]>;
+
+  /**
+   * Trouve une catégorie éducative par son nom
+   */
+  findByName(name: string): Promise<EducationalCategoryResponse | null>;
 } 

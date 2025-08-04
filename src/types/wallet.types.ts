@@ -16,7 +16,6 @@ export interface WalletWatchlistResponse extends BaseResponse {
 export interface WalletResponse {
   id: number;
   address: string;
-  name?: string;
   addedAt: Date;
 }
 
@@ -31,11 +30,10 @@ export interface UserWalletResponse {
 
 export interface WalletCreateInput {
   address: string;
-  name?: string;
 }
 
 export interface WalletUpdateInput {
-  name?: string;
+  // Aucun champ à mettre à jour dans la table Wallet
 }
 
 export interface WalletQueryParams {

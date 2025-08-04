@@ -206,8 +206,13 @@ export class PrismaEducationalCategoryRepository implements EducationalCategoryR
     try {
       logDeduplicator.info('Checking if educational category exists by name', { name });
       
-      const category = await this.prismaClient.educationalCategory.findUnique({
-        where: { name }
+      const category = await this.prismaClient.educationalCategory.findFirst({
+        where: { 
+          name: {
+            equals: name,
+            mode: 'insensitive'
+          }
+        }
       });
       
       const exists = !!category;
@@ -276,6 +281,37 @@ export class PrismaEducationalCategoryRepository implements EducationalCategoryR
       return categories;
     } catch (error) {
       logDeduplicator.error('Error finding educational categories by creator', { error, userId });
+      throw error;
+    }
+  }
+
+  async findByName(name: string): Promise<EducationalCategoryResponse | null> {
+    try {
+      logDeduplicator.info('Finding educational category by name', { name });
+      
+      const category = await this.prismaClient.educationalCategory.findFirst({
+        where: { 
+          name: {
+            equals: name,
+            mode: 'insensitive'
+          }
+        },
+        include: {
+          creator: {
+            select: {
+              id: true,
+              name: true,
+              email: true
+            }
+          }
+        }
+      });
+
+      logDeduplicator.info('Educational category by name search completed', { name, found: !!category });
+      
+      return category;
+    } catch (error) {
+      logDeduplicator.error('Error finding educational category by name', { error, name });
       throw error;
     }
   }

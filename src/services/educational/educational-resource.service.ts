@@ -283,5 +283,28 @@ export class EducationalResourceService extends BaseService<
     });
   }
 
+  /**
+   * Trouve une ressource par son URL
+   */
+  async findByUrl(url: string): Promise<EducationalResourceResponse | null> {
+    try {
+      return await this.repository.findByUrl(url);
+    } catch (error) {
+      logDeduplicator.error('Error finding resource by URL:', { error, url });
+      throw error;
+    }
+  }
+
+  /**
+   * Récupère les catégories d'une ressource
+   */
+  async getResourceCategories(resourceId: number): Promise<any[]> {
+    try {
+      return await this.repository.getResourceCategories(resourceId);
+    } catch (error) {
+      logDeduplicator.error('Error getting resource categories:', { error, resourceId });
+      throw error;
+    }
+  }
 
 }

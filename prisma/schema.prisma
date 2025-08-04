@@ -40,7 +40,6 @@ model User {
 model Wallet {
   id          Int         @id @default(autoincrement())
   address     String      @unique @db.VarChar(255)
-  name        String?     @db.VarChar(255)
   addedAt     DateTime    @default(now()) @db.Timestamp(6)
   UserWallets UserWallet[]
 }

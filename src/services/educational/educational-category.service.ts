@@ -161,4 +161,16 @@ export class EducationalCategoryService extends BaseService<
     await super.delete(id);
     await this.invalidateEducationalCategoryCache(id);
   }
+
+  /**
+   * Trouve une catégorie par son nom
+   */
+  async findByName(name: string): Promise<EducationalCategoryResponse | null> {
+    try {
+      return await this.repository.findByName(name);
+    } catch (error) {
+      logDeduplicator.error('Error finding category by name:', { error, name });
+      throw error;
+    }
+  }
 } 

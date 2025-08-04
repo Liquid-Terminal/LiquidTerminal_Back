@@ -354,4 +354,40 @@ router.patch('/items/:itemId/read-status', validatePrivyToken, (async (req: Requ
   }
 }) as RequestHandler);
 
+// Copier une read list publique
+router.post('/copy/:id', validatePrivyToken, (async (req: Request, res: Response) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) {
+      return res.status(400).json({ success: false, error: 'Invalid ID format', code: 'INVALID_ID_FORMAT' });
+    }
+
+    const privyUserId = req.user?.sub;
+    if (!privyUserId) {
+      return res.status(401).json({ success: false, error: 'User not authenticated', code: 'UNAUTHENTICATED' });
+    }
+
+    // Récupère l'utilisateur depuis la DB
+    const user = await prisma.user.findUnique({ where: { privyUserId } });
+    if (!user) {
+      return res.status(401).json({ success: false, error: 'User not found', code: 'USER_NOT_FOUND' });
+    }
+
+    // Copier la read list
+    const copiedReadList = await readListService.copyReadList(id, user.id);
+    
+    res.json({ 
+      success: true, 
+      data: copiedReadList,
+      message: 'Read list copied successfully'
+    });
+  } catch (error) {
+    logDeduplicator.error('Error copying read list:', { error, id: req.params.id, privyUserId: req.user?.sub });
+    if (error instanceof ReadListError) {
+      return res.status(error.statusCode).json({ success: false, error: error.message, code: error.code });
+    }
+    res.status(500).json({ success: false, error: 'Internal server error', code: 'INTERNAL_SERVER_ERROR' });
+  }
+}) as RequestHandler);
+
 export default router; 

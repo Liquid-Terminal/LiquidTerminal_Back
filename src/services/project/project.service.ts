@@ -1,39 +1,38 @@
-import { ProjectCreateInput, ProjectUpdateInput, ProjectResponse, ProjectCreateWithUploadInput } from '../../types/project.types';
+import { ProjectResponse, ProjectCreateInput, ProjectUpdateInput } from '../../types/project.types';
+import { projectRepository } from '../../repositories';
+import { categoryRepository } from '../../repositories';
+import { transactionService } from '../../core/transaction.service';
+import { CACHE_PREFIX } from '../../constants/cache.constants';
+import { logDeduplicator } from '../../utils/logDeduplicator';
+import { BaseService } from '../../core/crudBase.service';
 import { 
   ProjectNotFoundError, 
-  ProjectAlreadyExistsError,
+  ProjectAlreadyExistsError, 
   ProjectValidationError,
   CategoryNotFoundError 
 } from '../../errors/project.errors';
-import { logDeduplicator } from '../../utils/logDeduplicator';
-import {CACHE_PREFIX } from '../../constants/cache.constants';
 import { 
-  projectCreateSchema, 
-  projectUpdateSchema, 
+  createProjectSchema, 
+  updateProjectSchema, 
   projectQuerySchema,
-  projectCategoryUpdateSchema 
+  projectCategoriesUpdateSchema
 } from '../../schemas/project.schema';
-import { projectRepository, categoryRepository } from '../../repositories';
-import { transactionService } from '../../core/transaction.service';
-import { BaseService } from '../../core/crudBase.service';
-import { deleteUploadedFile } from '../../middleware/upload.middleware';
 
-// Type pour les paramètres de requête
 type ProjectQueryParams = {
   page?: number;
   limit?: number;
   sort?: string;
   order?: 'asc' | 'desc';
   search?: string;
-  categoryId?: number;
+  categoryIds?: number[];
 };
 
 export class ProjectService extends BaseService<ProjectResponse, ProjectCreateInput, ProjectUpdateInput, ProjectQueryParams> {
   protected repository = projectRepository;
   protected cacheKeyPrefix = CACHE_PREFIX.PROJECT;
   protected validationSchemas = {
-    create: projectCreateSchema,
-    update: projectUpdateSchema,
+    create: createProjectSchema as any,
+    update: updateProjectSchema as any,
     query: projectQuerySchema as any
   };
   protected errorClasses = {
@@ -42,97 +41,165 @@ export class ProjectService extends BaseService<ProjectResponse, ProjectCreateIn
     validation: ProjectValidationError
   };
 
-  /**
-   * Vérifie si un projet avec le titre donné existe déjà
-   * @param data Données du projet
-   * @returns true si le projet existe déjà, false sinon
-   */
   protected async checkExists(data: ProjectCreateInput): Promise<boolean> {
     return await this.repository.existsByTitle(data.title);
   }
 
-  /**
-   * Vérifie si un projet avec le titre donné existe déjà (pour la mise à jour)
-   * @param id ID du projet à mettre à jour
-   * @param data Données de mise à jour
-   * @returns true si un autre projet avec le même titre existe déjà, false sinon
-   */
   protected async checkExistsForUpdate(id: number, data: ProjectUpdateInput): Promise<boolean> {
-    if (data.title) {
-      const project = await this.repository.findById(id);
-      if (project && data.title !== project.title) {
-        return await this.repository.existsByTitle(data.title);
-      }
-    }
-    return false;
+    if (!data.title) return false;
+    
+    const existingProject = await this.repository.findById(id);
+    if (!existingProject) return false;
+    
+    return existingProject.title !== data.title && await this.repository.existsByTitle(data.title);
   }
 
-  /**
-   * Vérifie si un projet peut être supprimé
-   * @param id ID du projet à supprimer
-   * @throws Erreur si le projet ne peut pas être supprimé
-   */
   protected async checkCanDelete(id: number): Promise<void> {
-    // Aucune vérification spécifique pour la suppression d'un projet
-    return;
+    // Vérifications spécifiques avant suppression si nécessaire
+    const project = await this.repository.findById(id);
+    if (!project) {
+      throw new ProjectNotFoundError();
+    }
   }
 
   /**
-   * Met à jour la catégorie d'un projet
+   * Assigne des catégories à un projet
    * @param projectId ID du projet
-   * @param categoryId ID de la catégorie ou null pour retirer la catégorie
+   * @param categoryIds IDs des catégories à assigner
    * @returns Projet mis à jour
-   * @throws Erreur si le projet ou la catégorie n'existe pas
+   * @throws Erreur si le projet ou une catégorie n'existe pas
    */
-  public async updateProjectCategory(projectId: number, categoryId: number | null) {
+  public async assignCategories(projectId: number, categoryIds: number[]) {
     try {
       // Validate input data
-      const validationResult = projectCategoryUpdateSchema.safeParse({ categoryId });
+      const validationResult = projectCategoriesUpdateSchema.safeParse({ categoryIds });
       if (!validationResult.success) {
         throw new ProjectValidationError(validationResult.error.message);
       }
 
-      // Utiliser le service de transaction pour la mise à jour de la catégorie
-      const updatedProject = await transactionService.execute(async (tx) => {
+      // Utiliser le service de transaction pour l'assignation des catégories
+      await transactionService.execute(async (tx) => {
         // Vérifier si le projet existe
         const project = await this.repository.findById(projectId);
         if (!project) {
           throw new ProjectNotFoundError();
         }
 
-        // Si categoryId est fourni, vérifier si la catégorie existe
-        if (categoryId !== null) {
+        // Vérifier si toutes les catégories existent
+        for (const categoryId of categoryIds) {
           const category = await categoryRepository.findById(categoryId);
           if (!category) {
             throw new CategoryNotFoundError();
           }
         }
 
-        // Mettre à jour la catégorie du projet
-        return this.repository.updateCategory(projectId, categoryId);
+        // Assigner les catégories au projet
+        await this.repository.assignCategories(projectId, categoryIds);
       });
 
       // Invalider le cache
       await this.invalidateEntityCache(projectId);
       await this.invalidateEntityListCache();
 
-      logDeduplicator.info('Project category updated successfully', { 
+      logDeduplicator.info('Project categories assigned successfully', { 
         projectId, 
-        categoryId 
+        categoryIds 
       });
       
-      return updatedProject;
+      return await this.repository.findById(projectId);
     } catch (error) {
       if (error instanceof ProjectNotFoundError || 
           error instanceof CategoryNotFoundError || 
           error instanceof ProjectValidationError) {
         throw error;
       }
-      logDeduplicator.error('Error updating project category:', { 
+      logDeduplicator.error('Error assigning project categories:', { 
         error, 
         projectId, 
-        categoryId 
+        categoryIds 
       });
+      throw error;
+    }
+  }
+
+  /**
+   * Retire des catégories d'un projet
+   * @param projectId ID du projet
+   * @param categoryIds IDs des catégories à retirer
+   * @returns Projet mis à jour
+   * @throws Erreur si le projet n'existe pas
+   */
+  public async removeCategories(projectId: number, categoryIds: number[]) {
+    try {
+      // Validate input data
+      const validationResult = projectCategoriesUpdateSchema.safeParse({ categoryIds });
+      if (!validationResult.success) {
+        throw new ProjectValidationError(validationResult.error.message);
+      }
+
+      // Utiliser le service de transaction pour le retrait des catégories
+      await transactionService.execute(async (tx) => {
+        // Vérifier si le projet existe
+        const project = await this.repository.findById(projectId);
+        if (!project) {
+          throw new ProjectNotFoundError();
+        }
+
+        // Retirer les catégories du projet
+        await this.repository.removeCategories(projectId, categoryIds);
+      });
+
+      // Invalider le cache
+      await this.invalidateEntityCache(projectId);
+      await this.invalidateEntityListCache();
+
+      logDeduplicator.info('Project categories removed successfully', { 
+        projectId, 
+        categoryIds 
+      });
+      
+      return await this.repository.findById(projectId);
+    } catch (error) {
+      if (error instanceof ProjectNotFoundError || 
+          error instanceof ProjectValidationError) {
+        throw error;
+      }
+      logDeduplicator.error('Error removing project categories:', { 
+        error, 
+        projectId, 
+        categoryIds 
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Récupère toutes les catégories d'un projet
+   * @param projectId ID du projet
+   * @returns Liste des catégories du projet
+   * @throws Erreur si le projet n'existe pas
+   */
+  public async getProjectCategories(projectId: number) {
+    try {
+      // Vérifier si le projet existe
+      const project = await this.repository.findById(projectId);
+      if (!project) {
+        throw new ProjectNotFoundError();
+      }
+
+      const categories = await this.repository.getProjectCategories(projectId);
+
+      logDeduplicator.info('Project categories retrieved successfully', { 
+        projectId,
+        count: categories.length
+      });
+      
+      return categories;
+    } catch (error) {
+      if (error instanceof ProjectNotFoundError) {
+        throw error;
+      }
+      logDeduplicator.error('Error fetching project categories:', { error, projectId });
       throw error;
     }
   }
@@ -142,7 +209,7 @@ export class ProjectService extends BaseService<ProjectResponse, ProjectCreateIn
    * @param data Données du projet avec logo optionnel
    * @returns Projet créé
    */
-  public async createWithUpload(data: ProjectCreateWithUploadInput) {
+  public async createWithUpload(data: ProjectCreateInput) {
     try {
       // Nettoyer les données
       const cleanData = { ...data };
@@ -152,9 +219,11 @@ export class ProjectService extends BaseService<ProjectResponse, ProjectCreateIn
         delete cleanData.logo;
       }
       
-      // Convertir categoryId en number si c'est une string
-      if (cleanData.categoryId && typeof cleanData.categoryId === 'string') {
-        cleanData.categoryId = parseInt(cleanData.categoryId, 10);
+      // Convertir categoryIds en array si c'est une string
+      if (cleanData.categoryIds && Array.isArray(cleanData.categoryIds)) {
+        cleanData.categoryIds = cleanData.categoryIds.map(id => 
+          typeof id === 'string' ? parseInt(id, 10) : id
+        );
       }
       
       // Si pas de logo, utiliser une image par défaut
@@ -201,14 +270,14 @@ export class ProjectService extends BaseService<ProjectResponse, ProjectCreateIn
         throw new CategoryNotFoundError();
       }
 
-      const projects = await this.repository.findByCategory(categoryId);
+      const projects = await this.repository.findAll({ categoryIds: [categoryId] });
 
       logDeduplicator.info('Projects by category retrieved successfully', { 
         categoryId,
-        count: projects.length
+        count: projects.data.length
       });
       
-      return projects;
+      return projects.data;
     } catch (error) {
       if (error instanceof CategoryNotFoundError) {
         throw error;
@@ -218,50 +287,15 @@ export class ProjectService extends BaseService<ProjectResponse, ProjectCreateIn
     }
   }
 
-  /**
-   * Supprime un projet et son fichier uploadé associé
-   * @param id ID du projet à supprimer
-   * @throws Erreur si le projet n'existe pas
-   */
   async delete(id: number) {
     try {
-      // Récupérer le projet avant suppression pour avoir l'URL du logo
-      const project = await this.repository.findById(id);
-      if (!project) {
-        throw new this.errorClasses.notFound();
-      }
-
-      // Utiliser le service de transaction pour la suppression
-      await transactionService.execute(async (tx) => {
-        // Configurer le repository pour utiliser le client transactionnel
-        this.repository.setPrismaClient(tx);
-        
-        // Vérifier si l'entité peut être supprimée
-        await this.checkCanDelete(id);
-
-        // Supprimer l'entité
-        await this.repository.delete(id);
-      });
-
-      // Réinitialiser le client Prisma
-      this.repository.resetPrismaClient();
-
-      // Supprimer le fichier uploadé s'il existe et n'est pas l'image par défaut
-      if (project.logo && 
-          project.logo !== 'https://via.placeholder.com/150x150.png?text=No+Logo' &&
-          project.logo.includes('/uploads/project-logos/')) {
-        deleteUploadedFile(project.logo);
-      }
-
-      // Invalider le cache
+      await this.checkCanDelete(id);
+      await this.repository.delete(id);
       await this.invalidateEntityCache(id);
       await this.invalidateEntityListCache();
-
-      logDeduplicator.info('Project deleted successfully with file cleanup', { id, logo: project.logo });
+      
+      logDeduplicator.info('Project deleted successfully', { id });
     } catch (error) {
-      if (error instanceof this.errorClasses.notFound) {
-        throw error;
-      }
       logDeduplicator.error('Error deleting project:', { error, id });
       throw error;
     }

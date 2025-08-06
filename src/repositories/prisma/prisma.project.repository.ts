@@ -1,8 +1,8 @@
+import { PrismaClient } from '@prisma/client';
 import { ProjectRepository } from '../interfaces/project.repository.interface';
 import { Project, ProjectCreateInput, ProjectUpdateInput } from '../../types/project.types';
 import { prisma } from '../../core/prisma.service';
 import { logDeduplicator } from '../../utils/logDeduplicator';
-import { PrismaClient } from '@prisma/client';
 
 export class PrismaProjectRepository implements ProjectRepository {
   private prismaClient: Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'> = prisma;
@@ -30,7 +30,7 @@ export class PrismaProjectRepository implements ProjectRepository {
     sort?: string;
     order?: 'asc' | 'desc';
     search?: string;
-    categoryId?: number;
+    categoryIds?: number[];
   }): Promise<{
     data: Project[];
     pagination: {
@@ -47,7 +47,7 @@ export class PrismaProjectRepository implements ProjectRepository {
         sort = 'createdAt',
         order = 'desc',
         search,
-        categoryId
+        categoryIds
       } = params;
 
       const skip = (page - 1) * limit;
@@ -59,27 +59,51 @@ export class PrismaProjectRepository implements ProjectRepository {
           { desc: { contains: search, mode: 'insensitive' } }
         ];
       }
-      if (categoryId) {
-        where.categoryId = categoryId;
+      if (categoryIds && categoryIds.length > 0) {
+        where.categories = {
+          some: {
+            categoryId: {
+              in: categoryIds
+            }
+          }
+        };
       }
 
-      logDeduplicator.info('Finding all projects', { page, limit, sort, order, search, categoryId });
+      logDeduplicator.info('Finding all projects', { page, limit, sort, order, search, categoryIds });
 
       const total = await this.prismaClient.project.count({ where });
-      const projects = await this.prismaClient.project.findMany({
+      const projects = await (this.prismaClient as any).project.findMany({
         where,
         skip,
         take: limit,
         orderBy: { [sort]: order },
         include: {
-          category: true
+          categories: {
+            include: {
+              category: {
+                select: {
+                  id: true,
+                  name: true,
+                  description: true,
+                  createdAt: true,
+                  updatedAt: true
+                }
+              }
+            }
+          }
         }
       });
 
-      logDeduplicator.info('Projects found successfully', { count: projects.length, total });
+      // Transformer les données pour correspondre au type Project
+      const transformedProjects = projects.map((project: any) => ({
+        ...project,
+        categories: project.categories.map((pc: any) => pc.category)
+      }));
+
+      logDeduplicator.info('Projects found successfully', { count: transformedProjects.length, total });
 
       return {
-        data: projects,
+        data: transformedProjects,
         pagination: {
           total,
           page,
@@ -97,28 +121,39 @@ export class PrismaProjectRepository implements ProjectRepository {
     try {
       logDeduplicator.info('Finding project by ID', { id });
       
-      const project = await this.prismaClient.project.findUnique({
+      const project = await (this.prismaClient as any).project.findUnique({
         where: { id },
         include: {
-          category: {
-            select: {
-              id: true,
-              name: true,
-              description: true,
-              createdAt: true,
-              updatedAt: true
+          categories: {
+            include: {
+              category: {
+                select: {
+                  id: true,
+                  name: true,
+                  description: true,
+                  createdAt: true,
+                  updatedAt: true
+                }
+              }
             }
           }
         }
       });
 
-      if (project) {
-        logDeduplicator.info('Project found successfully', { id });
-      } else {
+      if (!project) {
         logDeduplicator.info('Project not found', { id });
+        return null;
       }
 
-      return project;
+      // Transformer les données pour correspondre au type Project
+      const transformedProject = {
+        ...project,
+        categories: (project as any).categories.map((pc: any) => pc.category)
+      };
+
+      logDeduplicator.info('Project found successfully', { id, title: project.title });
+      
+      return transformedProject;
     } catch (error) {
       logDeduplicator.error('Error finding project by ID', { error, id });
       throw error;
@@ -133,22 +168,50 @@ export class PrismaProjectRepository implements ProjectRepository {
         throw new Error('Logo is required for project creation');
       }
 
-      const project = await this.prismaClient.project.create({
+      const { categoryIds, ...projectData } = data;
+
+      const project = await (this.prismaClient as any).project.create({
         data: {
-          title: data.title,
-          desc: data.desc,
-          logo: data.logo,
-          twitter: data.twitter || null,
-          discord: data.discord || null,
-          telegram: data.telegram || null,
-          website: data.website || null,
-          categoryId: data.categoryId || null
+          ...projectData,
+          logo: projectData.logo || '',
+          twitter: projectData.twitter || null,
+          discord: projectData.discord || null,
+          telegram: projectData.telegram || null,
+          website: projectData.website || null,
+          ...(categoryIds && categoryIds.length > 0 ? {
+            categories: {
+              create: categoryIds.map(categoryId => ({
+                categoryId
+              }))
+            }
+          } : {})
+        },
+        include: {
+          categories: {
+            include: {
+              category: {
+                select: {
+                  id: true,
+                  name: true,
+                  description: true,
+                  createdAt: true,
+                  updatedAt: true
+                }
+              }
+            }
+          }
         }
       });
 
+      // Transformer les données pour correspondre au type Project
+      const transformedProject = {
+        ...project,
+        categories: (project as any).categories.map((pc: any) => pc.category)
+      };
+
       logDeduplicator.info('Project created successfully', { id: project.id, title: project.title });
       
-      return project;
+      return transformedProject;
     } catch (error) {
       logDeduplicator.error('Error creating project', { error, data });
       throw error;
@@ -157,27 +220,51 @@ export class PrismaProjectRepository implements ProjectRepository {
 
   async update(id: number, data: ProjectUpdateInput): Promise<Project> {
     try {
-      logDeduplicator.info('Updating project', { id });
+      logDeduplicator.info('Updating project', { id, data });
       
-      const project = await this.prismaClient.project.update({
+      const { categoryIds, ...projectData } = data;
+
+      const project = await (this.prismaClient as any).project.update({
         where: { id },
-        data,
+        data: {
+          ...projectData,
+          ...(categoryIds !== undefined ? {
+            categories: {
+              deleteMany: {},
+              ...(categoryIds.length > 0 ? {
+                create: categoryIds.map(categoryId => ({
+                  categoryId
+                }))
+              } : {})
+            }
+          } : {})
+        },
         include: {
-          category: {
-            select: {
-              id: true,
-              name: true,
-              description: true,
-              createdAt: true,
-              updatedAt: true
+          categories: {
+            include: {
+              category: {
+                select: {
+                  id: true,
+                  name: true,
+                  description: true,
+                  createdAt: true,
+                  updatedAt: true
+                }
+              }
             }
           }
         }
       });
 
-      logDeduplicator.info('Project updated successfully', { id });
+      // Transformer les données pour correspondre au type Project
+      const transformedProject = {
+        ...project,
+        categories: (project as any).categories.map((pc: any) => pc.category)
+      };
+
+      logDeduplicator.info('Project updated successfully', { id, title: project.title });
       
-      return project;
+      return transformedProject;
     } catch (error) {
       logDeduplicator.error('Error updating project', { error, id, data });
       throw error;
@@ -203,13 +290,12 @@ export class PrismaProjectRepository implements ProjectRepository {
     try {
       logDeduplicator.info('Checking if project exists by title', { title });
       
-      const project = await this.prismaClient.project.findUnique({
+      const count = await this.prismaClient.project.count({
         where: { title }
       });
-      
-      const exists = !!project;
-      
-      logDeduplicator.info('Project existence check completed', { title, exists });
+
+      const exists = count > 0;
+      logDeduplicator.info('Project exists check completed', { title, exists });
       
       return exists;
     } catch (error) {
@@ -218,41 +304,51 @@ export class PrismaProjectRepository implements ProjectRepository {
     }
   }
 
-  async updateCategory(projectId: number, categoryId: number | null): Promise<Project> {
+  async assignCategories(projectId: number, categoryIds: number[]): Promise<void> {
     try {
-      logDeduplicator.info('Updating project category', { projectId, categoryId });
+      logDeduplicator.info('Assigning categories to project', { projectId, categoryIds });
       
-      const project = await this.prismaClient.project.update({
-        where: { id: projectId },
-        data: { categoryId },
-        include: {
-          category: {
-            select: {
-              id: true,
-              name: true,
-              description: true,
-              createdAt: true,
-              updatedAt: true
-            }
-          }
-        }
+      await (this.prismaClient as any).projectCategory.createMany({
+        data: categoryIds.map(categoryId => ({
+          projectId,
+          categoryId
+        })),
+        skipDuplicates: true
       });
 
-      logDeduplicator.info('Project category updated successfully', { projectId, categoryId });
-      
-      return project;
+      logDeduplicator.info('Categories assigned to project successfully', { projectId, categoryIds });
     } catch (error) {
-      logDeduplicator.error('Error updating project category', { error, projectId, categoryId });
+      logDeduplicator.error('Error assigning categories to project', { error, projectId, categoryIds });
       throw error;
     }
   }
 
-  async findByCategory(categoryId: number): Promise<Project[]> {
+  async removeCategories(projectId: number, categoryIds: number[]): Promise<void> {
     try {
-      logDeduplicator.info('Finding projects by category', { categoryId });
+      logDeduplicator.info('Removing categories from project', { projectId, categoryIds });
       
-      const projects = await this.prismaClient.project.findMany({
-        where: { categoryId },
+      await (this.prismaClient as any).projectCategory.deleteMany({
+        where: {
+          projectId,
+          categoryId: {
+            in: categoryIds
+          }
+        }
+      });
+
+      logDeduplicator.info('Categories removed from project successfully', { projectId, categoryIds });
+    } catch (error) {
+      logDeduplicator.error('Error removing categories from project', { error, projectId, categoryIds });
+      throw error;
+    }
+  }
+
+  async getProjectCategories(projectId: number): Promise<any[]> {
+    try {
+      logDeduplicator.info('Getting project categories', { projectId });
+      
+      const projectCategories = await (this.prismaClient as any).projectCategory.findMany({
+        where: { projectId },
         include: {
           category: {
             select: {
@@ -266,11 +362,13 @@ export class PrismaProjectRepository implements ProjectRepository {
         }
       });
 
-      logDeduplicator.info('Projects found by category successfully', { categoryId, count: projects.length });
+      const categories = projectCategories.map((pc: any) => pc.category);
+
+      logDeduplicator.info('Project categories retrieved successfully', { projectId, count: categories.length });
       
-      return projects;
+      return categories;
     } catch (error) {
-      logDeduplicator.error('Error finding projects by category', { error, categoryId });
+      logDeduplicator.error('Error getting project categories', { error, projectId });
       throw error;
     }
   }

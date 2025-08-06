@@ -1,7 +1,7 @@
 import express, { Request, Response, RequestHandler } from "express";
 import { ProjectService } from "../../services/project/project.service";
 import { validateRequest } from '../../middleware/validation/validation.middleware';
-import {  projectCategoryUpdateSchema, projectCreateWithUploadSchema } from '../../schemas/project.schema';
+import { projectCategoriesUpdateSchema, projectCreateWithUploadSchema } from '../../schemas/project.schema';
 import { marketRateLimiter } from '../../middleware/apiRateLimiter';
 import { ProjectNotFoundError, CategoryNotFoundError } from '../../errors/project.errors';
 import { logDeduplicator } from '../../utils/logDeduplicator';
@@ -96,141 +96,15 @@ router.post('/', validatePrivyToken, requireModerator, (async (req: Request, res
 router.get('/', (async (req: Request, res: Response) => {
   try {
     const projects = await projectService.getAll(req.query);
-    res.json({
-      success: true,
-      data: projects.data,
-      pagination: projects.pagination
-    });
+    res.json(projects);
   } catch (error) {
-    logDeduplicator.error('Error fetching projects:', { error });
-    
-    if (error instanceof ProjectError) {
-      return res.status(error.statusCode).json({
-        success: false,
-        error: error.message,
-        code: error.code
-      });
-    }
-
-    res.status(500).json({
-      success: false,
-      error: 'Internal server error',
-      code: 'INTERNAL_SERVER_ERROR'
-    });
+    logDeduplicator.error('Error fetching projects:', { error, query: req.query });
+    res.status(500).json({ message: 'Internal server error' });
   }
 }) as RequestHandler);
 
-// Route pour récupérer un projet par son ID
+// Route pour récupérer un projet par ID
 router.get('/:id', (async (req: Request, res: Response) => {
-  try {
-    const id = parseInt(req.params.id, 10);
-    if (isNaN(id)) {
-      return res.status(400).json({
-        success: false,
-        error: 'Invalid ID format',
-        code: 'INVALID_ID_FORMAT'
-      });
-    }
-
-    const project = await projectService.getById(id);
-    res.json({
-      success: true,
-      data: project
-    });
-  } catch (error) {
-    logDeduplicator.error('Error fetching project:', { error, id: req.params.id });
-    
-    if (error instanceof ProjectError) {
-      return res.status(error.statusCode).json({
-        success: false,
-        error: error.message,
-        code: error.code
-      });
-    }
-
-    res.status(500).json({
-      success: false,
-      error: 'Internal server error',
-      code: 'INTERNAL_SERVER_ERROR'
-    });
-  }
-}) as RequestHandler);
-
-// Route pour mettre à jour un projet
-router.put('/:id', validatePrivyToken, requireModerator, (async (req: Request, res: Response) => {
-  try {
-    const id = parseInt(req.params.id, 10);
-    if (isNaN(id)) {
-      return res.status(400).json({
-        success: false,
-        error: 'Invalid ID format',
-        code: 'INVALID_ID_FORMAT'
-      });
-    }
-
-    const project = await projectService.update(id, req.body);
-    res.json({
-      success: true,
-      message: 'Project updated successfully',
-      data: project
-    });
-  } catch (error) {
-    logDeduplicator.error('Error updating project:', { error, id: req.params.id, body: req.body });
-    
-    if (error instanceof ProjectError) {
-      return res.status(error.statusCode).json({
-        success: false,
-        error: error.message,
-        code: error.code
-      });
-    }
-
-    res.status(500).json({
-      success: false,
-      error: 'Internal server error',
-      code: 'INTERNAL_SERVER_ERROR'
-    });
-  }
-}) as RequestHandler);
-
-// Route pour supprimer un projet
-router.delete('/:id', validatePrivyToken, requireAdmin, (async (req: Request, res: Response) => {
-  try {
-    const id = parseInt(req.params.id, 10);
-    if (isNaN(id)) {
-      return res.status(400).json({
-        success: false,
-        error: 'Invalid ID format',
-        code: 'INVALID_ID_FORMAT'
-      });
-    }
-
-    await projectService.delete(id);
-    res.json({
-      success: true,
-      message: 'Project deleted successfully'
-    });
-  } catch (error) {
-    logDeduplicator.error('Error deleting project:', { error, id: req.params.id });
-    
-    if (error instanceof ProjectError) {
-      return res.status(error.statusCode).json({
-        success: false,
-        error: error.message,
-        code: error.code
-      });
-    }
-
-    res.status(500).json({
-      success: false,
-      error: 'Internal server error',
-      code: 'INTERNAL_SERVER_ERROR'
-    });
-  }
-}) as RequestHandler);
-
-// Mettre à jour la catégorie d'un projet
-router.put("/:id/category", validatePrivyToken, requireModerator, validateRequest(projectCategoryUpdateSchema), (async (req: Request, res: Response) => {
   try {
     const projectId = parseInt(req.params.id);
     if (isNaN(projectId)) {
@@ -238,67 +112,180 @@ router.put("/:id/category", validatePrivyToken, requireModerator, validateReques
       return res.status(400).json({ message: "ID de projet invalide" });
     }
     
-    const { categoryId } = req.body;
-    const project = await projectService.updateProjectCategory(
-      projectId, 
-      categoryId
-    );
-    
-    logDeduplicator.info('Project category updated successfully', { 
-      projectId: project.id,
-      title: project.title,
-      categoryId: project.categoryId
-    });
+    const project = await projectService.getById(projectId);
+    if (!project) {
+      logDeduplicator.warn('Project not found', { projectId });
+      return res.status(404).json({ message: "Projet non trouvé" });
+    }
     
     res.json(project);
   } catch (error) {
+    logDeduplicator.error('Error fetching project:', { error, projectId: req.params.id });
+    res.status(500).json({ message: 'Internal server error' });
+  }
+}) as RequestHandler);
+
+// Route pour mettre à jour un projet
+router.put('/:id', validatePrivyToken, requireModerator, (async (req: Request, res: Response) => {
+  try {
+    const projectId = parseInt(req.params.id);
+    if (isNaN(projectId)) {
+      logDeduplicator.warn('Invalid project ID provided', { id: req.params.id });
+      return res.status(400).json({ message: "ID de projet invalide" });
+    }
+    
+    const project = await projectService.update(projectId, req.body);
+    res.json(project);
+  } catch (error) {
     if (error instanceof ProjectNotFoundError) {
-      logDeduplicator.warn('Project not found for category update', { projectId: req.params.id });
+      logDeduplicator.warn('Project not found for update', { projectId: req.params.id });
+      return res.status(404).json({ message: error.message });
+    }
+    
+    logDeduplicator.error('Error updating project:', { error, projectId: req.params.id, body: req.body });
+    res.status(500).json({ message: 'Internal server error' });
+  }
+}) as RequestHandler);
+
+// Route pour supprimer un projet
+router.delete('/:id', validatePrivyToken, requireAdmin, (async (req: Request, res: Response) => {
+  try {
+    const projectId = parseInt(req.params.id);
+    if (isNaN(projectId)) {
+      logDeduplicator.warn('Invalid project ID provided', { id: req.params.id });
+      return res.status(400).json({ message: "ID de projet invalide" });
+    }
+    
+    await projectService.delete(projectId);
+    res.json({ message: 'Project deleted successfully' });
+  } catch (error) {
+    if (error instanceof ProjectNotFoundError) {
+      logDeduplicator.warn('Project not found for deletion', { projectId: req.params.id });
+      return res.status(404).json({ message: error.message });
+    }
+    
+    logDeduplicator.error('Error deleting project:', { error, projectId: req.params.id });
+    res.status(500).json({ message: 'Internal server error' });
+  }
+}) as RequestHandler);
+
+// Route pour assigner des catégories à un projet
+router.post('/:id/categories', validatePrivyToken, requireModerator, validateRequest(projectCategoriesUpdateSchema), (async (req: Request, res: Response) => {
+  try {
+    const projectId = parseInt(req.params.id);
+    if (isNaN(projectId)) {
+      logDeduplicator.warn('Invalid project ID provided', { id: req.params.id });
+      return res.status(400).json({ message: "ID de projet invalide" });
+    }
+    
+    const { categoryIds } = req.body;
+    const project = await projectService.assignCategories(projectId, categoryIds);
+    
+    if (project) {
+      logDeduplicator.info('Project categories assigned successfully', { 
+        projectId: project.id,
+        title: project.title,
+        categoryIds
+      });
+    }
+    
+    res.json({
+      success: true,
+      message: 'Categories assigned successfully',
+      data: project
+    });
+  } catch (error) {
+    if (error instanceof ProjectNotFoundError) {
+      logDeduplicator.warn('Project not found for category assignment', { projectId: req.params.id });
       return res.status(404).json({ message: error.message });
     }
     
     if (error instanceof CategoryNotFoundError) {
-      logDeduplicator.warn('Category not found for project update', { 
+      logDeduplicator.warn('Category not found for project assignment', { 
         projectId: req.params.id,
-        categoryId: req.body.categoryId
+        categoryIds: req.body.categoryIds
       });
       return res.status(404).json({ message: error.message });
     }
     
-    logDeduplicator.error('Error updating project category:', { 
+    logDeduplicator.error('Error assigning project categories:', { 
       error, 
       projectId: req.params.id,
-      categoryId: req.body.categoryId
+      categoryIds: req.body.categoryIds
     });
     res.status(500).json({ message: 'Internal server error' });
   }
 }) as RequestHandler);
 
-// Récupérer tous les projets d'une catégorie
-router.get("/category/:categoryId", (async (req: Request, res: Response) => {
+// Route pour retirer des catégories d'un projet
+router.delete('/:id/categories', validatePrivyToken, requireModerator, validateRequest(projectCategoriesUpdateSchema), (async (req: Request, res: Response) => {
   try {
-    const categoryId = parseInt(req.params.categoryId);
-    if (isNaN(categoryId)) {
-      logDeduplicator.warn('Invalid category ID provided', { id: req.params.categoryId });
-      return res.status(400).json({ message: "ID de catégorie invalide" });
+    const projectId = parseInt(req.params.id);
+    if (isNaN(projectId)) {
+      logDeduplicator.warn('Invalid project ID provided', { id: req.params.id });
+      return res.status(400).json({ message: "ID de projet invalide" });
     }
     
-    const projects = await projectService.getProjectsByCategory(categoryId);
-    logDeduplicator.info('Projects by category retrieved successfully', { 
-      categoryId,
-      count: projects.length
-    });
+    const { categoryIds } = req.body;
+    const project = await projectService.removeCategories(projectId, categoryIds);
     
-    res.json(projects);
+    if (project) {
+      logDeduplicator.info('Project categories removed successfully', { 
+        projectId: project.id,
+        title: project.title,
+        categoryIds
+      });
+    }
+    
+    res.json({
+      success: true,
+      message: 'Categories removed successfully',
+      data: project
+    });
   } catch (error) {
-    if (error instanceof CategoryNotFoundError) {
-      logDeduplicator.warn('Category not found', { categoryId: req.params.categoryId });
+    if (error instanceof ProjectNotFoundError) {
+      logDeduplicator.warn('Project not found for category removal', { projectId: req.params.id });
       return res.status(404).json({ message: error.message });
     }
     
-    logDeduplicator.error('Error fetching projects by category:', { 
+    logDeduplicator.error('Error removing project categories:', { 
       error, 
-      categoryId: req.params.categoryId
+      projectId: req.params.id,
+      categoryIds: req.body.categoryIds
+    });
+    res.status(500).json({ message: 'Internal server error' });
+  }
+}) as RequestHandler);
+
+// Route pour récupérer les catégories d'un projet
+router.get('/:id/categories', (async (req: Request, res: Response) => {
+  try {
+    const projectId = parseInt(req.params.id);
+    if (isNaN(projectId)) {
+      logDeduplicator.warn('Invalid project ID provided', { id: req.params.id });
+      return res.status(400).json({ message: "ID de projet invalide" });
+    }
+    
+    const categories = await projectService.getProjectCategories(projectId);
+    logDeduplicator.info('Project categories retrieved successfully', { 
+      projectId,
+      count: categories.length
+    });
+    
+    res.json({
+      success: true,
+      message: 'Project categories retrieved successfully',
+      data: categories
+    });
+  } catch (error) {
+    if (error instanceof ProjectNotFoundError) {
+      logDeduplicator.warn('Project not found for categories retrieval', { projectId: req.params.id });
+      return res.status(404).json({ message: error.message });
+    }
+    
+    logDeduplicator.error('Error fetching project categories:', { 
+      error, 
+      projectId: req.params.id
     });
     res.status(500).json({ message: 'Internal server error' });
   }

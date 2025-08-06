@@ -11,7 +11,7 @@ export interface ProjectRepository extends BaseRepository {
     sort?: string;
     order?: 'asc' | 'desc';
     search?: string;
-    categoryId?: number;
+    categoryIds?: number[];
   }): Promise<{
     data: Project[];
     pagination: {
@@ -48,12 +48,17 @@ export interface ProjectRepository extends BaseRepository {
   existsByTitle(title: string): Promise<boolean>;
 
   /**
-   * Met à jour la catégorie d'un projet
+   * Assigne des catégories à un projet
    */
-  updateCategory(projectId: number, categoryId: number | null): Promise<Project>;
+  assignCategories(projectId: number, categoryIds: number[]): Promise<void>;
 
   /**
-   * Récupère tous les projets d'une catégorie
+   * Retire des catégories d'un projet
    */
-  findByCategory(categoryId: number): Promise<Project[]>;
+  removeCategories(projectId: number, categoryIds: number[]): Promise<void>;
+
+  /**
+   * Récupère toutes les catégories d'un projet
+   */
+  getProjectCategories(projectId: number): Promise<any[]>;
 } 

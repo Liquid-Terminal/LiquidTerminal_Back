@@ -110,7 +110,7 @@ export class PrismaCategoryRepository implements CategoryRepository {
     try {
       logDeduplicator.info('Finding category with projects by ID', { id });
       
-      const category = await this.prismaClient.category.findUnique({
+      const category = await (this.prismaClient as any).category.findUnique({
         where: { id },
         include: {
           projects: {
@@ -125,12 +125,12 @@ export class PrismaCategoryRepository implements CategoryRepository {
       });
 
       if (category) {
-        logDeduplicator.info('Category with projects found successfully', { id, projectsCount: category.projects.length });
+        logDeduplicator.info('Category with projects found successfully', { id, projectsCount: (category as any).projects.length });
       } else {
         logDeduplicator.info('Category with projects not found', { id });
       }
 
-      return category;
+      return category as any;
     } catch (error) {
       logDeduplicator.error('Error finding category with projects by ID', { error, id });
       throw error;
@@ -210,17 +210,27 @@ export class PrismaCategoryRepository implements CategoryRepository {
     try {
       logDeduplicator.info('Finding projects by category', { categoryId });
       
-      const projects = await this.prismaClient.project.findMany({
+      const projectCategories = await (this.prismaClient as any).projectCategory.findMany({
         where: { categoryId },
         include: {
-          category: {
+          project: {
             select: {
               id: true,
-              name: true
+              title: true,
+              desc: true,
+              logo: true,
+              twitter: true,
+              discord: true,
+              telegram: true,
+              website: true,
+              createdAt: true,
+              updatedAt: true
             }
           }
         }
       });
+
+      const projects = projectCategories.map((pc: any) => pc.project);
 
       logDeduplicator.info('Projects found by category successfully', { categoryId, count: projects.length });
       

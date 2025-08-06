@@ -21,7 +21,7 @@ Content-Type: multipart/form-data
 - `discord` (string, optional) - Discord URL
 - `telegram` (string, optional) - Telegram URL
 - `website` (string, optional) - Website URL
-- `categoryId` (number, optional) - Category ID
+- `categoryIds` (array of numbers, optional) - Category IDs
 
 ### 2. Create a project with logo URL
 ```
@@ -40,7 +40,7 @@ Content-Type: application/json
   "title": "My Project",
   "desc": "Project description",
   "logo": "https://example.com/logo.png",
-  "categoryId": 1
+  "categoryIds": [1, 2]
 }
 ```
 
@@ -62,7 +62,7 @@ const formData = new FormData();
 formData.append('title', 'My Project');
 formData.append('desc', 'Project description');
 formData.append('logo', fileInput.files[0]); // Selected file
-formData.append('categoryId', '1');
+formData.append('categoryIds', JSON.stringify([1, 2]));
 
 const response = await fetch('/project/with-upload', {
   method: 'POST',
@@ -85,7 +85,7 @@ const response = await fetch('/project', {
     title: 'My Project',
     desc: 'Project description',
     logo: 'https://example.com/logo.png',
-    categoryId: 1
+    categoryIds: [1, 2]
   })
 });
 ```
@@ -95,6 +95,66 @@ const response = await fetch('/project', {
 - PNG  
 - GIF
 - WebP
+
+## Project Categories Management
+
+### Assign categories to a project
+```
+POST /project/:id/categories
+```
+
+**Required Headers:**
+```
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+**Body (JSON):**
+```json
+{
+  "categoryIds": [1, 2, 3]
+}
+```
+
+### Remove categories from a project
+```
+DELETE /project/:id/categories
+```
+
+**Required Headers:**
+```
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+**Body (JSON):**
+```json
+{
+  "categoryIds": [1, 2]
+}
+```
+
+### Get project categories
+```
+GET /project/:id/categories
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Project categories retrieved successfully",
+  "data": [
+    {
+      "id": 1,
+      "name": "DeFi",
+      "description": "Decentralized Finance",
+      "createdAt": "2025-01-01T00:00:00.000Z",
+      "updatedAt": "2025-01-01T00:00:00.000Z"
+    }
+  ]
+}
+```
 
 ## Limitations
 - Maximum size: 5MB

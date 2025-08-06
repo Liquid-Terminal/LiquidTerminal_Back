@@ -10,10 +10,19 @@ export interface Project {
   discord: string | null;
   telegram: string | null;
   website: string | null;
-  categoryId: number | null;
   createdAt: Date;
   updatedAt: Date;
-  category?: CategoryResponse | null;
+  categories?: CategoryResponse[];
+}
+
+// Interface pour la table de liaison ProjectCategory
+export interface ProjectCategory {
+  id: number;
+  projectId: number;
+  categoryId: number;
+  assignedAt: Date;
+  project?: Project;
+  category?: CategoryResponse;
 }
 
 // Types pour les opérations CRUD des projets
@@ -25,7 +34,7 @@ export interface ProjectCreateInput {
   discord?: string;
   telegram?: string;
   website?: string;
-  categoryId?: number;
+  categoryIds?: number[];
 }
 
 // Type pour la création avec upload de fichier
@@ -37,7 +46,7 @@ export interface ProjectCreateWithUploadInput {
   discord?: string;
   telegram?: string;
   website?: string;
-  categoryId?: number;
+  categoryIds?: number[];
 }
 
 export interface ProjectUpdateInput extends Partial<ProjectCreateInput> {}

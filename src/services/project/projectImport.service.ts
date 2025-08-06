@@ -80,10 +80,10 @@ export class ProjectImportService {
   private async importSingleProject(row: ProjectCSVRow) {
     return await transactionService.execute(async () => {
       // Si une catégorie est spécifiée, la créer ou la récupérer
-      let categoryId: number | undefined = undefined;
+      let categoryIds: number[] | undefined = undefined;
       if (row.category) {
         const category = await this.ensureCategory(row.category);
-        categoryId = category.id;
+        categoryIds = [category.id];
       }
 
       // Créer le projet
@@ -95,7 +95,7 @@ export class ProjectImportService {
         discord: row.discord,
         telegram: row.telegram,
         website: row.website,
-        categoryId,
+        categoryIds,
       };
 
       return await this.projectService.create(projectData);

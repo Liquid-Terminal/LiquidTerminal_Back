@@ -50,7 +50,7 @@ model Category {
   description String?   @db.VarChar(255)
   createdAt   DateTime  @default(now()) @db.Timestamp(6)
   updatedAt   DateTime  @updatedAt
-  projects    Project[]
+  projects    ProjectCategory[]
 }
 
 model Project {
@@ -64,8 +64,19 @@ model Project {
   discord    String?   @db.VarChar(255)
   telegram   String?   @db.VarChar(255)
   website    String?   @db.VarChar(255)
-  categoryId Int?
-  category   Category? @relation(fields: [categoryId], references: [id])
+  categories ProjectCategory[]
+}
+
+model ProjectCategory {
+  id         Int       @id @default(autoincrement())
+  projectId  Int
+  categoryId Int
+  assignedAt DateTime  @default(now()) @db.Timestamp(6)
+  
+  project    Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  category   Category  @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, categoryId])
 }
 
 model UserWallet {

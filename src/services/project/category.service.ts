@@ -68,8 +68,8 @@ export class CategoryService extends BaseService<CategoryResponse, CategoryCreat
    * @throws Erreur si la catégorie ne peut pas être supprimée
    */
   protected async checkCanDelete(id: number): Promise<void> {
-    const projects = await projectRepository.findByCategory(id);
-    if (projects.length > 0) {
+    const projects = await projectRepository.findAll({ categoryIds: [id] });
+    if (projects.data.length > 0) {
       throw new CategoryValidationError('Cannot delete category with associated projects');
     }
   }
@@ -115,14 +115,14 @@ export class CategoryService extends BaseService<CategoryResponse, CategoryCreat
         throw new CategoryNotFoundError();
       }
 
-      const projects = await projectRepository.findByCategory(categoryId);
+      const projects = await projectRepository.findAll({ categoryIds: [categoryId] });
 
       logDeduplicator.info('Projects by category retrieved successfully', { 
         categoryId,
-        count: projects.length
+        count: projects.data.length
       });
       
-      return projects;
+      return projects.data;
     } catch (error) {
       if (error instanceof CategoryNotFoundError) {
         throw error;

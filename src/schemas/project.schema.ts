@@ -13,7 +13,7 @@ export const projectBaseSchema = z.object({
   discord: z.string().url('Discord URL must be valid').optional(),
   telegram: z.string().url('Telegram URL must be valid').optional(),
   website: z.string().url('Website URL must be valid').optional(),
-  categoryId: z.number().int().nullable()
+  categoryIds: z.array(z.number().int().positive()).optional()
 });
 
 // Create project schema
@@ -39,7 +39,7 @@ export const projectQuerySchema = z.object({
   sort: z.enum(['createdAt', 'title', 'updatedAt']).optional(),
   order: z.enum(['asc', 'desc']).optional(),
   search: z.string().max(100, 'Terme de recherche trop long').optional(),
-  categoryId: z.string().transform(val => parseInt(val)).pipe(z.number().int()).optional()
+  categoryIds: z.array(z.number().int().positive()).optional()
 });
 
 // Base category schema
@@ -121,13 +121,7 @@ export const projectCreateWithUploadSchema = z.object({
     telegram: urlSchema,
     website: urlSchema,
     
-    categoryId: z.union([z.string(), z.number()]).transform(val => {
-      if (typeof val === 'string') {
-        const num = parseInt(val, 10);
-        return isNaN(num) ? undefined : num;
-      }
-      return val;
-    }).optional()
+    categoryIds: z.array(z.number().int().positive()).optional()
   }),
   params: z.object({}),
   query: z.object({})
@@ -153,13 +147,13 @@ export const projectCreateSchema = z.object({
   telegram: urlSchema,
   website: urlSchema,
   
-  categoryId: z.number().optional()
+  categoryIds: z.array(z.number().int().positive()).optional()
 });
 
 // Schéma de validation pour la mise à jour de projet
 export const projectUpdateSchema = projectCreateSchema.partial();
 
-// Schéma de validation pour la mise à jour de catégorie
-export const projectCategoryUpdateSchema = z.object({
-  categoryId: z.number().nullable()
+// Schéma de validation pour l'assignation de catégories
+export const projectCategoriesUpdateSchema = z.object({
+  categoryIds: z.array(z.number().int().positive())
 }); 

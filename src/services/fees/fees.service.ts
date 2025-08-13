@@ -124,28 +124,39 @@ export class FeesService {
   private findClosestEntry(data: FeeData[], targetTime: number): FeeData | null {
     if (!data.length) return null;
 
+    const MAX_ACCEPTABLE_GAP_MINUTES = 20;
+    const maxGapSeconds = MAX_ACCEPTABLE_GAP_MINUTES * 60;
+
     // Trier les données par timestamp
     const sortedData = [...data].sort((a, b) => a.time - b.time);
 
-    // Trouver la dernière entrée qui n'est pas plus récente que targetTime
-    let closestEntry = null;
+    // Trouver l'entrée la plus proche du targetTime
+    let closestEntry = sortedData[0];
+    let minDifference = Math.abs(sortedData[0].time - targetTime);
+
     for (const entry of sortedData) {
-      if (entry.time <= targetTime) {
+      const difference = Math.abs(entry.time - targetTime);
+      if (difference < minDifference) {
+        minDifference = difference;
         closestEntry = entry;
-      } else {
-        break;
       }
     }
 
-    // Si aucune entrée n'est trouvée avant targetTime, prendre la plus ancienne
-    if (!closestEntry && sortedData.length > 0) {
-      closestEntry = sortedData[0];
+    // Si le gap est trop important, logger un warning
+    if (minDifference > maxGapSeconds) {
+      logDeduplicator.warn('Closest entry has significant time gap', {
+        targetTime,
+        foundTime: closestEntry.time,
+        gapMinutes: Math.round(minDifference / 60),
+        maxAcceptableMinutes: MAX_ACCEPTABLE_GAP_MINUTES
+      });
     }
 
     logDeduplicator.info('Found closest entry', {
       targetTime,
-      foundTime: closestEntry?.time,
-      difference: closestEntry ? Math.abs(closestEntry.time - targetTime) : null
+      foundTime: closestEntry.time,
+      gapSeconds: minDifference,
+      gapMinutes: Math.round(minDifference / 60)
     });
 
     return closestEntry;
@@ -235,26 +246,39 @@ export class FeesService {
       throw new FeesError('No recent fee data available');
     }
 
+    // Si les données sont trop anciennes (> 1h), utiliser la logique fallback
+    if (nowInSeconds - latestEntry.time > 3600) {
+      const prevDayEntry = this.findClosestEntry(sortedData, latestEntry.time - (24 * 60 * 60));
+      const prevHourEntry = this.findClosestEntry(sortedData, latestEntry.time - (60 * 60));
+
+      const dailyFees = this.calculateFeeDifference(prevDayEntry, latestEntry, 'total_fees');
+      const dailySpotFees = this.calculateFeeDifference(prevDayEntry, latestEntry, 'total_spot_fees');
+      const hourlyFees = this.calculateFeeDifference(prevHourEntry, latestEntry, 'total_fees');
+      const hourlySpotFees = this.calculateFeeDifference(prevHourEntry, latestEntry, 'total_spot_fees');
+
+      logDeduplicator.warn('Using fallback calculation due to old data', {
+        latestDataTime: latestEntry.time,
+        timeSinceLastData: nowInSeconds - latestEntry.time,
+        dailyFees,
+        hourlyFees
+      });
+
+      return {
+        dailyFees: this.convertToUSD(dailyFees),
+        dailySpotFees: this.convertToUSD(dailySpotFees),
+        hourlyFees: this.convertToUSD(hourlyFees),
+        hourlySpotFees: this.convertToUSD(hourlySpotFees)
+      };
+    }
+
     const dailyFees = this.calculateFeeDifference(dayStartEntry, latestEntry, 'total_fees');
     const dailySpotFees = this.calculateFeeDifference(dayStartEntry, latestEntry, 'total_spot_fees');
     const hourlyFees = this.calculateFeeDifference(hourStartEntry, latestEntry, 'total_fees');
     const hourlySpotFees = this.calculateFeeDifference(hourStartEntry, latestEntry, 'total_spot_fees');
 
-    if (dayStartEntry && Math.abs(dayStartEntry.time - oneDayAgoInSeconds) > 3600) {
-      logDeduplicator.warn('Daily start entry is too far from target time', {
-        targetTime: oneDayAgoInSeconds,
-        actualTime: dayStartEntry.time,
-        difference: Math.abs(dayStartEntry.time - oneDayAgoInSeconds)
-      });
-    }
+    // Les warnings de gap sont maintenant gérés dans findClosestEntry()
 
-    if (hourStartEntry && Math.abs(hourStartEntry.time - oneHourAgoInSeconds) > 300) {
-      logDeduplicator.warn('Hourly start entry is too far from target time', {
-        targetTime: oneHourAgoInSeconds,
-        actualTime: hourStartEntry.time,
-        difference: Math.abs(hourStartEntry.time - oneHourAgoInSeconds)
-      });
-    }
+    // Les warnings de gap sont maintenant gérés dans findClosestEntry()
 
     const stats = {
       dailyFees: this.convertToUSD(dailyFees),

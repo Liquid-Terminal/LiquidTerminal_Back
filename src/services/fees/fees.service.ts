@@ -121,7 +121,7 @@ export class FeesService {
     return microUsdAmount / MICRO_USD_DIVISOR;
   }
 
-  private findClosestEntry(data: FeeData[], targetTime: number): FeeData | null {
+  private findClosestEntry(data: FeeData[], targetTime: number, excludeTime?: number): FeeData | null {
     if (!data.length) return null;
 
     const MAX_ACCEPTABLE_GAP_MINUTES = 20;
@@ -130,11 +130,18 @@ export class FeesService {
     // Trier les données par timestamp
     const sortedData = [...data].sort((a, b) => a.time - b.time);
 
-    // Trouver l'entrée la plus proche du targetTime
-    let closestEntry = sortedData[0];
-    let minDifference = Math.abs(sortedData[0].time - targetTime);
+    // Filtrer les entrées à exclure si spécifié
+    const filteredData = excludeTime 
+      ? sortedData.filter(entry => entry.time !== excludeTime)
+      : sortedData;
 
-    for (const entry of sortedData) {
+    if (!filteredData.length) return null;
+
+    // Trouver l'entrée la plus proche du targetTime
+    let closestEntry = filteredData[0];
+    let minDifference = Math.abs(filteredData[0].time - targetTime);
+
+    for (const entry of filteredData) {
       const difference = Math.abs(entry.time - targetTime);
       if (difference < minDifference) {
         minDifference = difference;
@@ -148,7 +155,8 @@ export class FeesService {
         targetTime,
         foundTime: closestEntry.time,
         gapMinutes: Math.round(minDifference / 60),
-        maxAcceptableMinutes: MAX_ACCEPTABLE_GAP_MINUTES
+        maxAcceptableMinutes: MAX_ACCEPTABLE_GAP_MINUTES,
+        excludedTime: excludeTime
       });
     }
 
@@ -156,7 +164,8 @@ export class FeesService {
       targetTime,
       foundTime: closestEntry.time,
       gapSeconds: minDifference,
-      gapMinutes: Math.round(minDifference / 60)
+      gapMinutes: Math.round(minDifference / 60),
+      excludedTime: excludeTime
     });
 
     return closestEntry;
@@ -171,6 +180,15 @@ export class FeesService {
       logDeduplicator.warn('Missing data points for fee calculation', {
         startEntry,
         endEntry,
+        field
+      });
+      return 0;
+    }
+
+    // Si les deux entrées sont identiques, retourner 0
+    if (startEntry.time === endEntry.time) {
+      logDeduplicator.warn('Start and end entries are the same, returning 0', {
+        timestamp: startEntry.time,
         field
       });
       return 0;
@@ -239,8 +257,8 @@ export class FeesService {
 
     // Sinon, on utilise la logique normale
     const latestEntry = this.findClosestEntry(sortedData, nowInSeconds);
-    const dayStartEntry = this.findClosestEntry(sortedData, oneDayAgoInSeconds);
-    const hourStartEntry = this.findClosestEntry(sortedData, oneHourAgoInSeconds);
+    const dayStartEntry = this.findClosestEntry(sortedData, oneDayAgoInSeconds, latestEntry?.time);
+    const hourStartEntry = this.findClosestEntry(sortedData, oneHourAgoInSeconds, latestEntry?.time);
 
     if (!latestEntry) {
       throw new FeesError('No recent fee data available');

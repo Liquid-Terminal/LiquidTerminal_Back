@@ -25,6 +25,7 @@ import feesRoutes from './routes/fees/fees.routes';
 import walletRoutes from './routes/wallet/wallet.routes';
 import projectRoutes from './routes/project/project.routes';
 import categoryRoutes from './routes/project/category.routes';
+import projectCsvRoutes from './routes/project/csv-upload.routes';
 import educationalRoutes from './routes/educational';
 import readListRoutes from './routes/readlist';
 import linkPreviewRoutes from './routes/linkPreview/linkPreview.routes';
@@ -83,6 +84,16 @@ app.use(sanitizeInput);
 // Servir les fichiers statiques (uploads)
 app.use('/uploads', express.static('uploads'));
 
+// S'assurer que les dossiers d'upload existent
+import fs from 'fs';
+const uploadDirs = ['uploads', 'uploads/project-logos', 'uploads/csv-projects'];
+uploadDirs.forEach(dir => {
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+    logDeduplicator.info(`Created upload directory: ${dir}`);
+  }
+});
+
 // Routes Pages
 app.use('/auth', authRoutes);
 app.use('/user', userAuthRoutes);
@@ -93,6 +104,7 @@ app.use('/market/vaults', vaultsRoutes);
 app.use('/market/fees', feesRoutes);
 app.use('/wallet', walletRoutes);
 app.use('/project', projectRoutes);
+app.use('/project/csv', projectCsvRoutes);
 app.use('/category', categoryRoutes);
 app.use('/educational', educationalRoutes);
 app.use('/readlists', readListRoutes);

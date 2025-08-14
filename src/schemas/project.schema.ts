@@ -39,7 +39,10 @@ export const projectQuerySchema = z.object({
   sort: z.enum(['createdAt', 'title', 'updatedAt']).optional(),
   order: z.enum(['asc', 'desc']).optional(),
   search: z.string().max(100, 'Terme de recherche trop long').optional(),
-  categoryIds: z.array(z.number().int().positive()).optional()
+  categoryIds: z.union([
+    z.array(z.number().int().positive()),
+    z.string().transform(val => val.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id)))
+  ]).optional()
 });
 
 // Base category schema

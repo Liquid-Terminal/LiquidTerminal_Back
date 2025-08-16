@@ -60,6 +60,8 @@ model Project {
   title      String    @unique @db.VarChar(255)
   desc       String    @db.VarChar(255)
   logo       String    @db.VarChar(255)
+  banner     String?   @db.VarChar(255)
+  token      String?   @db.VarChar(255)
   twitter    String?   @db.VarChar(255)
   discord    String?   @db.VarChar(255)
   telegram   String?   @db.VarChar(255)

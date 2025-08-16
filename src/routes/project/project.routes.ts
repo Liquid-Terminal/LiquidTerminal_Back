@@ -8,7 +8,7 @@ import { logDeduplicator } from '../../utils/logDeduplicator';
 import { ProjectError } from '../../errors/project.errors';
 import { validatePrivyToken } from '../../middleware/authMiddleware';
 import { requireModerator, requireAdmin } from '../../middleware/roleMiddleware';
-import { uploadProjectLogo, handleUploadError, getFileUrl, validateUploadedFile } from '../../middleware/upload.middleware';
+import { uploadProjectFiles, handleUploadError, validateUploadedFile, processUploadedFiles } from '../../middleware/upload.middleware';
 
 const router = express.Router();
 const projectService = new ProjectService();
@@ -16,27 +16,28 @@ const projectService = new ProjectService();
 // Appliquer le rate limiting à toutes les routes
 router.use(marketRateLimiter);
 
-// Route pour créer un nouveau projet avec upload de logo
+// Route pour créer un nouveau projet avec upload de logo et banner
 router.post('/with-upload', 
   validatePrivyToken, 
   requireModerator, 
-  uploadProjectLogo,
+  uploadProjectFiles,
   handleUploadError,
   validateUploadedFile,
-    validateRequest(projectCreateWithUploadSchema),
+  validateRequest(projectCreateWithUploadSchema),
   (async (req: Request, res: Response) => {
-
-
-  try {
-      // Si un fichier a été uploadé, utiliser son URL
-      if (req.file) {
-        req.body.logo = getFileUrl(req.file.filename);
-        logDeduplicator.info('File uploaded successfully', { 
-          filename: req.file.filename,
-          originalName: req.file.originalname,
-          size: req.file.size
-        });
+    try {
+      // Traiter les fichiers uploadés (logo et/ou banner)
+      const uploadedFiles = processUploadedFiles(req);
+      
+      // Ajouter les URLs des fichiers au body
+      if (uploadedFiles.logo) {
+        req.body.logo = uploadedFiles.logo;
       }
+      if (uploadedFiles.banner) {
+        req.body.banner = uploadedFiles.banner;
+      }
+
+      logDeduplicator.info('Files uploaded successfully', uploadedFiles);
 
       const project = await projectService.createWithUpload(req.body);
       res.status(201).json({

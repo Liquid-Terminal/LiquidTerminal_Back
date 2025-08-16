@@ -10,6 +10,8 @@ type ProjectCSVRow = {
   title: string;
   desc: string;
   logo: string;
+  banner?: string;
+  token?: string;
   twitter?: string;
   discord?: string;
   telegram?: string;
@@ -91,6 +93,8 @@ export class ProjectImportService {
         title: row.title,
         desc: row.desc,
         logo: row.logo,
+        banner: row.banner,
+        token: row.token,
         twitter: row.twitter,
         discord: row.discord,
         telegram: row.telegram,

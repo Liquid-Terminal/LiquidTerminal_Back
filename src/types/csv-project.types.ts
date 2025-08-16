@@ -2,6 +2,8 @@ export interface ProjectCsvRow {
   title?: string;
   desc?: string;
   logo?: string;
+  banner?: string;
+  Banner?: string;
   twitter?: string;
   discord?: string;
   telegram?: string;

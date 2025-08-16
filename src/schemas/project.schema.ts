@@ -9,6 +9,8 @@ export const projectBaseSchema = z.object({
     .min(10, 'Description must be at least 10 characters')
     .max(1000, 'Description cannot exceed 1000 characters'),
   logo: z.string().url('Logo must be a valid URL'),
+  banner: z.string().url('Banner must be a valid URL').optional(),
+  token: z.string().max(255, 'Token cannot exceed 255 characters').optional(),
   twitter: z.string().url('Twitter URL must be valid').optional(),
   discord: z.string().url('Discord URL must be valid').optional(),
   telegram: z.string().url('Telegram URL must be valid').optional(),
@@ -119,6 +121,16 @@ export const projectCreateWithUploadSchema = z.object({
       z.string().optional()
     ]).optional(),
     
+    // Banner optionnel
+    banner: z.union([
+      imageUrlSchema,
+      z.object({}).optional(), // Pour les objets vides de FormData
+      z.string().optional()
+    ]).optional(),
+    
+    // Token optionnel
+    token: z.string().max(255, 'Token cannot exceed 255 characters').optional(),
+    
     twitter: urlSchema,
     discord: urlSchema,
     telegram: urlSchema,
@@ -144,6 +156,8 @@ export const projectCreateSchema = z.object({
     .trim(),
   
   logo: imageUrlSchema.optional(),
+  banner: imageUrlSchema.optional(),
+  token: z.string().max(255, 'Token cannot exceed 255 characters').optional(),
   
   twitter: urlSchema,
   discord: urlSchema,

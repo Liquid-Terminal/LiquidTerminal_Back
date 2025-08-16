@@ -78,6 +78,12 @@ const upload = multer({
 // Middleware d'upload pour les logos de projets
 export const uploadProjectLogo = upload.single('logo');
 
+// Middleware d'upload pour les logos et banners de projets
+export const uploadProjectFiles = upload.fields([
+  { name: 'logo', maxCount: 1 },
+  { name: 'banner', maxCount: 1 }
+]);
+
 // Fonction pour scanner un fichier uploadé
 const scanUploadedFile = async (filePath: string): Promise<boolean> => {
   try {
@@ -191,42 +197,65 @@ export const handleUploadError = (error: Error, req: Request, res: Response, nex
 
 // Middleware de sécurité post-upload
 export const validateUploadedFile = async (req: Request, res: Response, next: NextFunction) => {
-  if (!req.file) {
+  // Gérer les uploads simples (req.file) et multiples (req.files)
+  const files: Express.Multer.File[] = [];
+  
+  if (req.file) {
+    files.push(req.file);
+  } else if (req.files) {
+    if (Array.isArray(req.files)) {
+      files.push(...req.files);
+    } else {
+      // req.files est un objet avec des clés (logo, banner, etc.)
+      Object.values(req.files).forEach(fileArray => {
+        if (Array.isArray(fileArray)) {
+          files.push(...fileArray);
+        }
+      });
+    }
+  }
+
+  if (files.length === 0) {
     return next();
   }
 
   try {
-    const isValid = await scanUploadedFile(req.file.path);
-    
-    if (!isValid) {
-      // Supprimer le fichier dangereux
-      fs.unlinkSync(req.file.path);
+    // Valider tous les fichiers
+    for (const file of files) {
+      const isValid = await scanUploadedFile(file.path);
       
-      logDeduplicator.warn('Malicious file detected and removed', { 
-        filename: req.file.filename,
-        originalName: req.file.originalname
-      });
-      
-      return res.status(400).json({
-        success: false,
-        error: 'Fichier non sécurisé détecté',
-        code: 'MALICIOUS_FILE'
-      });
+      if (!isValid) {
+        // Supprimer le fichier dangereux
+        fs.unlinkSync(file.path);
+        
+        logDeduplicator.warn('Malicious file detected and removed', { 
+          filename: file.filename,
+          originalName: file.originalname
+        });
+        
+        return res.status(400).json({
+          success: false,
+          error: 'Fichier non sécurisé détecté',
+          code: 'MALICIOUS_FILE'
+        });
+      }
     }
 
     logDeduplicator.info('File security scan passed', { 
-      filename: req.file.filename,
-      size: req.file.size
+      fileCount: files.length,
+      files: files.map(f => ({ filename: f.filename, size: f.size }))
     });
     
     next();
   } catch (error) {
     logDeduplicator.error('Error during file security scan', { error });
     
-    // En cas d'erreur, supprimer le fichier par précaution
-    if (req.file && fs.existsSync(req.file.path)) {
-      fs.unlinkSync(req.file.path);
-    }
+    // En cas d'erreur, supprimer tous les fichiers par précaution
+    files.forEach(file => {
+      if (fs.existsSync(file.path)) {
+        fs.unlinkSync(file.path);
+      }
+    });
     
     res.status(500).json({
       success: false,
@@ -240,6 +269,26 @@ export const validateUploadedFile = async (req: Request, res: Response, next: Ne
 export const getFileUrl = (filename: string): string => {
   const baseUrl = process.env.BASE_URL || 'http://localhost:3002';
   return `${baseUrl}/uploads/project-logos/${filename}`;
+};
+
+// Fonction helper pour traiter les fichiers uploadés
+export const processUploadedFiles = (req: Request): { logo?: string; banner?: string } => {
+  const result: { logo?: string; banner?: string } = {};
+  
+  if (req.file) {
+    // Upload simple (logo seulement)
+    result.logo = getFileUrl(req.file.filename);
+  } else if (req.files && !Array.isArray(req.files)) {
+    // Upload multiple avec champs nommés
+    if (req.files.logo && req.files.logo[0]) {
+      result.logo = getFileUrl(req.files.logo[0].filename);
+    }
+    if (req.files.banner && req.files.banner[0]) {
+      result.banner = getFileUrl(req.files.banner[0].filename);
+    }
+  }
+  
+  return result;
 };
 
 // Fonction pour nettoyer les anciens fichiers

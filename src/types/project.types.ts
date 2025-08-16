@@ -6,6 +6,8 @@ export interface Project {
   title: string;
   desc: string;
   logo: string;
+  banner: string | null;
+  token: string | null;
   twitter: string | null;
   discord: string | null;
   telegram: string | null;
@@ -30,6 +32,8 @@ export interface ProjectCreateInput {
   title: string;
   desc: string;
   logo?: string; // Rendu optionnel pour supporter les uploads
+  banner?: string;
+  token?: string;
   twitter?: string;
   discord?: string;
   telegram?: string;
@@ -42,6 +46,8 @@ export interface ProjectCreateWithUploadInput {
   title: string;
   desc: string;
   logo?: string; // URL optionnelle si pas de fichier uploadé
+  banner?: string;
+  token?: string;
   twitter?: string;
   discord?: string;
   telegram?: string;
@@ -96,6 +102,8 @@ export interface CategoryWithProjects extends CategoryResponse {
     title: string;
     desc: string;
     logo: string;
+    banner: string | null;
+    token: string | null;
   }[];
 }
 

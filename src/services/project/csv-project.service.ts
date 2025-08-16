@@ -143,6 +143,8 @@ export class CsvProjectService {
         title: normalizedRow.title,
         desc: normalizedRow.desc,
         logo: this.buildLogoUrl(normalizedRow.logo),
+        banner: normalizedRow.banner ? this.buildLogoUrl(normalizedRow.banner) : undefined,
+        token: normalizedRow.token || undefined,
         twitter: normalizedRow.twitter || undefined,
         discord: normalizedRow.discord || undefined,
         telegram: normalizedRow.telegram || undefined,
@@ -188,6 +190,11 @@ export class CsvProjectService {
     // Valider le logo (URL complète ou nom de fichier)
     if (!this.isValidLogoPath(normalized.logo)) {
       throw new Error('Le logo doit être une URL valide ou un nom de fichier (ex: logo.jpg)');
+    }
+
+    // Valider le banner s'il est présent (optionnel)
+    if (normalized.banner && normalized.banner !== '' && !this.isValidLogoPath(normalized.banner)) {
+      throw new Error('Le banner doit être une URL valide ou un nom de fichier (ex: banner.jpg)');
     }
 
     // Valider les URLs optionnelles
@@ -284,6 +291,7 @@ export class CsvProjectService {
     title: string;
     desc: string;
     logo: string;
+    banner?: string;
     twitter?: string;
     discord?: string;
     telegram?: string;
@@ -295,6 +303,7 @@ export class CsvProjectService {
       title: (row.title || '').trim(),
       desc: (row.desc || '').trim(),
       logo: (row.logo || '').trim(),
+      banner: (row.Banner || row.banner || '').trim() || undefined,
       twitter: (row.twitter || '').trim() || undefined,
       discord: (row.discord || '').trim() || undefined,
       telegram: (row.telegram || '').trim() || undefined,

@@ -52,6 +52,7 @@ export interface MarketData {
     liquidity: number;
     supply: number;
     marketIndex: number;
+    tokenId: string;
 }
 
 export interface SpotUSDCData {

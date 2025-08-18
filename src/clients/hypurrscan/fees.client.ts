@@ -12,7 +12,7 @@ export class HypurrscanFeesClient extends BaseApiService {
   private static readonly MAX_WEIGHT_PER_MINUTE = 1000;
   private static readonly CACHE_KEY = 'fees:raw_data';
   private static readonly UPDATE_CHANNEL = 'fees:data:updated';
-  private static readonly UPDATE_INTERVAL = 60000; 
+  private static readonly UPDATE_INTERVAL = 30000; 
   private static readonly MICRO_USD_DIVISOR = 1_000_000;
 
   private circuitBreaker: CircuitBreakerService;

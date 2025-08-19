@@ -6,6 +6,7 @@ import {
   EducationalResourceCategoryResponse 
 } from '../../types/educational.types';
 import { BaseRepository } from './base.repository.interface';
+import { BasePagination } from '../../types/common.types';
 
 export interface EducationalResourceRepository extends BaseRepository {
   /**
@@ -21,12 +22,7 @@ export interface EducationalResourceRepository extends BaseRepository {
     categoryId?: number;
   }): Promise<{
     data: EducationalResourceResponse[];
-    pagination: {
-      total: number;
-      page: number;
-      limit: number;
-      totalPages: number;
-    };
+    pagination: BasePagination;
   }>;
 
   /**

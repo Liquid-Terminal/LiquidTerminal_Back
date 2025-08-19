@@ -1,4 +1,4 @@
-import { BaseResponse } from './common.types';
+import { BaseResponse, PaginatedResponse, BasePagination } from './common.types';
 
 // Types de base pour les validateurs
 export interface ValidatorSummary {
@@ -100,28 +100,11 @@ export interface PaginationParams {
   limit?: number;
 }
 
-export interface PaginatedResponse<T> {
-  data: T[];
-  pagination: {
-    currentPage: number;
-    totalPages: number;
-    totalItems: number;
-    itemsPerPage: number;
-    hasNextPage: boolean;
-    hasPreviousPage: boolean;
-  };
-}
+// PaginatedResponse est maintenant importé de common.types.ts
 
 export interface ValidationResponse extends BaseResponse {
   data: ValidationInfo[];
-  pagination?: {
-    currentPage: number;
-    totalPages: number;
-    totalItems: number;
-    itemsPerPage: number;
-    hasNextPage: boolean;
-    hasPreviousPage: boolean;
-  };
+  pagination?: BasePagination;
 }
 
 // Types pour la queue de unstaking
@@ -139,14 +122,7 @@ export interface UnstakingQueueInfo {
 
 export interface UnstakingQueueResponse extends BaseResponse {
   data: UnstakingQueueInfo[];
-  pagination?: {
-    currentPage: number;
-    totalPages: number;
-    totalItems: number;
-    itemsPerPage: number;
-    hasNextPage: boolean;
-    hasPreviousPage: boolean;
-  };
+  pagination?: BasePagination;
 }
 
 // Types pour les staked holders

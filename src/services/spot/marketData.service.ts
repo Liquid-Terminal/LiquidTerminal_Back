@@ -1,4 +1,5 @@
-import { MarketData, SpotContext, AssetContext, Token, Market, MarketQueryParams, PaginatedResponse } from '../../types/market.types';
+import { MarketData, SpotContext, AssetContext, Token, Market, MarketQueryParams } from '../../types/market.types';
+import { PaginatedResponse } from '../../types/common.types';
 import { redisService } from '../../core/redis.service';
 import { MarketDataError } from '../../errors/spot.errors';
 import { logDeduplicator } from '../../utils/logDeduplicator';
@@ -110,6 +111,10 @@ export class SpotAssetContextService {
           page,
           limit,
           totalPages: Math.ceil(markets.length / limit),
+          hasNext: page < Math.ceil(markets.length / limit),
+          hasPrevious: page > 1
+        },
+        metadata: {
           totalVolume
         }
       };

@@ -1,5 +1,6 @@
 import { CategoryResponse, CategoryCreateInput, CategoryUpdateInput, CategoryWithProjects } from '../../types/project.types';
 import { BaseRepository } from './base.repository.interface';
+import { BasePagination } from '../../types/common.types';
 
 export interface CategoryRepository extends BaseRepository {
   /**
@@ -13,12 +14,7 @@ export interface CategoryRepository extends BaseRepository {
     search?: string;
   }): Promise<{
     data: CategoryResponse[];
-    pagination: {
-      total: number;
-      page: number;
-      limit: number;
-      totalPages: number;
-    };
+    pagination: BasePagination;
   }>;
 
   /**

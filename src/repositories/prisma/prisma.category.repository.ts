@@ -1,5 +1,6 @@
 import { CategoryRepository } from '../interfaces/category.repository.interface';
 import { CategoryResponse, CategoryCreateInput, CategoryUpdateInput, CategoryWithProjects } from '../../types/project.types';
+import { BasePagination } from '../../types/common.types';
 import { prisma } from '../../core/prisma.service';
 import { logDeduplicator } from '../../utils/logDeduplicator';
 import { PrismaClient } from '@prisma/client';
@@ -32,12 +33,7 @@ export class PrismaCategoryRepository implements CategoryRepository {
     search?: string;
   }): Promise<{
     data: CategoryResponse[];
-    pagination: {
-      total: number;
-      page: number;
-      limit: number;
-      totalPages: number;
-    };
+    pagination: BasePagination;
   }> {
     try {
       const {
@@ -70,13 +66,16 @@ export class PrismaCategoryRepository implements CategoryRepository {
 
       logDeduplicator.info('Categories found successfully', { count: categories.length, total });
 
+      const totalPages = Math.ceil(total / limit);
       return {
         data: categories,
         pagination: {
           total,
           page,
           limit,
-          totalPages: Math.ceil(total / limit)
+          totalPages,
+          hasNext: page < totalPages,
+          hasPrevious: page > 1
         }
       };
     } catch (error) {

@@ -1,4 +1,5 @@
-import { ValidationRawData, ValidationInfo, PaginationParams, PaginatedResponse } from '../../types/staking.types';
+import { ValidationRawData, ValidationInfo, PaginationParams } from '../../types/staking.types';
+import { PaginatedResponse } from '../../types/common.types';
 import { HypurrscanValidationClient } from '../../clients/hypurrscan/validation.client';
 import { redisService } from '../../core/redis.service';
 import { ValidatorError } from '../../errors/staking.errors';
@@ -91,12 +92,12 @@ export class ValidationService {
     return {
       data: paginatedData,
       pagination: {
-        currentPage: page,
+        page,
         totalPages,
-        totalItems,
-        itemsPerPage: limit,
-        hasNextPage: page < totalPages,
-        hasPreviousPage: page > 1
+        total: totalItems,
+        limit,
+        hasNext: page < totalPages,
+        hasPrevious: page > 1
       }
     };
   }

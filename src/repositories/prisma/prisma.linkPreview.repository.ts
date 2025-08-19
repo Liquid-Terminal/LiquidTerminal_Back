@@ -4,6 +4,7 @@ import {
   LinkPreviewCreateInput, 
   LinkPreviewUpdateInput
 } from '../../types/linkPreview.types';
+import { BasePagination } from '../../types/common.types';
 import { prisma } from '../../core/prisma.service';
 import { logDeduplicator } from '../../utils/logDeduplicator';
 
@@ -39,12 +40,7 @@ export class PrismaLinkPreviewRepository implements LinkPreviewRepository {
     search?: string;
   }): Promise<{
     data: LinkPreviewResponse[];
-    pagination: {
-      total: number;
-      page: number;
-      limit: number;
-      totalPages: number;
-    };
+    pagination: BasePagination;
   }> {
     try {
       const {
@@ -79,13 +75,16 @@ export class PrismaLinkPreviewRepository implements LinkPreviewRepository {
 
       logDeduplicator.info('Link previews found successfully', { count: linkPreviews.length, total });
 
+      const totalPages = Math.ceil(total / limit);
       return {
         data: linkPreviews,
         pagination: {
           total,
           page,
           limit,
-          totalPages: Math.ceil(total / limit)
+          totalPages,
+          hasNext: page < totalPages,
+          hasPrevious: page > 1
         }
       };
     } catch (error) {

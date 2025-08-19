@@ -1,4 +1,5 @@
-import { UnstakingQueueRawData, UnstakingQueueInfo, PaginationParams, PaginatedResponse } from '../../types/staking.types';
+import { UnstakingQueueRawData, UnstakingQueueInfo, PaginationParams } from '../../types/staking.types';
+import { PaginatedResponse } from '../../types/common.types';
 import { HypurrscanUnstakingClient } from '../../clients/hypurrscan/unstaking.client';
 import { redisService } from '../../core/redis.service';
 import { ValidatorError } from '../../errors/staking.errors';
@@ -87,12 +88,12 @@ export class UnstakingService {
     return {
       data: paginatedData,
       pagination: {
-        currentPage: page,
+        page,
         totalPages,
-        totalItems,
-        itemsPerPage: limit,
-        hasNextPage: page < totalPages,
-        hasPreviousPage: page > 1
+        total: totalItems,
+        limit,
+        hasNext: page < totalPages,
+        hasPrevious: page > 1
       }
     };
   }

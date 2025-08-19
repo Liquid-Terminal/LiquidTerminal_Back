@@ -1,6 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import { ProjectRepository } from '../interfaces/project.repository.interface';
 import { Project, ProjectCreateInput, ProjectUpdateInput } from '../../types/project.types';
+import { BasePagination } from '../../types/common.types';
 import { prisma } from '../../core/prisma.service';
 import { logDeduplicator } from '../../utils/logDeduplicator';
 
@@ -33,12 +34,7 @@ export class PrismaProjectRepository implements ProjectRepository {
     categoryIds?: number[];
   }): Promise<{
     data: Project[];
-    pagination: {
-      total: number;
-      page: number;
-      limit: number;
-      totalPages: number;
-    };
+    pagination: BasePagination;
   }> {
     try {
       const {
@@ -102,13 +98,16 @@ export class PrismaProjectRepository implements ProjectRepository {
 
       logDeduplicator.info('Projects found successfully', { count: transformedProjects.length, total });
 
+      const totalPages = Math.ceil(total / limit);
       return {
         data: transformedProjects,
         pagination: {
           total,
           page,
           limit,
-          totalPages: Math.ceil(total / limit)
+          totalPages,
+          hasNext: page < totalPages,
+          hasPrevious: page > 1
         }
       };
     } catch (error) {

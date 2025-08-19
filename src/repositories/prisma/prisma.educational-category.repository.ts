@@ -4,6 +4,7 @@ import {
   EducationalCategoryCreateInput, 
   EducationalCategoryUpdateInput
 } from '../../types/educational.types';
+import { BasePagination } from '../../types/common.types';
 import { prisma } from '../../core/prisma.service';
 import { logDeduplicator } from '../../utils/logDeduplicator';
 
@@ -36,12 +37,7 @@ export class PrismaEducationalCategoryRepository implements EducationalCategoryR
     createdBy?: number;
   }): Promise<{
     data: EducationalCategoryResponse[];
-    pagination: {
-      total: number;
-      page: number;
-      limit: number;
-      totalPages: number;
-    };
+    pagination: BasePagination;
   }> {
     try {
       const {
@@ -87,13 +83,16 @@ export class PrismaEducationalCategoryRepository implements EducationalCategoryR
 
       logDeduplicator.info('Educational categories found successfully', { count: categories.length, total });
 
+      const totalPages = Math.ceil(total / limit);
       return {
         data: categories,
         pagination: {
           total,
           page,
           limit,
-          totalPages: Math.ceil(total / limit)
+          totalPages,
+          hasNext: page < totalPages,
+          hasPrevious: page > 1
         }
       };
     } catch (error) {

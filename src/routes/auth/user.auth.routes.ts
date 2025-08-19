@@ -39,7 +39,9 @@ router.get("/admin/users", validatePrivyToken, requireAdmin, (req: Request, res:
             page,
             limit,
             total: result.total,
-            pages: result.pages
+            totalPages: result.pages,
+            hasNext: page < result.pages,
+            hasPrevious: page > 1
           }
         }
       });

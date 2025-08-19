@@ -4,6 +4,7 @@ import {
   EducationalCategoryUpdateInput
 } from '../../types/educational.types';
 import { BaseRepository } from './base.repository.interface';
+import { BasePagination } from '../../types/common.types';
 
 export interface EducationalCategoryRepository extends BaseRepository {
   /**
@@ -18,12 +19,7 @@ export interface EducationalCategoryRepository extends BaseRepository {
     createdBy?: number;
   }): Promise<{
     data: EducationalCategoryResponse[];
-    pagination: {
-      total: number;
-      page: number;
-      limit: number;
-      totalPages: number;
-    };
+    pagination: BasePagination;
   }>;
 
   /**

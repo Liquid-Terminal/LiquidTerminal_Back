@@ -223,21 +223,7 @@ export interface MarketQueryParams {
     pair?: string;
 }
 
-export interface PaginatedResponse<T> {
-    data: T[];
-    pagination: {
-        total: number;
-        page: number;
-        limit: number;
-        totalPages: number;
-        totalVolume?: number;
-    };
-    metadata?: {
-        lastUpdate: number;
-        isFresh: boolean;
-        timeSinceLastUpdate: number;
-    };
-}
+// PaginatedResponse est maintenant importé de common.types.ts
 
 export interface PerpMarketQueryParams {
     sortBy?: 'volume' | 'openInterest' | 'change24h';

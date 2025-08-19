@@ -4,6 +4,7 @@ import {
   ReadListItemCreateInput, 
   ReadListItemUpdateInput
 } from '../../types/readlist.types';
+import { BasePagination } from '../../types/common.types';
 import { prisma } from '../../core/prisma.service';
 import { logDeduplicator } from '../../utils/logDeduplicator';
 
@@ -66,12 +67,7 @@ export class PrismaReadListItemRepository implements ReadListItemRepository {
     isRead?: boolean;
   }): Promise<{
     data: ReadListItemResponse[];
-    pagination: {
-      total: number;
-      page: number;
-      limit: number;
-      totalPages: number;
-    };
+    pagination: BasePagination;
   }> {
     try {
       const {
@@ -123,13 +119,16 @@ export class PrismaReadListItemRepository implements ReadListItemRepository {
 
       logDeduplicator.info('Read list items found successfully', { count: items.length, total });
 
+      const totalPages = Math.ceil(total / limit);
       return {
         data: items,
         pagination: {
           total,
           page,
           limit,
-          totalPages: Math.ceil(total / limit)
+          totalPages,
+          hasNext: page < totalPages,
+          hasPrevious: page > 1
         }
       };
     } catch (error) {
@@ -223,12 +222,7 @@ export class PrismaReadListItemRepository implements ReadListItemRepository {
     isRead?: boolean;
   }): Promise<{
     data: ReadListItemResponse[];
-    pagination: {
-      total: number;
-      page: number;
-      limit: number;
-      totalPages: number;
-    };
+    pagination: BasePagination;
   }> {
     return this.findAll({ ...params, readListId });
   }

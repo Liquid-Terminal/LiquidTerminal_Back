@@ -5,6 +5,7 @@ import {
   ReadListUpdateInput,
   ReadListSummaryResponse
 } from '../../types/readlist.types';
+import { BasePagination } from '../../types/common.types';
 import { prisma } from '../../core/prisma.service';
 import { logDeduplicator } from '../../utils/logDeduplicator';
 
@@ -97,12 +98,7 @@ export class PrismaReadListRepository implements ReadListRepository {
     isPublic?: boolean;
   }): Promise<{
     data: ReadListSummaryResponse[];
-    pagination: {
-      total: number;
-      page: number;
-      limit: number;
-      totalPages: number;
-    };
+    pagination: BasePagination;
   }> {
     try {
       const {
@@ -151,13 +147,16 @@ export class PrismaReadListRepository implements ReadListRepository {
 
       logDeduplicator.info('Read lists found successfully', { count: data.length, total });
 
+      const totalPages = Math.ceil(total / limit);
       return {
         data,
         pagination: {
           total,
           page,
           limit,
-          totalPages: Math.ceil(total / limit)
+          totalPages,
+          hasNext: page < totalPages,
+          hasPrevious: page > 1
         }
       };
     } catch (error) {

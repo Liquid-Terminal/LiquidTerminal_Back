@@ -26,6 +26,8 @@ export class StakedHoldersService {
       limit: number;
       total: number;
       totalPages: number;
+      hasNext: boolean;
+      hasPrevious: boolean;
     };
     metadata: {
       token: string;
@@ -63,7 +65,9 @@ export class StakedHoldersService {
           page,
           limit,
           total: holdersArray.length,
-          totalPages
+          totalPages,
+          hasNext: page < totalPages,
+          hasPrevious: page > 1
         },
         metadata: {
           token: data.token,

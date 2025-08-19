@@ -122,6 +122,8 @@ export class VaultsService {
           page,
           limit,
           totalPages: Math.ceil(filteredVaults.length / limit),
+          hasNext: page < Math.ceil(filteredVaults.length / limit),
+          hasPrevious: page > 1,
           totalTvl,
           vaultsNumber: vaults.length
         }

@@ -1,4 +1,4 @@
-import { BaseResponse, TimeRange } from './common.types';
+import { BaseResponse, TimeRange, BasePagination } from './common.types';
 
 // Types pour les données de portfolio
 export interface VaultPortfolioData {
@@ -101,11 +101,7 @@ export interface VaultData {
 export interface VaultsResponse {
   success: boolean;
   data: VaultData[];
-  pagination: {
-    total: number;
-    page: number;
-    limit: number;
-    totalPages: number;
+  pagination: BasePagination & {
     totalTvl: number;
     vaultsNumber: number;
   };

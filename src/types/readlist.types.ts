@@ -1,4 +1,4 @@
-import { BaseResponse } from './common.types';
+import { BaseResponse, BasePagination } from './common.types';
 
 // Types de base pour les ReadLists
 export interface ReadListResponse {
@@ -90,12 +90,7 @@ export interface ReadListResponseWrapper extends BaseResponse {
 
 export interface ReadListsResponseWrapper extends BaseResponse {
   data: ReadListSummaryResponse[];
-  pagination?: {
-    total: number;
-    page: number;
-    limit: number;
-    totalPages: number;
-  };
+  pagination?: BasePagination;
 }
 
 export interface ReadListItemResponseWrapper extends BaseResponse {
@@ -104,10 +99,5 @@ export interface ReadListItemResponseWrapper extends BaseResponse {
 
 export interface ReadListItemsResponseWrapper extends BaseResponse {
   data: ReadListItemResponse[];
-  pagination?: {
-    total: number;
-    page: number;
-    limit: number;
-    totalPages: number;
-  };
+  pagination?: BasePagination;
 } 

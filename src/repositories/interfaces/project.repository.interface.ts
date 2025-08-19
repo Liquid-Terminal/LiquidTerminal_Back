@@ -1,5 +1,6 @@
 import { Project, ProjectCreateInput, ProjectUpdateInput } from '../../types/project.types';
 import { BaseRepository } from './base.repository.interface';
+import { BasePagination } from '../../types/common.types';
 
 export interface ProjectRepository extends BaseRepository {
   /**
@@ -14,12 +15,7 @@ export interface ProjectRepository extends BaseRepository {
     categoryIds?: number[];
   }): Promise<{
     data: Project[];
-    pagination: {
-      total: number;
-      page: number;
-      limit: number;
-      totalPages: number;
-    };
+    pagination: BasePagination;
   }>;
 
   /**

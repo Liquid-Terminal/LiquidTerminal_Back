@@ -33,9 +33,9 @@ router.get('/', async (req: Request, res: Response) => {
 
     logDeduplicator.info('Unstaking queue retrieved successfully', { 
       count: result.data.length,
-      page: result.pagination.currentPage,
+      page: result.pagination.page,
       totalPages: result.pagination.totalPages,
-      totalItems: result.pagination.totalItems
+      totalItems: result.pagination.total
     });
     
     res.json(response);

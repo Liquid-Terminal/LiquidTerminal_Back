@@ -159,7 +159,9 @@ export class LeaderboardService {
         total,
         page,
         limit,
-        pages
+        totalPages: pages,
+        hasNext: page < pages,
+        hasPrevious: page > 1
       }
     };
   }

@@ -5,6 +5,7 @@ import {
   ReadListSummaryResponse
 } from '../../types/readlist.types';
 import { BaseRepository } from './base.repository.interface';
+import { BasePagination } from '../../types/common.types';
 
 export interface ReadListRepository extends BaseRepository {
   /**
@@ -20,12 +21,7 @@ export interface ReadListRepository extends BaseRepository {
     isPublic?: boolean;
   }): Promise<{
     data: ReadListSummaryResponse[];
-    pagination: {
-      total: number;
-      page: number;
-      limit: number;
-      totalPages: number;
-    };
+    pagination: BasePagination;
   }>;
 
   /**

@@ -35,9 +35,9 @@ router.get('/', validateGetRequest(validationsGetSchema), async (req: Request, r
 
     logDeduplicator.info('Validations retrieved successfully', { 
       count: result.data.length,
-      page: result.pagination.currentPage,
+      page: result.pagination.page,
       totalPages: result.pagination.totalPages,
-      totalItems: result.pagination.totalItems
+      totalItems: result.pagination.total
     });
     
     res.json(response);

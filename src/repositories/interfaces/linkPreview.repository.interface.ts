@@ -4,6 +4,7 @@ import {
   LinkPreviewUpdateInput
 } from '../../types/linkPreview.types';
 import { BaseRepository } from './base.repository.interface';
+import { BasePagination } from '../../types/common.types';
 
 export interface LinkPreviewRepository extends BaseRepository {
   /**
@@ -17,12 +18,7 @@ export interface LinkPreviewRepository extends BaseRepository {
     search?: string;
   }): Promise<{
     data: LinkPreviewResponse[];
-    pagination: {
-      total: number;
-      page: number;
-      limit: number;
-      totalPages: number;
-    };
+    pagination: BasePagination;
   }>;
 
   /**

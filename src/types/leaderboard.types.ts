@@ -1,3 +1,5 @@
+import { BasePagination } from './common.types';
+
 export interface WindowPerformance {
   pnl: string;
   roi: string;
@@ -37,12 +39,7 @@ export interface LeaderboardQueryParams {
 
 export interface PaginatedLeaderboardResponse {
   data: ProcessedLeaderboardEntry[];
-  pagination: {
-    total: number;
-    page: number;
-    limit: number;
-    pages: number;
-  };
+  pagination: BasePagination;
 }
 
 export class LeaderboardError extends Error {

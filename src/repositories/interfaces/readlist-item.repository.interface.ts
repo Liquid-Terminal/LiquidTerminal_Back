@@ -4,6 +4,7 @@ import {
   ReadListItemUpdateInput
 } from '../../types/readlist.types';
 import { BaseRepository } from './base.repository.interface';
+import { BasePagination } from '../../types/common.types';
 
 export interface ReadListItemRepository extends BaseRepository {
   /**
@@ -19,12 +20,7 @@ export interface ReadListItemRepository extends BaseRepository {
     isRead?: boolean;
   }): Promise<{
     data: ReadListItemResponse[];
-    pagination: {
-      total: number;
-      page: number;
-      limit: number;
-      totalPages: number;
-    };
+    pagination: BasePagination;
   }>;
 
   /**
@@ -58,12 +54,7 @@ export interface ReadListItemRepository extends BaseRepository {
     isRead?: boolean;
   }): Promise<{
     data: ReadListItemResponse[];
-    pagination: {
-      total: number;
-      page: number;
-      limit: number;
-      totalPages: number;
-    };
+    pagination: BasePagination;
   }>;
 
   /**

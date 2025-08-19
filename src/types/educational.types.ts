@@ -1,4 +1,4 @@
-import { BaseResponse } from './common.types';
+import { BaseResponse, BasePagination } from './common.types';
 
 // Types de base pour les catégories éducatives
 export interface EducationalCategoryResponse {
@@ -87,12 +87,7 @@ export interface EducationalCategoryResponseWrapper extends BaseResponse {
 
 export interface EducationalCategoriesResponseWrapper extends BaseResponse {
   data: EducationalCategoryResponse[];
-  pagination?: {
-    total: number;
-    page: number;
-    limit: number;
-    totalPages: number;
-  };
+  pagination?: BasePagination;
 }
 
 export interface EducationalResourceResponseWrapper extends BaseResponse {
@@ -101,12 +96,7 @@ export interface EducationalResourceResponseWrapper extends BaseResponse {
 
 export interface EducationalResourcesResponseWrapper extends BaseResponse {
   data: EducationalResourceResponse[];
-  pagination?: {
-    total: number;
-    page: number;
-    limit: number;
-    totalPages: number;
-  };
+  pagination?: BasePagination;
 }
 
  

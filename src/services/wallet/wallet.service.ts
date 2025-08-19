@@ -191,7 +191,9 @@ export class WalletService extends BaseService<WalletResponse, WalletCreateInput
           total: result.total,
           page,
           limit,
-          pages: Math.ceil(result.total / limit)
+          totalPages: Math.ceil(result.total / limit),
+          hasNext: page < Math.ceil(result.total / limit),
+          hasPrevious: page > 1
         }
       };
     } catch (error) {

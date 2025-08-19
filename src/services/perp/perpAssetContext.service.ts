@@ -1,4 +1,5 @@
-import { PerpMarketData, PerpMarketQueryParams, PaginatedResponse } from '../../types/market.types';
+import { PerpMarketData, PerpMarketQueryParams } from '../../types/market.types';
+import { PaginatedResponse } from '../../types/common.types';
 import { redisService } from '../../core/redis.service';
 import { PerpMarketDataError } from '../../errors/perp.errors';
 import { logDeduplicator } from '../../utils/logDeduplicator';
@@ -131,6 +132,10 @@ export class PerpAssetContextService {
           page,
           limit,
           totalPages: Math.ceil(markets.length / limit),
+          hasNext: page < Math.ceil(markets.length / limit),
+          hasPrevious: page > 1
+        },
+        metadata: {
           totalVolume
         }
       };

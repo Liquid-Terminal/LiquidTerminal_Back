@@ -7,20 +7,13 @@ import {
   EducationalResourceCategoryResponse 
 } from '../../types/educational.types';
 import { BasePagination } from '../../types/common.types';
-import { prisma } from '../../core/prisma.service';
-import { logDeduplicator } from '../../utils/logDeduplicator';
+import { BasePrismaRepository } from './base-prisma.repository';
 
-export class PrismaEducationalResourceRepository implements EducationalResourceRepository {
-  private prismaClient: any = prisma;
-
+export class PrismaEducationalResourceRepository extends BasePrismaRepository implements EducationalResourceRepository {
   // Helper pour les includes répétitifs
   private readonly includeConfig = {
     creator: {
-      select: {
-        id: true,
-        name: true,
-        email: true
-      }
+      select: BasePrismaRepository.UserSelect
     },
     linkPreview: {
       select: {
@@ -42,46 +35,11 @@ export class PrismaEducationalResourceRepository implements EducationalResourceR
           }
         },
         assigner: {
-          select: {
-            id: true,
-            name: true,
-            email: true
-          }
+          select: BasePrismaRepository.UserSelect
         }
       }
     }
   };
-
-  setPrismaClient(prismaClient: any): void {
-    this.prismaClient = prismaClient;
-    logDeduplicator.info('Prisma client updated in educational resource repository');
-  }
-
-  resetPrismaClient(): void {
-    this.prismaClient = prisma;
-    logDeduplicator.info('Prisma client reset to default in educational resource repository');
-  }
-
-  // Helper pour try/catch avec logging
-  private async executeWithErrorHandling<T>(
-    operation: () => Promise<T>,
-    operationName: string,
-    context?: any
-  ): Promise<T> {
-    try {
-      if (context) {
-        logDeduplicator.info(`Starting ${operationName}`, context);
-      }
-      const result = await operation();
-      if (context) {
-        logDeduplicator.info(`${operationName} completed successfully`, context);
-      }
-      return result;
-    } catch (error) {
-      logDeduplicator.error(`Error in ${operationName}`, { error, context });
-      throw error;
-    }
-  }
 
   async findAll(params: {
     page?: number;
@@ -95,7 +53,7 @@ export class PrismaEducationalResourceRepository implements EducationalResourceR
     data: EducationalResourceResponse[];
     pagination: BasePagination;
   }> {
-    try {
+    return this.executeWithErrorHandling(async () => {
       const {
         page = 1,
         limit = 10,
@@ -106,8 +64,8 @@ export class PrismaEducationalResourceRepository implements EducationalResourceR
         categoryId
       } = params;
 
-      const skip = (page - 1) * limit;
-
+      this.validatePaginationParams({ page, limit, sort, order });
+      
       const where: any = {};
       if (search) {
         where.url = { contains: search, mode: 'insensitive' };
@@ -120,109 +78,75 @@ export class PrismaEducationalResourceRepository implements EducationalResourceR
           some: { categoryId }
         };
       }
-
-      logDeduplicator.info('Finding all educational resources', { page, limit, sort, order, search, addedBy, categoryId });
+      
+      const { skip, take, orderBy } = this.buildQueryParams({ page, limit, sort, order });
 
       const total = await this.prismaClient.educationalResource.count({ where });
       const resources = await this.prismaClient.educationalResource.findMany({
         where,
         skip,
-        take: limit,
-        orderBy: { [sort]: order },
+        take,
+        orderBy,
         include: this.includeConfig
       });
 
-      logDeduplicator.info('Educational resources found successfully', { count: resources.length, total });
-
-      const totalPages = Math.ceil(total / limit);
       return {
         data: resources,
-        pagination: {
-          total,
-          page,
-          limit,
-          totalPages,
-          hasNext: page < totalPages,
-          hasPrevious: page > 1
-        }
+        pagination: this.buildPagination(total, page, limit)
       };
-    } catch (error) {
-      logDeduplicator.error('Error finding all educational resources', { error, params });
-      throw error;
-    }
+    }, 'finding all educational resources', { page: params.page, limit: params.limit, sort: params.sort, order: params.order, search: params.search, addedBy: params.addedBy, categoryId: params.categoryId });
   }
 
   async findById(id: number): Promise<EducationalResourceResponse | null> {
-    try {
-      logDeduplicator.info('Finding educational resource by ID', { id });
-      
-      const resource = await this.prismaClient.educationalResource.findUnique({
-        where: { id },
-        include: this.includeConfig
-      });
-
-      if (resource) {
-        logDeduplicator.info('Educational resource found successfully', { id });
-      } else {
-        logDeduplicator.info('Educational resource not found', { id });
-      }
-
-      return resource;
-    } catch (error) {
-      logDeduplicator.error('Error finding educational resource by ID', { error, id });
-      throw error;
-    }
+    return this.executeWithErrorHandling(
+      async () => {
+        return await this.prismaClient.educationalResource.findUnique({
+          where: { id },
+          include: this.includeConfig
+        });
+      },
+      'finding educational resource by ID',
+      { id }
+    );
   }
 
-
-
   async create(data: EducationalResourceCreateInput): Promise<EducationalResourceResponse> {
-    try {
-      logDeduplicator.info('Creating educational resource', { url: data.url });
-      
-      const { categoryIds, ...resourceData } = data;
-      
-      const resource = await this.prismaClient.educationalResource.create({
-        data: {
-          ...resourceData,
-          ...(categoryIds && categoryIds.length > 0 ? {
-            categories: {
-              create: categoryIds.map(categoryId => ({
-                categoryId,
-                assignedBy: data.addedBy
-              }))
-            }
-          } : {})
-        },
-        include: this.includeConfig
-      });
-
-      logDeduplicator.info('Educational resource created successfully', { id: resource.id, url: resource.url });
-      
-      return resource;
-    } catch (error) {
-      logDeduplicator.error('Error creating educational resource', { error, data });
-      throw error;
-    }
+    return this.executeWithErrorHandling(
+      async () => {
+        const { categoryIds, ...resourceData } = data;
+        
+        return await this.prismaClient.educationalResource.create({
+          data: {
+            ...resourceData,
+            ...(categoryIds && categoryIds.length > 0 ? {
+              categories: {
+                create: categoryIds.map(categoryId => ({
+                  categoryId,
+                  assignedBy: data.addedBy
+                }))
+              }
+            } : {})
+          },
+          include: this.includeConfig
+        });
+      },
+      'creating educational resource',
+      { url: data.url, addedBy: data.addedBy }
+    );
   }
 
   async update(id: number, data: EducationalResourceUpdateInput): Promise<EducationalResourceResponse> {
-    try {
-      logDeduplicator.info('Updating educational resource', { id });
-      
-      const resource = await this.prismaClient.educationalResource.update({
-        where: { id },
-        data,
-        include: this.includeConfig
-      });
-
-      logDeduplicator.info('Educational resource updated successfully', { id });
-      
-      return resource;
-    } catch (error) {
-      logDeduplicator.error('Error updating educational resource', { error, id, data });
-      throw error;
-    }
+    return this.executeWithErrorHandling(
+      async () => {
+        return await this.prismaClient.educationalResource.update({
+          where: { id },
+          data,
+          include: this.includeConfig
+        });
+      },
+      'updating educational resource',
+      { id, ...data }
+    );
   }
 
   async delete(id: number): Promise<void> {
@@ -251,226 +175,150 @@ export class PrismaEducationalResourceRepository implements EducationalResourceR
   }
 
   async findByCreator(userId: number): Promise<EducationalResourceResponse[]> {
-    try {
-      logDeduplicator.info('Finding educational resources by creator', { userId });
-      
-      const resources = await this.prismaClient.educationalResource.findMany({
-        where: { addedBy: userId },
-        include: this.includeConfig,
-        orderBy: { createdAt: 'desc' }
-      });
-
-      logDeduplicator.info('Educational resources found by creator successfully', { userId, count: resources.length });
-      
-      return resources;
-    } catch (error) {
-      logDeduplicator.error('Error finding educational resources by creator', { error, userId });
-      throw error;
-    }
+    return this.executeWithErrorHandling(
+      async () => {
+        return await this.prismaClient.educationalResource.findMany({
+          where: { addedBy: userId },
+          include: this.includeConfig,
+          orderBy: { createdAt: 'desc' }
+        });
+      },
+      'finding educational resources by creator',
+      { userId }
+    );
   }
 
   async findByCategory(categoryId: number): Promise<EducationalResourceResponse[]> {
-    try {
-      logDeduplicator.info('Finding educational resources by category', { categoryId });
-      
-      const resourceCategories = await this.prismaClient.educationalResourceCategory.findMany({
-        where: { categoryId },
-        include: {
-          resource: {
-            include: {
-              creator: {
-                select: {
-                  id: true,
-                  name: true,
-                  email: true
-                }
-              },
-              categories: {
-                include: {
-                  category: {
-                    select: {
-                      id: true,
-                      name: true,
-                      description: true
-                    }
-                  },
-                  assigner: {
-                    select: {
-                      id: true,
-                      name: true,
-                      email: true
-                    }
-                  }
-                }
-              }
+    return this.executeWithErrorHandling(
+      async () => {
+        const resourceCategories = await this.prismaClient.educationalResourceCategory.findMany({
+          where: { categoryId },
+          include: {
+            resource: {
+              include: this.includeConfig
             }
           }
-        }
-      });
+        });
 
-      const resources = resourceCategories.map((rc: any) => rc.resource);
-
-      logDeduplicator.info('Educational resources found by category successfully', { categoryId, count: resources.length });
-      
-      return resources;
-    } catch (error) {
-      logDeduplicator.error('Error finding educational resources by category', { error, categoryId });
-      throw error;
-    }
+        return resourceCategories.map((rc: any) => rc.resource);
+      },
+      'finding educational resources by category',
+      { categoryId }
+    );
   }
 
   async assignToCategory(data: EducationalResourceCategoryCreateInput): Promise<EducationalResourceCategoryResponse> {
-    try {
-      logDeduplicator.info('Assigning resource to category', data);
-      
-      const assignment = await this.prismaClient.educationalResourceCategory.create({
-        data,
-        include: {
-          category: {
-            select: {
-              id: true,
-              name: true,
-              description: true
-            }
-          },
-          assigner: {
-            select: {
-              id: true,
-              name: true,
-              email: true
+    return this.executeWithErrorHandling(
+      async () => {
+        return await this.prismaClient.educationalResourceCategory.create({
+          data,
+          include: {
+            category: {
+              select: {
+                id: true,
+                name: true,
+                description: true
+              }
+            },
+            assigner: {
+              select: BasePrismaRepository.UserSelect
             }
           }
-        }
-      });
-
-      logDeduplicator.info('Resource assigned to category successfully', { 
-        resourceId: data.resourceId, 
-        categoryId: data.categoryId 
-      });
-      
-      return assignment;
-    } catch (error) {
-      logDeduplicator.error('Error assigning resource to category', { error, data });
-      throw error;
-    }
+        });
+      },
+      'assigning resource to category',
+      data
+    );
   }
 
   async removeFromCategory(resourceId: number, categoryId: number): Promise<void> {
-    try {
-      logDeduplicator.info('Removing resource from category', { resourceId, categoryId });
-      
-      await this.prismaClient.educationalResourceCategory.deleteMany({
-        where: {
-          resourceId,
-          categoryId
-        }
-      });
-
-      logDeduplicator.info('Resource removed from category successfully', { resourceId, categoryId });
-    } catch (error) {
-      logDeduplicator.error('Error removing resource from category', { error, resourceId, categoryId });
-      throw error;
-    }
+    return this.executeWithErrorHandling(
+      async () => {
+        await this.prismaClient.educationalResourceCategory.deleteMany({
+          where: {
+            resourceId,
+            categoryId
+          }
+        });
+      },
+      'removing resource from category',
+      { resourceId, categoryId }
+    );
   }
 
   async isAssignedToCategory(resourceId: number, categoryId: number): Promise<boolean> {
-    try {
-      logDeduplicator.info('Checking if resource is assigned to category', { resourceId, categoryId });
-      
-      const assignment = await this.prismaClient.educationalResourceCategory.findFirst({
-        where: {
-          resourceId,
-          categoryId
-        }
-      });
-      
-      const exists = !!assignment;
-      
-      logDeduplicator.info('Resource category assignment check completed', { resourceId, categoryId, exists });
-      
-      return exists;
-    } catch (error) {
-      logDeduplicator.error('Error checking resource category assignment', { error, resourceId, categoryId });
-      throw error;
-    }
+    return this.executeWithErrorHandling(
+      async () => {
+        const assignment = await this.prismaClient.educationalResourceCategory.findFirst({
+          where: {
+            resourceId,
+            categoryId
+          }
+        });
+        return !!assignment;
+      },
+      'checking if resource is assigned to category',
+      { resourceId, categoryId }
+    );
   }
 
   async getResourceAssignments(resourceId: number): Promise<EducationalResourceCategoryResponse[]> {
-    try {
-      logDeduplicator.info('Getting resource assignments', { resourceId });
-      
-      const assignments = await this.prismaClient.educationalResourceCategory.findMany({
-        where: { resourceId },
-        include: {
-          category: {
-            select: {
-              id: true,
-              name: true,
-              description: true
-            }
-          },
-          assigner: {
-            select: {
-              id: true,
-              name: true,
-              email: true
+    return this.executeWithErrorHandling(
+      async () => {
+        return await this.prismaClient.educationalResourceCategory.findMany({
+          where: { resourceId },
+          include: {
+            category: {
+              select: {
+                id: true,
+                name: true,
+                description: true
+              }
+            },
+            assigner: {
+              select: BasePrismaRepository.UserSelect
             }
           }
-        }
-      });
-
-      logDeduplicator.info('Resource assignments retrieved successfully', { resourceId, count: assignments.length });
-      
-      return assignments;
-    } catch (error) {
-      logDeduplicator.error('Error getting resource assignments', { error, resourceId });
-      throw error;
-    }
+        });
+      },
+      'getting resource assignments',
+      { resourceId }
+    );
   }
 
   async findByUrl(url: string): Promise<EducationalResourceResponse | null> {
-    try {
-      logDeduplicator.info('Finding resource by URL', { url });
-      
-      const resource = await this.prismaClient.educationalResource.findFirst({
-        where: { url },
-        include: this.includeConfig
-      });
-
-      logDeduplicator.info('Resource by URL search completed', { url, found: !!resource });
-      
-      return resource;
-    } catch (error) {
-      logDeduplicator.error('Error finding resource by URL', { error, url });
-      throw error;
-    }
+    return this.executeWithErrorHandling(
+      async () => {
+        return await this.prismaClient.educationalResource.findFirst({
+          where: { url },
+          include: this.includeConfig
+        });
+      },
+      'finding resource by URL',
+      { url }
+    );
   }
 
   async getResourceCategories(resourceId: number): Promise<any[]> {
-    try {
-      logDeduplicator.info('Getting resource categories', { resourceId });
-      
-      const assignments = await this.prismaClient.educationalResourceCategory.findMany({
-        where: { resourceId },
-        include: {
-          category: {
-            select: {
-              id: true,
-              name: true,
-              description: true
+    return this.executeWithErrorHandling(
+      async () => {
+        const assignments = await this.prismaClient.educationalResourceCategory.findMany({
+          where: { resourceId },
+          include: {
+            category: {
+              select: {
+                id: true,
+                name: true,
+                description: true
+              }
             }
           }
-        }
-      });
+        });
 
-      const categories = assignments.map((assignment: any) => assignment.category);
-
-      logDeduplicator.info('Resource categories retrieved successfully', { resourceId, count: categories.length });
-      
-      return categories;
-    } catch (error) {
-      logDeduplicator.error('Error getting resource categories', { error, resourceId });
-      throw error;
-    }
+        return assignments.map((assignment: any) => assignment.category);
+      },
+      'getting resource categories',
+      { resourceId }
+    );
   }
 } 

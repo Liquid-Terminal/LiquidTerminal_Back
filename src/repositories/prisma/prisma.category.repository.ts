@@ -1,30 +1,9 @@
 import { CategoryRepository } from '../interfaces/category.repository.interface';
 import { CategoryResponse, CategoryCreateInput, CategoryUpdateInput, CategoryWithProjects } from '../../types/project.types';
 import { BasePagination } from '../../types/common.types';
-import { prisma } from '../../core/prisma.service';
-import { logDeduplicator } from '../../utils/logDeduplicator';
-import { PrismaClient } from '@prisma/client';
+import { BasePrismaRepository } from './base-prisma.repository';
 
-export class PrismaCategoryRepository implements CategoryRepository {
-  private prismaClient: Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'> = prisma;
-
-  /**
-   * Définit le client Prisma à utiliser pour les opérations de base de données
-   * @param prismaClient Client Prisma à utiliser
-   */
-  setPrismaClient(prismaClient: Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>): void {
-    this.prismaClient = prismaClient;
-    logDeduplicator.info('Prisma client updated in category repository');
-  }
-
-  /**
-   * Réinitialise le client Prisma à sa valeur par défaut
-   */
-  resetPrismaClient(): void {
-    this.prismaClient = prisma;
-    logDeduplicator.info('Prisma client reset to default in category repository');
-  }
-
+export class PrismaCategoryRepository extends BasePrismaRepository implements CategoryRepository {
   async findAll(params: {
     page?: number;
     limit?: number;
@@ -35,7 +14,7 @@ export class PrismaCategoryRepository implements CategoryRepository {
     data: CategoryResponse[];
     pagination: BasePagination;
   }> {
-    try {
+    return this.executeWithErrorHandling(async () => {
       const {
         page = 1,
         limit = 10,
@@ -44,199 +23,164 @@ export class PrismaCategoryRepository implements CategoryRepository {
         search
       } = params;
 
-      const skip = (page - 1) * limit;
-
-      const where: any = {};
-      if (search) {
-        where.OR = [
-          { name: { contains: search, mode: 'insensitive' } },
-          { description: { contains: search, mode: 'insensitive' } }
-        ];
-      }
-
-      logDeduplicator.info('Finding all categories', { page, limit, sort, order, search });
+      this.validatePaginationParams({ page, limit, sort, order });
+      const where = this.buildWhereClause({ search });
+      const { skip, take, orderBy } = this.buildQueryParams({ page, limit, sort, order });
 
       const total = await this.prismaClient.category.count({ where });
       const categories = await this.prismaClient.category.findMany({
         where,
         skip,
-        take: limit,
-        orderBy: { [sort]: order }
+        take,
+        orderBy
       });
 
-      logDeduplicator.info('Categories found successfully', { count: categories.length, total });
-
-      const totalPages = Math.ceil(total / limit);
       return {
         data: categories,
-        pagination: {
-          total,
-          page,
-          limit,
-          totalPages,
-          hasNext: page < totalPages,
-          hasPrevious: page > 1
-        }
+        pagination: this.buildPagination(total, page, limit)
       };
-    } catch (error) {
-      logDeduplicator.error('Error finding all categories', { error, params });
-      throw error;
-    }
+    }, 'finding all categories', { page: params.page, limit: params.limit, sort: params.sort, order: params.order, search: params.search });
   }
 
   async findById(id: number): Promise<CategoryResponse | null> {
-    try {
-      logDeduplicator.info('Finding category by ID', { id });
-      
-      const category = await this.prismaClient.category.findUnique({
-        where: { id }
-      });
-
-      if (category) {
-        logDeduplicator.info('Category found successfully', { id });
-      } else {
-        logDeduplicator.info('Category not found', { id });
-      }
-
-      return category;
-    } catch (error) {
-      logDeduplicator.error('Error finding category by ID', { error, id });
-      throw error;
-    }
-  }
-
-  async findByIdWithProjects(id: number): Promise<CategoryWithProjects | null> {
-    try {
-      logDeduplicator.info('Finding category with projects by ID', { id });
-      
-      const category = await (this.prismaClient as any).category.findUnique({
-        where: { id },
-        include: {
-          projects: {
-            select: {
-              id: true,
-              title: true,
-              desc: true,
-              logo: true
-            }
-          }
-        }
-      });
-
-      if (category) {
-        logDeduplicator.info('Category with projects found successfully', { id, projectsCount: (category as any).projects.length });
-      } else {
-        logDeduplicator.info('Category with projects not found', { id });
-      }
-
-      return category as any;
-    } catch (error) {
-      logDeduplicator.error('Error finding category with projects by ID', { error, id });
-      throw error;
-    }
+    return this.executeWithErrorHandling(
+      async () => {
+        return await this.prismaClient.category.findUnique({
+          where: { id }
+        });
+      },
+      'finding category by ID',
+      { id }
+    );
   }
 
   async create(data: CategoryCreateInput): Promise<CategoryResponse> {
-    try {
-      logDeduplicator.info('Creating category', { name: data.name });
-      
-      const category = await this.prismaClient.category.create({
-        data
-      });
-
-      logDeduplicator.info('Category created successfully', { id: category.id, name: category.name });
-      
-      return category;
-    } catch (error) {
-      logDeduplicator.error('Error creating category', { error, data });
-      throw error;
-    }
+    return this.executeWithErrorHandling(
+      async () => {
+        return await this.prismaClient.category.create({
+          data
+        });
+      },
+      'creating category',
+      { name: data.name }
+    );
   }
 
   async update(id: number, data: CategoryUpdateInput): Promise<CategoryResponse> {
-    try {
-      logDeduplicator.info('Updating category', { id });
-      
-      const category = await this.prismaClient.category.update({
-        where: { id },
-        data
-      });
-
-      logDeduplicator.info('Category updated successfully', { id });
-      
-      return category;
-    } catch (error) {
-      logDeduplicator.error('Error updating category', { error, id, data });
-      throw error;
-    }
+    return this.executeWithErrorHandling(
+      async () => {
+        return await this.prismaClient.category.update({
+          where: { id },
+          data
+        });
+      },
+      'updating category',
+      { id, ...data }
+    );
   }
 
   async delete(id: number): Promise<void> {
-    try {
-      logDeduplicator.info('Deleting category', { id });
-      
-      await this.prismaClient.category.delete({
-        where: { id }
-      });
-
-      logDeduplicator.info('Category deleted successfully', { id });
-    } catch (error) {
-      logDeduplicator.error('Error deleting category', { error, id });
-      throw error;
-    }
+    return this.executeWithErrorHandling(
+      async () => {
+        await this.prismaClient.category.delete({
+          where: { id }
+        });
+      },
+      'deleting category',
+      { id }
+    );
   }
 
   async existsByName(name: string): Promise<boolean> {
-    try {
-      logDeduplicator.info('Checking if category exists by name', { name });
-      
-      const category = await this.prismaClient.category.findUnique({
-        where: { name }
-      });
-      
-      const exists = !!category;
-      
-      logDeduplicator.info('Category existence check completed', { name, exists });
-      
-      return exists;
-    } catch (error) {
-      logDeduplicator.error('Error checking if category exists by name', { error, name });
-      throw error;
-    }
+    return this.executeWithErrorHandling(
+      async () => {
+        const category = await this.prismaClient.category.findFirst({
+          where: { name }
+        });
+        return !!category;
+      },
+      'checking if category exists by name',
+      { name }
+    );
+  }
+
+  async findWithProjects(id: number): Promise<CategoryWithProjects | null> {
+    return this.executeWithErrorHandling(
+      async () => {
+        return await this.prismaClient.category.findUnique({
+          where: { id },
+          include: {
+            projects: {
+              include: {
+                project: true
+              }
+            }
+          }
+        });
+      },
+      'finding category with projects',
+      { id }
+    );
+  }
+
+  async findByName(name: string): Promise<CategoryResponse | null> {
+    return this.executeWithErrorHandling(
+      async () => {
+        return await this.prismaClient.category.findFirst({
+          where: { name }
+        });
+      },
+      'finding category by name',
+      { name }
+    );
+  }
+
+  async findByIdWithProjects(id: number): Promise<CategoryWithProjects | null> {
+    return this.executeWithErrorHandling(
+      async () => {
+        return await this.prismaClient.category.findUnique({
+          where: { id },
+          include: {
+            projects: {
+              include: {
+                project: true
+              }
+            }
+          }
+        });
+      },
+      'finding category with projects by ID',
+      { id }
+    );
   }
 
   async getProjectsByCategory(categoryId: number): Promise<any[]> {
-    try {
-      logDeduplicator.info('Finding projects by category', { categoryId });
-      
-      const projectCategories = await (this.prismaClient as any).projectCategory.findMany({
-        where: { categoryId },
-        include: {
-          project: {
-            select: {
-              id: true,
-              title: true,
-              desc: true,
-              logo: true,
-              twitter: true,
-              discord: true,
-              telegram: true,
-              website: true,
-              createdAt: true,
-              updatedAt: true
+    return this.executeWithErrorHandling(
+      async () => {
+        const projectCategories = await this.prismaClient.projectCategory.findMany({
+          where: { categoryId },
+          include: {
+            project: {
+              select: {
+                id: true,
+                title: true,
+                desc: true,
+                logo: true,
+                twitter: true,
+                discord: true,
+                telegram: true,
+                website: true,
+                createdAt: true,
+                updatedAt: true
+              }
             }
           }
-        }
-      });
+        });
 
-      const projects = projectCategories.map((pc: any) => pc.project);
-
-      logDeduplicator.info('Projects found by category successfully', { categoryId, count: projects.length });
-      
-      return projects;
-    } catch (error) {
-      logDeduplicator.error('Error finding projects by category', { error, categoryId });
-      throw error;
-    }
+        return projectCategories.map((pc: any) => pc.project);
+      },
+      'finding projects by category',
+      { categoryId }
+    );
   }
 } 

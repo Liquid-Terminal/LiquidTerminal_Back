@@ -6,31 +6,20 @@ import {
   ReadListSummaryResponse
 } from '../../types/readlist.types';
 import { BasePagination } from '../../types/common.types';
-import { prisma } from '../../core/prisma.service';
-import { logDeduplicator } from '../../utils/logDeduplicator';
+import { BasePrismaRepository } from './base-prisma.repository';
 
-export class PrismaReadListRepository implements ReadListRepository {
-  private prismaClient: any = prisma;
-
+export class PrismaReadListRepository extends BasePrismaRepository implements ReadListRepository {
   // Helper pour les includes répétitifs
   private readonly includeConfig = {
     creator: {
-      select: {
-        id: true,
-        name: true,
-        email: true
-      }
+      select: BasePrismaRepository.UserSelect
     },
     items: {
       include: {
         resource: {
           include: {
             creator: {
-              select: {
-                id: true,
-                name: true,
-                email: true
-              }
+              select: BasePrismaRepository.UserSelect
             }
           }
         }
@@ -44,11 +33,7 @@ export class PrismaReadListRepository implements ReadListRepository {
 
   private readonly summaryIncludeConfig = {
     creator: {
-      select: {
-        id: true,
-        name: true,
-        email: true
-      }
+      select: BasePrismaRepository.UserSelect
     },
     _count: {
       select: {
@@ -56,37 +41,6 @@ export class PrismaReadListRepository implements ReadListRepository {
       }
     }
   };
-
-  setPrismaClient(prismaClient: any): void {
-    this.prismaClient = prismaClient;
-    logDeduplicator.info('Prisma client updated in readlist repository');
-  }
-
-  resetPrismaClient(): void {
-    this.prismaClient = prisma;
-    logDeduplicator.info('Prisma client reset to default in readlist repository');
-  }
-
-  // Helper pour try/catch avec logging
-  private async executeWithErrorHandling<T>(
-    operation: () => Promise<T>,
-    operationName: string,
-    context?: any
-  ): Promise<T> {
-    try {
-      if (context) {
-        logDeduplicator.info(`Starting ${operationName}`, context);
-      }
-      const result = await operation();
-      if (context) {
-        logDeduplicator.info(`${operationName} completed successfully`, context);
-      }
-      return result;
-    } catch (error) {
-      logDeduplicator.error(`Error in ${operationName}`, { error, context });
-      throw error;
-    }
-  }
 
   async findAll(params: {
     page?: number;
@@ -100,7 +54,7 @@ export class PrismaReadListRepository implements ReadListRepository {
     data: ReadListSummaryResponse[];
     pagination: BasePagination;
   }> {
-    try {
+    return this.executeWithErrorHandling(async () => {
       const {
         page = 1,
         limit = 10,
@@ -111,30 +65,16 @@ export class PrismaReadListRepository implements ReadListRepository {
         isPublic
       } = params;
 
-      const skip = (page - 1) * limit;
-
-      const where: any = {};
-      if (search) {
-        where.OR = [
-          { name: { contains: search, mode: 'insensitive' } },
-          { description: { contains: search, mode: 'insensitive' } }
-        ];
-      }
-      if (userId !== undefined) {
-        where.userId = userId;
-      }
-      if (isPublic !== undefined) {
-        where.isPublic = isPublic;
-      }
-
-      logDeduplicator.info('Finding all read lists', { page, limit, sort, order, search, userId, isPublic });
+      this.validatePaginationParams({ page, limit, sort, order });
+      const where = this.buildWhereClause({ search, userId, isPublic });
+      const { skip, take, orderBy } = this.buildQueryParams({ page, limit, sort, order });
 
       const total = await this.prismaClient.readList.count({ where });
       const readLists = await this.prismaClient.readList.findMany({
         where,
         skip,
-        take: limit,
-        orderBy: { [sort]: order },
+        take,
+        orderBy,
         include: this.summaryIncludeConfig
       });
 
@@ -145,34 +85,20 @@ export class PrismaReadListRepository implements ReadListRepository {
         _count: undefined
       }));
 
-      logDeduplicator.info('Read lists found successfully', { count: data.length, total });
-
-      const totalPages = Math.ceil(total / limit);
       return {
         data,
-        pagination: {
-          total,
-          page,
-          limit,
-          totalPages,
-          hasNext: page < totalPages,
-          hasPrevious: page > 1
-        }
+        pagination: this.buildPagination(total, page, limit)
       };
-    } catch (error) {
-      logDeduplicator.error('Error finding all read lists', { error, params });
-      throw error;
-    }
+    }, 'finding all read lists', { page: params.page, limit: params.limit, sort: params.sort, order: params.order, search: params.search, userId: params.userId, isPublic: params.isPublic });
   }
 
   async findById(id: number): Promise<ReadListResponse | null> {
     return this.executeWithErrorHandling(
       async () => {
-        const readList = await this.prismaClient.readList.findUnique({
+        return await this.prismaClient.readList.findUnique({
           where: { id },
           include: this.includeConfig
         });
-        return readList;
       },
       'finding read list by ID',
       { id }
@@ -203,7 +129,7 @@ export class PrismaReadListRepository implements ReadListRepository {
   async create(data: ReadListCreateInput): Promise<ReadListResponse> {
     return this.executeWithErrorHandling(
       async () => {
-        const readList = await this.prismaClient.readList.create({
+        return await this.prismaClient.readList.create({
           data: {
             name: data.name,
             description: data.description,
@@ -214,7 +140,6 @@ export class PrismaReadListRepository implements ReadListRepository {
           },
           include: this.includeConfig
         });
-        return readList;
       },
       'creating read list',
       { name: data.name, userId: data.userId }
@@ -224,12 +149,11 @@ export class PrismaReadListRepository implements ReadListRepository {
   async update(id: number, data: ReadListUpdateInput): Promise<ReadListResponse> {
     return this.executeWithErrorHandling(
       async () => {
-        const readList = await this.prismaClient.readList.update({
+        return await this.prismaClient.readList.update({
           where: { id },
           data,
           include: this.includeConfig
         });
-        return readList;
       },
       'updating read list',
       { id, ...data }
@@ -289,12 +213,7 @@ export class PrismaReadListRepository implements ReadListRepository {
     search?: string;
   }): Promise<{
     data: ReadListSummaryResponse[];
-    pagination: {
-      total: number;
-      page: number;
-      limit: number;
-      totalPages: number;
-    };
+    pagination: BasePagination;
   }> {
     return this.findAll({ ...params, isPublic: true });
   }
@@ -320,7 +239,7 @@ export class PrismaReadListRepository implements ReadListRepository {
       async () => {
         // Cette méthode peut être utilisée pour maintenir un compteur dénormalisé si nécessaire
         // Pour l'instant, nous utilisons _count dans les requêtes
-        logDeduplicator.info('Items count update requested', { readListId });
+        // Pas d'action nécessaire car on utilise _count dynamiquement
       },
       'updating items count',
       { readListId }

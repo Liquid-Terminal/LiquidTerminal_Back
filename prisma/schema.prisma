@@ -35,6 +35,7 @@ model User {
   addedEducationalResources       EducationalResource[]         @relation("EducationalResourceCreator")
   assignedEducationalResources    EducationalResourceCategory[] @relation("EducationalResourceAssigner")
   readLists                       ReadList[]
+  walletLists                     WalletList[]
 }
 
 model Wallet {
@@ -89,8 +90,36 @@ model UserWallet {
   addedAt   DateTime @default(now()) @db.Timestamp(6)
   User      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   Wallet    Wallet   @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  listEntries WalletListItem[]
 
   @@unique([userId, walletId])
+}
+
+model WalletList {
+  id          Int       @id @default(autoincrement())
+  name        String    @db.VarChar(255)
+  description String?   @db.VarChar(500)
+  createdAt   DateTime  @default(now()) @db.Timestamp(6)
+  updatedAt   DateTime  @updatedAt
+  userId      Int
+  isPublic    Boolean   @default(false)
+  
+  creator     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items       WalletListItem[]
+}
+
+model WalletListItem {
+  id         Int      @id @default(autoincrement())
+  walletListId Int
+  userWalletId Int
+  addedAt    DateTime @default(now()) @db.Timestamp(6)
+  notes      String?  @db.Text
+  order      Int?
+  
+  walletList WalletList @relation(fields: [walletListId], references: [id], onDelete: Cascade)
+  userWallet UserWallet @relation(fields: [userWalletId], references: [id], onDelete: Cascade)
+  
+  @@unique([walletListId, userWalletId])
 }
 
 model EducationalCategory {

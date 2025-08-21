@@ -28,6 +28,7 @@ import categoryRoutes from './routes/project/category.routes';
 import projectCsvRoutes from './routes/project/csv-upload.routes';
 import educationalRoutes from './routes/educational';
 import readListRoutes from './routes/readlist';
+import walletListRoutes from './routes/walletlist';
 import linkPreviewRoutes from './routes/linkPreview/linkPreview.routes';
 
 import validatorRoutes from './routes/staking/validator.routes';
@@ -108,6 +109,7 @@ app.use('/project/csv', projectCsvRoutes);
 app.use('/category', categoryRoutes);
 app.use('/educational', educationalRoutes);
 app.use('/readlists', readListRoutes);
+app.use('/walletlists', walletListRoutes);
 app.use('/link-preview', linkPreviewRoutes);
 app.use('/staking/validators', validatorRoutes);
 app.use('/staking/validators/trending', trendingValidatorRoutes);

@@ -1,5 +1,7 @@
 import express, { Request, Response, RequestHandler } from "express";
 import { WalletService } from "../../services/wallet/wallet.service";
+import { WalletListService } from "../../services/walletlist/walletlist.service";
+import { WalletListItemService } from "../../services/walletlist/walletlist-item.service";
 import { marketRateLimiter } from "../../middleware/apiRateLimiter";
 import { validatePrivyToken } from "../../middleware/authMiddleware";
 import { 
@@ -8,6 +10,7 @@ import {
   WalletError,
   WalletLimitExceededError
 } from "../../errors/wallet.errors";
+import { WalletListError } from "../../errors/walletlist.errors";
 import {
   validateCreateWallet,
   validateUpdateWallet,
@@ -18,6 +21,8 @@ import { prisma } from "../../core/prisma.service";
 
 const router = express.Router();
 const walletService = new WalletService();
+const walletListService = new WalletListService();
+const walletListItemService = new WalletListItemService();
 
 // Rate limiting
 router.use(marketRateLimiter);
@@ -38,7 +43,7 @@ router.post("/", validatePrivyToken, validateCreateWallet, (async (req: Request,
       return res.status(401).json({ success: false, error: 'User not found', code: 'USER_NOT_FOUND' });
     }
 
-    const { address, name } = req.body;
+    const { address, name, walletListId } = req.body;
 
     const userWallet = await walletService.addWallet(privyUserId, address, name);
     
@@ -50,18 +55,79 @@ router.post("/", validatePrivyToken, validateCreateWallet, (async (req: Request,
         code: "INVALID_RESPONSE_STRUCTURE"
       });
     }
+
+    // Si un walletListId est fourni, ajouter le wallet à la liste
+    let walletListItem = null;
+    if (walletListId) {
+      try {
+        // Vérifier que l'utilisateur a accès à la wallet list
+        const hasAccess = await walletListService.hasAccess(walletListId, user.id);
+        if (!hasAccess) {
+          logDeduplicator.warn('User attempted to add wallet to inaccessible list', {
+            userId: user.id,
+            walletListId,
+            userWalletId: userWallet.id
+          });
+          return res.status(403).json({
+            success: false,
+            error: "Accès refusé à cette liste de wallets",
+            code: "ACCESS_DENIED"
+          });
+        }
+
+        // Ajouter le wallet à la liste
+        walletListItem = await walletListItemService.create({
+          userWalletId: userWallet.id,
+          walletListId: walletListId
+        });
+
+        logDeduplicator.info('Wallet added to list successfully', {
+          userWalletId: userWallet.id,
+          walletListId,
+          itemId: walletListItem.id
+        });
+      } catch (error) {
+        logDeduplicator.error('Error adding wallet to list:', { 
+          error, 
+          userWalletId: userWallet.id, 
+          walletListId 
+        });
+        
+        // Si l'erreur vient de la wallet list, on retourne une erreur spécifique
+        if (error instanceof WalletListError) {
+          return res.status(error.statusCode).json({
+            success: false,
+            error: error.message,
+            code: error.code
+          });
+        }
+        
+        // Pour les autres erreurs, on log mais on continue (le wallet a été créé avec succès)
+        logDeduplicator.warn('Wallet created but failed to add to list', {
+          userWalletId: userWallet.id,
+          walletListId,
+          error: error
+        });
+      }
+    }
     
     logDeduplicator.info('Wallet added successfully', { 
       address: userWallet.Wallet.address,
       userId: userWallet.userId,
       walletId: userWallet.walletId,
-      name: userWallet.name
+      name: userWallet.name,
+      addedToList: !!walletListItem
     });
     
     res.status(201).json({ 
       success: true,
-      message: "Wallet ajouté avec succès.", 
-      data: userWallet 
+      message: walletListItem 
+        ? "Wallet ajouté avec succès et ajouté à la liste." 
+        : "Wallet ajouté avec succès.", 
+      data: {
+        userWallet,
+        walletListItem
+      }
     });
   } catch (error) {
     logDeduplicator.error('Error adding wallet:', { error, body: req.body });

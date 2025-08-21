@@ -6,7 +6,8 @@ export const walletCreateSchema = z.object({
     .min(42, 'Address must be 42 characters')
     .max(42, 'Address must be 42 characters')
     .regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid Ethereum address format'),
-  name: z.string().optional()
+  name: z.string().optional(),
+  walletListId: z.number().int().positive().optional()
 });
 
 // Schéma pour la mise à jour de Wallet

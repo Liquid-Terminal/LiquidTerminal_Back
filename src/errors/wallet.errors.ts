@@ -38,7 +38,7 @@ export class UserNotFoundError extends WalletError {
 }
 
 export class WalletLimitExceededError extends WalletError {
-  constructor(message: string = 'Maximum number of wallets reached (5 wallets per user)') {
+  constructor(message: string = 'Maximum number of wallets reached (25 wallets per user)') {
     super(message, 400, 'WALLET_LIMIT_EXCEEDED');
     this.name = 'WalletLimitExceededError';
   }

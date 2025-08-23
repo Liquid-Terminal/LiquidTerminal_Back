@@ -60,6 +60,11 @@ export interface WalletListRepository extends BaseRepository {
   findByUser(userId: number): Promise<WalletListSummaryResponse[]>;
 
   /**
+   * Compte le nombre de wallet lists d'un utilisateur
+   */
+  countByUser(userId: number): Promise<number>;
+
+  /**
    * Récupère toutes les wallet lists publiques
    */
   findPublicLists(params: {

@@ -75,3 +75,10 @@ export class WalletListUnauthorizedError extends WalletListError {
     super(message, 401, 'WALLETLIST_UNAUTHORIZED');
   }
 }
+
+export class WalletListLimitExceededError extends WalletListError {
+  constructor(message: string = 'Maximum number of wallet lists reached (5 lists per user)') {
+    super(message, 400, 'WALLETLIST_LIMIT_EXCEEDED');
+    this.name = 'WalletListLimitExceededError';
+  }
+}

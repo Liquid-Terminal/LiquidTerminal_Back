@@ -212,6 +212,18 @@ export class PrismaWalletListRepository extends BasePrismaRepository implements 
     );
   }
 
+  async countByUser(userId: number): Promise<number> {
+    return this.executeWithErrorHandling(
+      async () => {
+        return await this.prismaClient.walletList.count({
+          where: { userId }
+        });
+      },
+      'counting wallet lists by user',
+      { userId }
+    );
+  }
+
   async findPublicLists(params: {
     page?: number;
     limit?: number;

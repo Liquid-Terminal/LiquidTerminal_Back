@@ -52,7 +52,8 @@ router.get('/', validateGetRequest(marketSpotGetSchema), async (req: Request, re
       success: true,
       message: 'Market data retrieved successfully',
       data: result.data,
-      pagination: result.pagination
+      pagination: result.pagination,
+      metadata: result.metadata
     });
   } catch (error) {
     logDeduplicator.error('Error retrieving market data:', { error: error instanceof Error ? error.message : String(error) });

@@ -4,7 +4,7 @@ import { logDeduplicator } from '../../utils/logDeduplicator';
 
 export class SpotGlobalStatsService {
   private readonly SPOT_MARKETS_CACHE_KEY = 'spot:markets';
-  private readonly SPOT_USDC_CACHE_KEY = 'hypurrscan:spotUSDC:data';
+  private readonly SPOT_USDC_CACHE_KEY = 'spotUSDC:raw_data';
   private readonly SPOT_MARKETS_UPDATE_CHANNEL = 'spot:data:updated';
   private readonly SPOT_USDC_UPDATE_CHANNEL = 'hypurrscan:spotUSDC:updated';
   private lastUpdate: Record<string, number> = {};

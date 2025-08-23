@@ -5,7 +5,7 @@ import { logDeduplicator } from '../../../utils/logDeduplicator';
 export class HyperliquidSpotStatsClient {
   private static instance: HyperliquidSpotStatsClient | null = null;
   private static readonly UPDATE_INTERVAL = 10000; // 10 secondes
-  private static readonly SPOT_USDC_CACHE_KEY = 'hypurrscan:spotUSDC:data';
+  private static readonly SPOT_USDC_CACHE_KEY = 'spotUSDC:raw_data';
   private static readonly SPOT_STATS_CACHE_KEY = 'spot:global_stats';
   private static readonly UPDATE_CHANNEL = 'spot:stats:updated';
   private static readonly SPOT_MARKETS_CACHE_KEY = 'spot:markets';

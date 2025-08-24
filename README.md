@@ -15,7 +15,6 @@ Liquid Terminal Backend is a comprehensive API and data processing platform dedi
 - **Staking Data** - Validator information and staking statistics
 - **Rate Limiting** - Multi-tier protection against abuse
 - **Caching** - Redis-based high-performance caching
-- **Real-time Updates** - WebSocket support for live data
 
 ## 🛠️ Tech Stack
 

@@ -95,11 +95,33 @@ export class PrismaCategoryRepository extends BasePrismaRepository implements Ca
     return this.executeWithErrorHandling(
       async () => {
         const category = await this.prismaClient.category.findFirst({
-          where: { name }
+          where: { 
+            name: {
+              equals: name,
+              mode: 'insensitive'
+            }
+          }
         });
         return !!category;
       },
       'checking if category exists by name',
+      { name }
+    );
+  }
+
+  async findByName(name: string): Promise<CategoryResponse | null> {
+    return this.executeWithErrorHandling(
+      async () => {
+        return await this.prismaClient.category.findFirst({
+          where: { 
+            name: {
+              equals: name,
+              mode: 'insensitive'
+            }
+          }
+        });
+      },
+      'finding category by name',
       { name }
     );
   }
@@ -123,17 +145,7 @@ export class PrismaCategoryRepository extends BasePrismaRepository implements Ca
     );
   }
 
-  async findByName(name: string): Promise<CategoryResponse | null> {
-    return this.executeWithErrorHandling(
-      async () => {
-        return await this.prismaClient.category.findFirst({
-          where: { name }
-        });
-      },
-      'finding category by name',
-      { name }
-    );
-  }
+
 
   async findByIdWithProjects(id: number): Promise<CategoryWithProjects | null> {
     return this.executeWithErrorHandling(

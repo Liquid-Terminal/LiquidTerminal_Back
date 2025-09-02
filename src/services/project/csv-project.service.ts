@@ -320,18 +320,13 @@ export class CsvProjectService {
     try {
       logDeduplicator.info('findOrCreateCategory called', { categoryName });
       
-      // Essayer de trouver la catégorie existante avec une recherche plus large
-      const allCategories = await this.categoryService.getAll({ 
-        limit: 1000 // S'assurer d'avoir toutes les catégories
-      });
-      const existingCategory = allCategories.data.find(
-        (cat: any) => cat.name.toLowerCase() === categoryName.toLowerCase()
-      );
+      // Utiliser la nouvelle méthode findByName qui est case-insensitive
+      const existingCategory = await this.categoryService.findByName(categoryName);
       
       if (existingCategory) {
         logDeduplicator.info('Existing category found', { 
           categoryId: existingCategory.id, 
-          categoryName 
+          categoryName: existingCategory.name 
         });
         return existingCategory;
       }
@@ -360,10 +355,7 @@ export class CsvProjectService {
         // Si la catégorie existe déjà (race condition), essayer de la récupérer à nouveau
         if (createError.message?.includes('already exists')) {
           logDeduplicator.warn('Category was created by another process, fetching again', { categoryName });
-          const retryCategories = await this.categoryService.getAll({ limit: 1000 });
-          const retryExisting = retryCategories.data.find(
-            (cat: any) => cat.name.toLowerCase() === categoryName.toLowerCase()
-          );
+          const retryExisting = await this.categoryService.findByName(categoryName);
           if (retryExisting) {
             return retryExisting;
           }

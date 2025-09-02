@@ -48,6 +48,11 @@ export interface CategoryRepository extends BaseRepository {
   existsByName(name: string): Promise<boolean>;
 
   /**
+   * Trouve une catégorie par son nom (case-insensitive)
+   */
+  findByName(name: string): Promise<CategoryResponse | null>;
+
+  /**
    * Récupère tous les projets d'une catégorie
    */
   getProjectsByCategory(categoryId: number): Promise<any[]>;

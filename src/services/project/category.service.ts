@@ -131,4 +131,18 @@ export class CategoryService extends BaseService<CategoryResponse, CategoryCreat
       throw error;
     }
   }
+
+  /**
+   * Trouve une catégorie par son nom (case-insensitive)
+   * @param name Nom de la catégorie
+   * @returns Catégorie trouvée ou null
+   */
+  async findByName(name: string): Promise<CategoryResponse | null> {
+    try {
+      return await this.repository.findByName(name);
+    } catch (error) {
+      logDeduplicator.error('Error finding category by name:', { error, name });
+      throw error;
+    }
+  }
 } 

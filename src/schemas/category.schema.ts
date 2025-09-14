@@ -1,8 +1,8 @@
 import { z } from 'zod';
 
 export const categoryQuerySchema = z.object({
-  page: z.number().int().positive().optional().default(1),
-  limit: z.number().int().positive().optional().default(10),
+  page: z.string().transform(val => parseInt(val)).pipe(z.number().int().positive()).optional().default(1),
+  limit: z.string().transform(val => parseInt(val)).pipe(z.number().int().positive().max(1000)).optional().default(10),
   sort: z.enum(['createdAt', 'name', 'updatedAt']).optional(),
   order: z.enum(['asc', 'desc']).optional(),
   search: z.string().max(100, 'Terme de recherche trop long').optional()

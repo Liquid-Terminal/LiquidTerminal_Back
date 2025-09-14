@@ -219,7 +219,7 @@ export class ProjectService extends BaseService<ProjectResponse, ProjectCreateIn
         delete cleanData.logo;
       }
       
-      // Convertir categoryIds en array si c'est une string
+      // Convertir les strings en numbers dans categoryIds (au cas où)
       if (cleanData.categoryIds && Array.isArray(cleanData.categoryIds)) {
         cleanData.categoryIds = cleanData.categoryIds.map(id => 
           typeof id === 'string' ? parseInt(id, 10) : id

@@ -74,7 +74,7 @@ export class FileCleanupService {
       const fs = require('fs');
       const path = require('path');
       
-      const uploadDir = 'uploads/project-logos/';
+      const uploadDir = 'uploads/logos/';
       if (!fs.existsSync(uploadDir)) {
         return { totalFiles: 0, totalSize: 0 };
       }

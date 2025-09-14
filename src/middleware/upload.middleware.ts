@@ -8,7 +8,7 @@ import crypto from 'crypto';
 // Configuration du stockage
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, 'uploads/project-logos/');
+    cb(null, 'uploads/logos/');
   },
   filename: (req, file, cb) => {
     // Générer un nom unique avec timestamp + hash pour éviter les collisions
@@ -268,7 +268,7 @@ export const validateUploadedFile = async (req: Request, res: Response, next: Ne
 // Fonction utilitaire pour générer l'URL du fichier
 export const getFileUrl = (filename: string): string => {
   const baseUrl = process.env.BASE_URL || 'http://localhost:3002';
-  return `${baseUrl}/uploads/project-logos/${filename}`;
+  return `${baseUrl}/uploads/logos/${filename}`;
 };
 
 // Fonction helper pour traiter les fichiers uploadés
@@ -294,7 +294,7 @@ export const processUploadedFiles = (req: Request): { logo?: string; banner?: st
 // Fonction pour nettoyer les anciens fichiers
 export const cleanupOldFiles = async (maxAge: number = 24 * 60 * 60 * 1000) => {
   try {
-    const uploadDir = 'uploads/project-logos/';
+    const uploadDir = 'uploads/logos/';
     if (!fs.existsSync(uploadDir)) return;
 
     const files = fs.readdirSync(uploadDir);
@@ -327,7 +327,7 @@ export const deleteUploadedFile = (logoUrl: string): boolean => {
       return false;
     }
     
-    const filePath = path.join('uploads/project-logos/', filename);
+    const filePath = path.join('uploads/logos/', filename);
     
     // Vérifier si le fichier existe
     if (fs.existsSync(filePath)) {

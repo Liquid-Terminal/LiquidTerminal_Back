@@ -87,7 +87,7 @@ app.use('/uploads', express.static('uploads'));
 
 // S'assurer que les dossiers d'upload existent
 import fs from 'fs';
-const uploadDirs = ['uploads', 'uploads/project-logos', 'uploads/csv-projects'];
+const uploadDirs = ['uploads', 'uploads/logos', 'uploads/csv-projects'];
 uploadDirs.forEach(dir => {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });

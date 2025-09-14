@@ -1,4 +1,4 @@
-import express, { Request, Response, RequestHandler } from "express";
+import express, { Request, Response, RequestHandler, NextFunction } from "express";
 import { ProjectService } from "../../services/project/project.service";
 import { validateRequest } from '../../middleware/validation/validation.middleware';
 import { projectCategoriesUpdateSchema, projectCreateWithUploadSchema } from '../../schemas/project.schema';
@@ -23,6 +23,22 @@ router.post('/with-upload',
   uploadProjectFiles,
   handleUploadError,
   validateUploadedFile,
+  // Parser les categoryIds avant la validation
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      // Parser categoryIds si c'est une string JSON
+      if (typeof req.body.categoryIds === 'string') {
+        req.body.categoryIds = JSON.parse(req.body.categoryIds);
+      }
+      next();
+    } catch (error) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid categoryIds format',
+        code: 'INVALID_CATEGORY_IDS'
+      });
+    }
+  },
   validateRequest(projectCreateWithUploadSchema),
   (async (req: Request, res: Response) => {
     try {

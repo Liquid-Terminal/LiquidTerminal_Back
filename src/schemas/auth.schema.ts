@@ -35,8 +35,8 @@ export const authResponseSchema = z.object({
 
 // Schéma pour les requêtes de liste d'utilisateurs admin
 export const adminUsersQuerySchema = z.object({
-  page: z.number().int().positive().optional(),
-  limit: z.number().int().positive().optional(),
+  page: z.string().transform(val => parseInt(val)).pipe(z.number().int().positive()).optional().default(1),
+  limit: z.string().transform(val => parseInt(val)).pipe(z.number().int().positive().max(1000)).optional().default(10),
   search: z.string().optional(),
   verified: z.enum(['true', 'false']).optional(),
 }).strict();

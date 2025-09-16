@@ -17,12 +17,12 @@ export const walletUpdateSchema = z.object({
 
 // Schéma pour les requêtes de Wallets
 export const walletQuerySchema = z.object({
-  page: z.number().int().positive().optional(),
-  limit: z.number().int().positive().optional(),
+  page: z.string().transform(val => parseInt(val)).pipe(z.number().int().positive()).optional().default(1),
+  limit: z.string().transform(val => parseInt(val)).pipe(z.number().int().positive().max(1000)).optional().default(10),
   sort: z.string().optional(),
   order: z.enum(['asc', 'desc']).optional(),
   search: z.string().optional(),
-  userId: z.number().int().positive().optional()
+  userId: z.string().transform(val => parseInt(val)).pipe(z.number().int().positive()).optional()
 });
 
 // Types

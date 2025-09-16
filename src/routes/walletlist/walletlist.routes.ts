@@ -80,6 +80,31 @@ router.get('/public', validateWalletListQuery, (async (req: Request, res: Respon
   }
 }) as RequestHandler);
 
+// Récupérer les wallet lists de l'utilisateur connecté
+router.get('/userlists', validatePrivyToken, validateWalletListQuery, (async (req: Request, res: Response) => {
+  try {
+    const privyUserId = req.user?.sub;
+    if (!privyUserId) {
+      return res.status(401).json({ success: false, error: 'User not authenticated', code: 'UNAUTHENTICATED' });
+    }
+
+    // Récupère l'utilisateur depuis la DB
+    const user = await prisma.user.findUnique({ where: { privyUserId } });
+    if (!user) {
+      return res.status(401).json({ success: false, error: 'User not found', code: 'USER_NOT_FOUND' });
+    }
+
+    const walletLists = await walletListService.getByUser(user.id);
+    res.json({ success: true, data: walletLists });
+  } catch (error) {
+    logDeduplicator.error('Error fetching user wallet lists:', { error });
+    if (error instanceof WalletListError) {
+      return res.status(error.statusCode).json({ success: false, error: error.message, code: error.code });
+    }
+    res.status(500).json({ success: false, error: 'Internal server error', code: 'INTERNAL_SERVER_ERROR' });
+  }
+}) as RequestHandler);
+
 // Récupérer une wallet list par ID
 router.get('/:id', (async (req: Request, res: Response) => {
   try {

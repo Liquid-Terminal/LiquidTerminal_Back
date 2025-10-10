@@ -5,6 +5,7 @@ import { EducationalResourceRepository } from './interfaces/educational-resource
 import { ReadListRepository } from './interfaces/readlist.repository.interface';
 import { ReadListItemRepository } from './interfaces/readlist-item.repository.interface';
 import { LinkPreviewRepository } from './interfaces/linkPreview.repository.interface';
+import { PublicGoodRepository } from './interfaces/publicgood.repository.interface';
 import { PrismaProjectRepository } from './prisma/prisma.project.repository';
 import { PrismaCategoryRepository } from './prisma/prisma.category.repository';
 import { PrismaEducationalCategoryRepository } from './prisma/prisma.educational-category.repository';
@@ -12,6 +13,7 @@ import { PrismaEducationalResourceRepository } from './prisma/prisma.educational
 import { PrismaReadListRepository } from './prisma/prisma.readlist.repository';
 import { PrismaReadListItemRepository } from './prisma/prisma.readlist-item.repository';
 import { PrismaLinkPreviewRepository } from './prisma/prisma.linkPreview.repository';
+import { PrismaPublicGoodRepository } from './prisma/prisma.publicgood.repository';
 
 // Export des interfaces
 export type { 
@@ -21,7 +23,8 @@ export type {
   EducationalResourceRepository,
   ReadListRepository,
   ReadListItemRepository,
-  LinkPreviewRepository
+  LinkPreviewRepository,
+  PublicGoodRepository
 };
 
 // Export des implémentations
@@ -32,7 +35,8 @@ export {
   PrismaEducationalResourceRepository,
   PrismaReadListRepository,
   PrismaReadListItemRepository,
-  PrismaLinkPreviewRepository
+  PrismaLinkPreviewRepository,
+  PrismaPublicGoodRepository
 };
 
 // Instances par défaut
@@ -42,4 +46,5 @@ export const educationalCategoryRepository: EducationalCategoryRepository = new 
 export const educationalResourceRepository: EducationalResourceRepository = new PrismaEducationalResourceRepository();
 export const readListRepository: ReadListRepository = new PrismaReadListRepository();
 export const readListItemRepository: ReadListItemRepository = new PrismaReadListItemRepository();
-export const linkPreviewRepository: LinkPreviewRepository = new PrismaLinkPreviewRepository(); 
+export const linkPreviewRepository: LinkPreviewRepository = new PrismaLinkPreviewRepository();
+export const publicGoodRepository: PublicGoodRepository = new PrismaPublicGoodRepository(); 

@@ -11,7 +11,8 @@ export const CACHE_PREFIX = {
   LINK_PREVIEW: 'link_preview',
   MARKET: 'market',
   STATS: 'stats',
-  WALLET: 'wallet'
+  WALLET: 'wallet',
+  PUBLIC_GOOD: 'publicgood'
 } as const;
 
 // Durées de vie par défaut (en secondes)

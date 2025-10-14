@@ -280,6 +280,10 @@ export class PublicGoodService extends BaseService<
       // Par défaut, on filtre sur APPROVED si pas de status spécifié
       const params = { ...query };
       
+      // Parser page et limit en numbers
+      if (params.page) params.page = parseInt(params.page as string);
+      if (params.limit) params.limit = parseInt(params.limit as string);
+      
       if (!params.status || params.status === 'approved') {
         params.status = 'APPROVED' as ProjectStatus;
       } else if (params.status === 'pending') {

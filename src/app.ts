@@ -30,6 +30,7 @@ import educationalRoutes from './routes/educational';
 import readListRoutes from './routes/readlist';
 import walletListRoutes from './routes/walletlist';
 import linkPreviewRoutes from './routes/linkPreview/linkPreview.routes';
+import publicGoodRoutes from './routes/publicgood';
 
 import validatorRoutes from './routes/staking/validator.routes';
 import trendingValidatorRoutes from './routes/staking/trendingValidator.routes';
@@ -67,7 +68,7 @@ app.use(cors({
       callback(new Error('Not allowed by CORS'));
     }
   },
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true
 }));
@@ -87,7 +88,15 @@ app.use('/uploads', express.static('uploads'));
 
 // S'assurer que les dossiers d'upload existent
 import fs from 'fs';
-const uploadDirs = ['uploads', 'uploads/logos', 'uploads/csv-projects'];
+const uploadDirs = [
+  'uploads', 
+  'uploads/logos', 
+  'uploads/csv-projects',
+  'uploads/publicgoods',
+  'uploads/publicgoods/logos',
+  'uploads/publicgoods/banners',
+  'uploads/publicgoods/screenshots'
+];
 uploadDirs.forEach(dir => {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
@@ -111,6 +120,7 @@ app.use('/educational', educationalRoutes);
 app.use('/readlists', readListRoutes);
 app.use('/walletlists', walletListRoutes);
 app.use('/link-preview', linkPreviewRoutes);
+app.use('/publicgoods', publicGoodRoutes);
 app.use('/staking/validators', validatorRoutes);
 app.use('/staking/validators/trending', trendingValidatorRoutes);
 app.use('/staking/validations', validationRoutes);

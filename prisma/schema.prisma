@@ -13,6 +13,53 @@ enum UserRole {
   ADMIN
 }
 
+// ==================== PUBLIC GOODS ENUMS ====================
+
+enum ProjectStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum DevelopmentStatus {
+  IDEA
+  DEVELOPMENT
+  BETA
+  PRODUCTION
+}
+
+enum TeamSize {
+  SOLO
+  SMALL
+  LARGE
+}
+
+enum ExperienceLevel {
+  BEGINNER
+  INTERMEDIATE
+  EXPERT
+}
+
+enum SupportType {
+  PROMOTION
+  SERVICES
+  FUNDING
+}
+
+enum BudgetRange {
+  RANGE_0_5K
+  RANGE_5_15K
+  RANGE_15_30K
+  RANGE_30_50K
+  RANGE_50K_PLUS
+}
+
+enum Timeline {
+  THREE_MONTHS
+  SIX_MONTHS
+  TWELVE_MONTHS
+}
+
 model User {
   id                              Int                           @id @default(autoincrement())
   privyUserId                     String                        @unique
@@ -36,6 +83,8 @@ model User {
   assignedEducationalResources    EducationalResourceCategory[] @relation("EducationalResourceAssigner")
   readLists                       ReadList[]
   walletLists                     WalletList[]
+  submittedPublicGoods            PublicGood[]                  @relation("SubmittedGoods")
+  reviewedPublicGoods             PublicGood[]                  @relation("ReviewedGoods")
 }
 
 model Wallet {
@@ -200,4 +249,63 @@ model LinkPreview {
   resources   EducationalResource[]
   
   @@map("link_previews")
+}
+
+// ==================== PUBLIC GOODS ====================
+
+model PublicGood {
+  id        Int      @id @default(autoincrement())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Section 1: Le projet
+  name            String
+  description     String   @db.Text
+  githubUrl       String
+  demoUrl         String?
+  websiteUrl      String?
+  category        String
+  discordContact  String?
+  telegramContact String?
+
+  // Visuels
+  logo        String?
+  banner      String?
+  screenshots String[] // Array de URLs
+
+  // Section 2: Impact HyperLiquid
+  problemSolved      String   @db.Text
+  targetUsers        String[] // ["developers", "traders", etc]
+  hlIntegration      String   @db.Text
+  developmentStatus  DevelopmentStatus
+
+  // Section 3: Équipe & Technique
+  leadDeveloperName    String
+  leadDeveloperContact String
+  teamSize             TeamSize
+  experienceLevel      ExperienceLevel
+  technologies         String[]
+
+  // Section 4: Soutien demandé (optionnel)
+  supportTypes SupportType[]
+  budgetRange  BudgetRange?
+  timeline     Timeline?
+
+  // Métadonnées
+  status      ProjectStatus @default(PENDING)
+  submittedAt DateTime      @default(now())
+  reviewedAt  DateTime?
+  reviewedBy  User?         @relation("ReviewedGoods", fields: [reviewerId], references: [id])
+  reviewerId  Int?
+  reviewNotes String?       @db.Text
+
+  // User qui a soumis
+  submittedBy User @relation("SubmittedGoods", fields: [submitterId], references: [id], onDelete: Cascade)
+  submitterId Int
+
+  @@index([status])
+  @@index([category])
+  @@index([submitterId])
+  @@index([developmentStatus])
+  @@map("public_goods")
 }

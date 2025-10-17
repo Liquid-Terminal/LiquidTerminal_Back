@@ -131,9 +131,13 @@ export abstract class BasePrismaRepository {
   } {
     const { page = 1, limit = 10, sort = 'createdAt', order = 'desc' } = params;
     
+    // Parse en int pour éviter que des strings passent à Prisma (query params HTTP)
+    const pageInt = typeof page === 'string' ? parseInt(page, 10) : page;
+    const limitInt = typeof limit === 'string' ? parseInt(limit, 10) : limit;
+    
     return {
-      skip: (page - 1) * limit,
-      take: limit,
+      skip: (pageInt - 1) * limitInt,
+      take: limitInt,
       orderBy: { [sort]: order }
     };
   }

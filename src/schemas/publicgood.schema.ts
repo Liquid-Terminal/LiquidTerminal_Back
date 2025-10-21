@@ -116,8 +116,7 @@ export const publicGoodCreateSchema = z.object({
       return val;
     }).optional(),
     
-    budgetRange: z.enum(['RANGE_0_5K', 'RANGE_5_15K', 'RANGE_15_30K', 'RANGE_30_50K', 'RANGE_50K_PLUS']).optional(),
-    timeline: z.enum(['THREE_MONTHS', 'SIX_MONTHS', 'TWELVE_MONTHS']).optional()
+    budgetRange: z.enum(['RANGE_0_5K', 'RANGE_5_15K', 'RANGE_15_30K', 'RANGE_30_50K', 'RANGE_50K_PLUS']).optional()
   }),
   params: z.object({}),
   query: z.object({})
@@ -203,8 +202,7 @@ export const publicGoodUpdateSchema = z.object({
       return val;
     }).optional(),
     
-    budgetRange: z.enum(['RANGE_0_5K', 'RANGE_5_15K', 'RANGE_15_30K', 'RANGE_30_50K', 'RANGE_50K_PLUS']).optional(),
-    timeline: z.enum(['THREE_MONTHS', 'SIX_MONTHS', 'TWELVE_MONTHS']).optional()
+    budgetRange: z.enum(['RANGE_0_5K', 'RANGE_5_15K', 'RANGE_15_30K', 'RANGE_30_50K', 'RANGE_50K_PLUS']).optional()
   }),
   params: z.object({
     id: z.string().transform(val => parseInt(val))

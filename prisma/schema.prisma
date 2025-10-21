@@ -54,12 +54,6 @@ enum BudgetRange {
   RANGE_50K_PLUS
 }
 
-enum Timeline {
-  THREE_MONTHS
-  SIX_MONTHS
-  TWELVE_MONTHS
-}
-
 model User {
   id                              Int                           @id @default(autoincrement())
   privyUserId                     String                        @unique
@@ -289,7 +283,6 @@ model PublicGood {
   // Section 4: Soutien demandé (optionnel)
   supportTypes SupportType[]
   budgetRange  BudgetRange?
-  timeline     Timeline?
 
   // Métadonnées
   status      ProjectStatus @default(PENDING)

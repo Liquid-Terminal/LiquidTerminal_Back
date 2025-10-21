@@ -5,8 +5,7 @@ import {
   TeamSize, 
   ExperienceLevel, 
   SupportType, 
-  BudgetRange, 
-  Timeline 
+  BudgetRange
 } from '@prisma/client';
 
 // Type de base pour PublicGood
@@ -46,7 +45,6 @@ export interface PublicGood {
   // Section 4: Soutien demandé (optionnel)
   supportTypes: SupportType[];
   budgetRange: BudgetRange | null;
-  timeline: Timeline | null;
 
   // Métadonnées
   status: ProjectStatus;
@@ -104,7 +102,6 @@ export interface PublicGoodCreateInput {
   // Section 4: Soutien demandé (optionnel)
   supportTypes?: SupportType[];
   budgetRange?: BudgetRange;
-  timeline?: Timeline;
 
   // User qui soumet (injecté par le controller)
   submitterId?: number;
@@ -143,7 +140,6 @@ export interface PublicGoodUpdateInput {
   // Section 4: Soutien demandé
   supportTypes?: SupportType[];
   budgetRange?: BudgetRange;
-  timeline?: Timeline;
 }
 
 // Type pour review

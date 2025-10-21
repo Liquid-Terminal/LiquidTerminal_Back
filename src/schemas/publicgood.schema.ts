@@ -103,7 +103,21 @@ export const publicGoodCreateSchema = z.object({
 
     // Section 4: Soutien demandé (Optionnel)
     supportTypes: z.union([
-      z.array(z.enum(['PROMOTION', 'SERVICES', 'FUNDING'])),
+      z.array(z.enum(['PROMOTION', 'SERVICES', 'FUNDING', 'CONTRIBUTOR'])),
+      z.string() // JSON stringifié
+    ]).transform(val => {
+      if (typeof val === 'string') {
+        try {
+          return JSON.parse(val);
+        } catch {
+          return [];
+        }
+      }
+      return val;
+    }).optional(),
+    
+    contributorTypes: z.union([
+      z.array(z.enum(['DEVELOPERS', 'DESIGNERS', 'MARKETING_COMMUNITY', 'TECHNICAL_WRITERS', 'QA_TESTERS'])),
       z.string() // JSON stringifié
     ]).transform(val => {
       if (typeof val === 'string') {
@@ -189,7 +203,21 @@ export const publicGoodUpdateSchema = z.object({
     }).optional(),
     
     supportTypes: z.union([
-      z.array(z.enum(['PROMOTION', 'SERVICES', 'FUNDING'])),
+      z.array(z.enum(['PROMOTION', 'SERVICES', 'FUNDING', 'CONTRIBUTOR'])),
+      z.string()
+    ]).transform(val => {
+      if (typeof val === 'string') {
+        try {
+          return JSON.parse(val);
+        } catch {
+          return [];
+        }
+      }
+      return val;
+    }).optional(),
+    
+    contributorTypes: z.union([
+      z.array(z.enum(['DEVELOPERS', 'DESIGNERS', 'MARKETING_COMMUNITY', 'TECHNICAL_WRITERS', 'QA_TESTERS'])),
       z.string()
     ]).transform(val => {
       if (typeof val === 'string') {

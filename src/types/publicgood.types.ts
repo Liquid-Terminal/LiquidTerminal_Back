@@ -5,7 +5,8 @@ import {
   TeamSize, 
   ExperienceLevel, 
   SupportType, 
-  BudgetRange
+  BudgetRange,
+  ContributorType
 } from '@prisma/client';
 
 // Type de base pour PublicGood
@@ -44,6 +45,7 @@ export interface PublicGood {
 
   // Section 4: Soutien demandé (optionnel)
   supportTypes: SupportType[];
+  contributorTypes: ContributorType[];
   budgetRange: BudgetRange | null;
 
   // Métadonnées
@@ -101,6 +103,7 @@ export interface PublicGoodCreateInput {
 
   // Section 4: Soutien demandé (optionnel)
   supportTypes?: SupportType[];
+  contributorTypes?: ContributorType[];
   budgetRange?: BudgetRange;
 
   // User qui soumet (injecté par le controller)
@@ -139,6 +142,7 @@ export interface PublicGoodUpdateInput {
 
   // Section 4: Soutien demandé
   supportTypes?: SupportType[];
+  contributorTypes?: ContributorType[];
   budgetRange?: BudgetRange;
 }
 

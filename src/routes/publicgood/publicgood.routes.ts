@@ -176,6 +176,11 @@ router.post('/',
         req.body.supportTypes = JSON.parse(req.body.supportTypes);
       }
       
+      // Parser contributorTypes si c'est une string JSON
+      if (req.body.contributorTypes && typeof req.body.contributorTypes === 'string') {
+        req.body.contributorTypes = JSON.parse(req.body.contributorTypes);
+      }
+      
       // Parser screenshots si c'est une string JSON
       if (req.body.screenshots && typeof req.body.screenshots === 'string') {
         req.body.screenshots = JSON.parse(req.body.screenshots);
@@ -274,6 +279,11 @@ router.put('/:id',
       // Parser supportTypes si c'est une string JSON
       if (req.body.supportTypes && typeof req.body.supportTypes === 'string') {
         req.body.supportTypes = JSON.parse(req.body.supportTypes);
+      }
+      
+      // Parser contributorTypes si c'est une string JSON
+      if (req.body.contributorTypes && typeof req.body.contributorTypes === 'string') {
+        req.body.contributorTypes = JSON.parse(req.body.contributorTypes);
       }
       
       // Parser screenshots si c'est une string JSON

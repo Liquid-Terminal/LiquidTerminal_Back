@@ -44,6 +44,15 @@ enum SupportType {
   PROMOTION
   SERVICES
   FUNDING
+  CONTRIBUTOR
+}
+
+enum ContributorType {
+  DEVELOPERS
+  DESIGNERS
+  MARKETING_COMMUNITY
+  TECHNICAL_WRITERS
+  QA_TESTERS
 }
 
 enum BudgetRange {
@@ -281,8 +290,9 @@ model PublicGood {
   technologies         String[]
 
   // Section 4: Soutien demandé (optionnel)
-  supportTypes SupportType[]
-  budgetRange  BudgetRange?
+  supportTypes     SupportType[]
+  contributorTypes ContributorType[] // Utilisé si CONTRIBUTOR dans supportTypes
+  budgetRange      BudgetRange?
 
   // Métadonnées
   status      ProjectStatus @default(PENDING)

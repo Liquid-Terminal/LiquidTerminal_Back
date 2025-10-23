@@ -284,11 +284,36 @@ export class WalletListService extends BaseService<
       // 5. Copier tous les items de la wallet list originale
       if (originalWalletList.items && originalWalletList.items.length > 0) {
         const walletListItemService = new WalletListItemService();
+        const { userWalletRepository } = await import('../../repositories/userWallet.repository');
         
         for (const item of originalWalletList.items) {
+          const originalWallet = item.userWallet.Wallet;
+          
+          // A. Vérifier si le copieur a déjà ce wallet dans ses UserWallet
+          let copierUserWallet = await userWalletRepository.findByUserAndWallet(
+            userId, 
+            originalWallet.id
+          );
+          
+          // B. Si non, créer un UserWallet pour le copieur
+          if (!copierUserWallet) {
+            copierUserWallet = await userWalletRepository.create({
+              userId: userId,
+              walletId: originalWallet.id,
+              name: item.userWallet.name || undefined  // Garder le nom original
+            });
+            
+            logDeduplicator.info('Created UserWallet for copier', {
+              userId,
+              walletId: originalWallet.id,
+              userWalletId: copierUserWallet.id
+            });
+          }
+          
+          // C. Créer le WalletListItem avec le userWalletId DU COPIEUR
           await walletListItemService.create({
             walletListId: newWalletList.id,
-            userWalletId: item.userWallet.id,
+            userWalletId: copierUserWallet.id,  // ← ID du copieur maintenant
             notes: item.notes || undefined,
             order: item.order || undefined
           });

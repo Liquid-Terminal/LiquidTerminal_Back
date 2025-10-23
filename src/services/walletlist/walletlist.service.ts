@@ -9,12 +9,10 @@ import {
   WalletListAlreadyExistsError,
   WalletListValidationError,
   WalletListPermissionError,
-  WalletListLimitExceededError,
   WalletListError
 } from '../../errors/walletlist.errors';
 import { logDeduplicator } from '../../utils/logDeduplicator';
 import { CACHE_PREFIX, CACHE_KEYS } from '../../constants/cache.constants';
-import { WALLETLIST_CONSTANTS } from '../../constants/wallet.constants';
 import { 
   walletListCreateSchema, 
   walletListUpdateSchema, 
@@ -209,15 +207,9 @@ export class WalletListService extends BaseService<
   }
 
   /**
-   * Override de la méthode create pour vérifier la limite et invalider les caches spécifiques
+   * Override de la méthode create pour invalider les caches spécifiques
    */
   async create(data: WalletListCreateInput): Promise<WalletListResponse> {
-    // Vérifier la limite de wallet lists par utilisateur
-    const userWalletListCount = await this.repository.countByUser(data.userId);
-    if (userWalletListCount >= WALLETLIST_CONSTANTS.MAX_WALLETLISTS_PER_USER) {
-      throw new WalletListLimitExceededError();
-    }
-
     const result = await super.create(data);
     await this.invalidateWalletListCache(result.id, data.userId);
     return result;

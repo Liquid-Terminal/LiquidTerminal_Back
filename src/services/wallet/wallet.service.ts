@@ -12,8 +12,7 @@ import {
   WalletNotFoundError, 
   WalletAlreadyExistsError,
   WalletValidationError,
-  UserNotFoundError,
-  WalletLimitExceededError
+  UserNotFoundError
 } from '../../errors/wallet.errors';
 import { 
   walletCreateSchema, 
@@ -21,7 +20,6 @@ import {
   walletQuerySchema 
 } from '../../schemas/wallet.schema';
 import { CACHE_PREFIX } from '../../constants/cache.constants';
-import { WALLET_CONSTANTS } from '../../constants/wallet.constants';
 import { transactionService } from '../../core/transaction.service';
 import { logDeduplicator } from '../../utils/logDeduplicator';
 
@@ -84,12 +82,6 @@ export class WalletService extends BaseService<WalletResponse, WalletCreateInput
           throw new UserNotFoundError();
         }
 
-        // Vérifier la limite de wallets par utilisateur
-        const userWalletCount = await userWalletRepository.countByUser(user.id);
-        if (userWalletCount >= WALLET_CONSTANTS.MAX_WALLETS_PER_USER) {
-          throw new WalletLimitExceededError();
-        }
-
         // Vérifier si le wallet existe déjà
         let wallet = await this.repository.findByAddress(address);
         
@@ -127,8 +119,7 @@ export class WalletService extends BaseService<WalletResponse, WalletCreateInput
     } catch (error) {
       if (error instanceof WalletAlreadyExistsError || 
           error instanceof UserNotFoundError ||
-          error instanceof WalletValidationError ||
-          error instanceof WalletLimitExceededError) {
+          error instanceof WalletValidationError) {
         throw error;
       }
       logDeduplicator.error('Error adding wallet:', { 

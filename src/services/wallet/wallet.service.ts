@@ -296,4 +296,203 @@ export class WalletService extends BaseService<WalletResponse, WalletCreateInput
       throw error;
     }
   }
+
+  /**
+   * Ajoute plusieurs wallets en une seule transaction (bulk import)
+   * @param privyUserId ID Privy de l'utilisateur
+   * @param wallets Array de wallets à ajouter
+   * @param walletListId ID optionnel de la liste à laquelle ajouter les wallets
+   * @returns Statistiques du bulk import
+   */
+  public async bulkAddWallets(
+    privyUserId: string, 
+    wallets: Array<{ address: string; name?: string }>,
+    walletListId?: number
+  ) {
+    try {
+      logDeduplicator.info('Starting bulk wallet import', { 
+        privyUserId, 
+        walletsCount: wallets.length,
+        walletListId 
+      });
+
+      // Pré-validation des adresses avant la transaction
+      const errors: Array<{ address: string; reason: string }> = [];
+      const validWallets: Array<{ address: string; name?: string }> = [];
+
+      for (const wallet of wallets) {
+        if (!this.validateEthereumAddress(wallet.address)) {
+          errors.push({
+            address: wallet.address,
+            reason: 'Invalid address format'
+          });
+        } else {
+          validWallets.push(wallet);
+        }
+      }
+
+      if (validWallets.length === 0) {
+        logDeduplicator.warn('No valid wallets to import', { 
+          privyUserId, 
+          totalErrors: errors.length 
+        });
+        return {
+          total: wallets.length,
+          added: 0,
+          skipped: wallets.length,
+          errors
+        };
+      }
+
+      // Utiliser le service de transaction pour l'import bulk
+      const result = await transactionService.execute(async (tx) => {
+        // Configurer les repositories pour utiliser le client transactionnel
+        this.repository.setPrismaClient(tx);
+        userWalletRepository.setPrismaClient(tx);
+
+        // Vérifier que l'utilisateur existe
+        const user = await tx.user.findUnique({
+          where: { privyUserId }
+        });
+
+        if (!user) {
+          throw new UserNotFoundError();
+        }
+
+        // Vérifier si walletListId est fourni et que l'utilisateur y a accès
+        if (walletListId) {
+          const walletList = await tx.walletList.findUnique({
+            where: { id: walletListId }
+          });
+
+          if (!walletList) {
+            const error = new WalletValidationError('Wallet list not found');
+            (error as any).statusCode = 404;
+            throw error;
+          }
+
+          if (walletList.userId !== user.id) {
+            const error = new WalletValidationError('Access denied to this wallet list');
+            (error as any).statusCode = 403;
+            throw error;
+          }
+        }
+
+        // Étape 1: Bulk insert des wallets (skip duplicates)
+        const addresses = validWallets.map(w => w.address);
+        await this.repository.bulkCreate(addresses);
+
+        // Étape 2: Récupérer tous les wallet IDs
+        const walletRecords = await this.repository.findManyByAddresses(addresses);
+        const addressToWalletId = new Map(
+          walletRecords.map(w => [w.address, w.id])
+        );
+
+        // Étape 3: Vérifier quels wallets l'utilisateur possède déjà
+        const existingUserWallets = await userWalletRepository.findManyByUserAndWallets(
+          user.id,
+          walletRecords.map(w => w.id)
+        );
+        const existingWalletIds = new Set(existingUserWallets.map(uw => uw.walletId));
+
+        // Étape 4: Préparer les données UserWallet (seulement les nouveaux)
+        const userWalletData: Array<{ userId: number; walletId: number; name?: string }> = [];
+        const walletMap = new Map(validWallets.map(w => [w.address, w.name]));
+
+        for (const walletRecord of walletRecords) {
+          if (!existingWalletIds.has(walletRecord.id)) {
+            userWalletData.push({
+              userId: user.id,
+              walletId: walletRecord.id,
+              name: walletMap.get(walletRecord.address)
+            });
+          }
+        }
+
+        // Étape 5: Bulk insert UserWallet
+        if (userWalletData.length > 0) {
+          await userWalletRepository.bulkCreate(userWalletData);
+        }
+
+        // Étape 6: Si walletListId fourni, ajouter à la liste
+        let addedToList = 0;
+        if (walletListId) {
+          // Récupérer les UserWallets créés/existants
+          const allUserWallets = await userWalletRepository.findManyByUserAndWallets(
+            user.id,
+            walletRecords.map(w => w.id)
+          );
+
+          // Vérifier quels sont déjà dans la liste
+          const existingListItems = await tx.walletListItem.findMany({
+            where: {
+              walletListId,
+              userWalletId: {
+                in: allUserWallets.map(uw => uw.id)
+              }
+            }
+          });
+          const existingListItemIds = new Set(existingListItems.map(li => li.userWalletId));
+
+          // Préparer les données WalletListItem (seulement les nouveaux)
+          const walletListItemData = allUserWallets
+            .filter(uw => !existingListItemIds.has(uw.id))
+            .map((uw, index) => ({
+              walletListId,
+              userWalletId: uw.id,
+              order: index
+            }));
+
+          if (walletListItemData.length > 0) {
+            await tx.walletListItem.createMany({
+              data: walletListItemData,
+              skipDuplicates: true
+            });
+            addedToList = walletListItemData.length;
+          }
+        }
+
+        const added = userWalletData.length;
+        const skipped = validWallets.length - added + errors.length;
+
+        return {
+          total: wallets.length,
+          added,
+          skipped,
+          errors,
+          addedToList
+        };
+      });
+
+      // Réinitialiser les clients Prisma
+      this.repository.resetPrismaClient();
+      userWalletRepository.resetPrismaClient();
+
+      // Invalider le cache
+      await this.invalidateEntityListCache();
+
+      logDeduplicator.info('Bulk wallet import completed', { 
+        privyUserId,
+        total: result.total,
+        added: result.added,
+        skipped: result.skipped,
+        errorsCount: result.errors.length,
+        addedToList: result.addedToList
+      });
+
+      return result;
+    } catch (error) {
+      if (error instanceof UserNotFoundError ||
+          error instanceof WalletValidationError) {
+        throw error;
+      }
+      logDeduplicator.error('Error in bulk wallet import:', { 
+        error, 
+        privyUserId,
+        walletsCount: wallets.length,
+        walletListId
+      });
+      throw error;
+    }
+  }
 }

@@ -68,6 +68,24 @@ export class WalletRepository {
       where: { id }
     });
   }
+
+  async bulkCreate(addresses: string[]) {
+    // Use createMany with skipDuplicates to avoid conflicts
+    await this.prismaClient.wallet.createMany({
+      data: addresses.map(address => ({ address })),
+      skipDuplicates: true
+    });
+  }
+
+  async findManyByAddresses(addresses: string[]) {
+    return this.prismaClient.wallet.findMany({
+      where: {
+        address: {
+          in: addresses
+        }
+      }
+    });
+  }
 }
 
 export const walletRepository = new WalletRepository(); 

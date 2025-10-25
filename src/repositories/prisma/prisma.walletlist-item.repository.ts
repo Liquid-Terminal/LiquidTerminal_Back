@@ -241,4 +241,17 @@ export class PrismaWalletListItemRepository extends BasePrismaRepository impleme
       { id, order }
     );
   }
+
+  async bulkCreate(data: Array<{ walletListId: number; userWalletId: number; order?: number }>): Promise<void> {
+    return this.executeWithErrorHandling(
+      async () => {
+        await this.prismaClient.walletListItem.createMany({
+          data,
+          skipDuplicates: true
+        });
+      },
+      'bulk creating wallet list items',
+      { count: data.length }
+    );
+  }
 }

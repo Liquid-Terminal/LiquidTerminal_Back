@@ -25,6 +25,21 @@ export const walletQuerySchema = z.object({
   userId: z.string().transform(val => parseInt(val)).pipe(z.number().int().positive()).optional()
 });
 
+// Schéma pour le bulk import de Wallets
+export const walletBulkAddSchema = z.object({
+  wallets: z.array(
+    z.object({
+      address: z.string()
+        .min(42, 'Address must be 42 characters')
+        .max(42, 'Address must be 42 characters')
+        .regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid Ethereum address format'),
+      name: z.string().optional()
+    })
+  ).min(1, 'At least one wallet is required').max(1000, 'Maximum 1000 wallets per batch'),
+  walletListId: z.number().int().positive().optional()
+});
+
 // Types
 export type WalletCreateInput = z.infer<typeof walletCreateSchema>;
-export type WalletUpdateInput = z.infer<typeof walletUpdateSchema>; 
+export type WalletUpdateInput = z.infer<typeof walletUpdateSchema>;
+export type WalletBulkAddInput = z.infer<typeof walletBulkAddSchema>; 

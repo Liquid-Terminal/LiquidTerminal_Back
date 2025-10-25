@@ -13,7 +13,8 @@ import { WalletListError } from "../../errors/walletlist.errors";
 import {
   validateCreateWallet,
   validateUpdateWallet,
-  validateWalletQuery
+  validateWalletQuery,
+  validateBulkAddWallet
 } from "../../middleware/validation/wallet.validation";
 import { logDeduplicator } from "../../utils/logDeduplicator";
 import { prisma } from "../../core/prisma.service";
@@ -27,6 +28,61 @@ const walletListItemService = new WalletListItemService();
 router.use(marketRateLimiter);
 
 // ========== WALLET ROUTES ==========
+
+// Bulk import de wallets
+router.post("/bulk-add", validatePrivyToken, validateBulkAddWallet, (async (req: Request, res: Response) => {
+  try {
+    const privyUserId = req.user?.sub;
+    if (!privyUserId) {
+      return res.status(401).json({ 
+        success: false, 
+        error: 'User not authenticated', 
+        code: 'UNAUTHENTICATED' 
+      });
+    }
+
+    const { wallets, walletListId } = req.body;
+
+    logDeduplicator.info('Bulk wallet import request', { 
+      privyUserId,
+      walletsCount: wallets.length,
+      walletListId 
+    });
+
+    const result = await walletService.bulkAddWallets(privyUserId, wallets, walletListId);
+
+    logDeduplicator.info('Bulk wallet import completed', { 
+      privyUserId,
+      result 
+    });
+
+    res.status(200).json({
+      success: true,
+      data: result
+    });
+  } catch (error) {
+    logDeduplicator.error('Error in bulk wallet import:', { 
+      error, 
+      body: req.body 
+    });
+
+    if (error instanceof WalletAlreadyExistsError ||
+        error instanceof UserNotFoundError ||
+        error instanceof WalletError) {
+      return res.status((error as any).statusCode || 400).json({
+        success: false,
+        error: (error as any).message,
+        code: (error as any).code
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      error: "Erreur interne du serveur",
+      code: "INTERNAL_SERVER_ERROR"
+    });
+  }
+}) as RequestHandler);
 
 // Créer un wallet
 router.post("/", validatePrivyToken, validateCreateWallet, (async (req: Request, res: Response) => {

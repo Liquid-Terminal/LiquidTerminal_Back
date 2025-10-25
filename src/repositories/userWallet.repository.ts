@@ -84,6 +84,28 @@ export class UserWalletRepository {
       where: { id }
     });
   }
+
+  async bulkCreate(data: Array<{ userId: number; walletId: number; name?: string }>) {
+    // Use createMany with skipDuplicates to avoid conflicts
+    await this.prismaClient.userWallet.createMany({
+      data,
+      skipDuplicates: true
+    });
+  }
+
+  async findManyByUserAndWallets(userId: number, walletIds: number[]) {
+    return this.prismaClient.userWallet.findMany({
+      where: {
+        userId,
+        walletId: {
+          in: walletIds
+        }
+      },
+      include: {
+        Wallet: true
+      }
+    });
+  }
 }
 
 export const userWalletRepository = new UserWalletRepository(); 

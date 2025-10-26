@@ -42,11 +42,16 @@ function sanitizeString(str: string): string {
   str = sanitizeHtml(str, {
     allowedTags: [], // Ne pas autoriser de tags HTML
     allowedAttributes: {}, // Ne pas autoriser d'attributs
+    disallowedTagsMode: 'discard', // Supprimer les tags, pas encoder
     textFilter: (text: string) => {
       // Supprimer les caractères de contrôle
       return text.replace(/[\x00-\x1F\x7F-\x9F]/g, '');
     }
   });
+  
+  // Décoder uniquement &amp; pour garder les & dans les titres (safe)
+  // Ne PAS décoder < > pour éviter les risques XSS
+  str = str.replace(/&amp;/g, '&');
   
   // Supprimer les espaces multiples
   return str.replace(/\s+/g, ' ').trim();

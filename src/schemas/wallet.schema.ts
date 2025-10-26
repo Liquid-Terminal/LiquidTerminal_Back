@@ -39,7 +39,15 @@ export const walletBulkAddSchema = z.object({
   walletListId: z.number().int().positive().optional()
 });
 
+// Schéma pour le bulk delete de Wallets
+export const walletBulkDeleteSchema = z.object({
+  walletIds: z.array(
+    z.number().int().positive()
+  ).min(1, 'At least one wallet ID is required').max(1000, 'Maximum 1000 wallets per batch')
+});
+
 // Types
 export type WalletCreateInput = z.infer<typeof walletCreateSchema>;
 export type WalletUpdateInput = z.infer<typeof walletUpdateSchema>;
-export type WalletBulkAddInput = z.infer<typeof walletBulkAddSchema>; 
+export type WalletBulkAddInput = z.infer<typeof walletBulkAddSchema>;
+export type WalletBulkDeleteInput = z.infer<typeof walletBulkDeleteSchema>; 

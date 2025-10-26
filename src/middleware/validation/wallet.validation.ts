@@ -3,7 +3,8 @@ import {
   walletCreateSchema,
   walletUpdateSchema,
   walletQuerySchema,
-  walletBulkAddSchema
+  walletBulkAddSchema,
+  walletBulkDeleteSchema
 } from '../../schemas/wallet.schema';
 
 // Wallet validation middleware
@@ -49,6 +50,19 @@ export const validateWalletQuery = (req: Request, res: Response, next: NextFunct
 export const validateBulkAddWallet = (req: Request, res: Response, next: NextFunction) => {
   try {
     walletBulkAddSchema.parse(req.body);
+    next();
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      error: 'Invalid request data',
+      code: 'BAD_REQUEST'
+    });
+  }
+};
+
+export const validateBulkDeleteWallet = (req: Request, res: Response, next: NextFunction) => {
+  try {
+    walletBulkDeleteSchema.parse(req.body);
     next();
   } catch (error) {
     res.status(400).json({

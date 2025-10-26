@@ -14,7 +14,8 @@ import {
   validateCreateWallet,
   validateUpdateWallet,
   validateWalletQuery,
-  validateBulkAddWallet
+  validateBulkAddWallet,
+  validateBulkDeleteWallet
 } from "../../middleware/validation/wallet.validation";
 import { logDeduplicator } from "../../utils/logDeduplicator";
 import { prisma } from "../../core/prisma.service";
@@ -68,6 +69,59 @@ router.post("/bulk-add", validatePrivyToken, validateBulkAddWallet, (async (req:
 
     if (error instanceof WalletAlreadyExistsError ||
         error instanceof UserNotFoundError ||
+        error instanceof WalletError) {
+      return res.status((error as any).statusCode || 400).json({
+        success: false,
+        error: (error as any).message,
+        code: (error as any).code
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      error: "Erreur interne du serveur",
+      code: "INTERNAL_SERVER_ERROR"
+    });
+  }
+}) as RequestHandler);
+
+// Bulk delete de wallets
+router.post("/bulk-delete", validatePrivyToken, validateBulkDeleteWallet, (async (req: Request, res: Response) => {
+  try {
+    const privyUserId = req.user?.sub;
+    if (!privyUserId) {
+      return res.status(401).json({ 
+        success: false, 
+        error: 'User not authenticated', 
+        code: 'UNAUTHENTICATED' 
+      });
+    }
+
+    const { walletIds } = req.body;
+
+    logDeduplicator.info('Bulk wallet delete request', { 
+      privyUserId,
+      walletsCount: walletIds.length
+    });
+
+    const result = await walletService.bulkDeleteWallets(privyUserId, walletIds);
+
+    logDeduplicator.info('Bulk wallet delete completed', { 
+      privyUserId,
+      result 
+    });
+
+    res.status(200).json({
+      success: true,
+      data: result
+    });
+  } catch (error) {
+    logDeduplicator.error('Error in bulk wallet delete:', { 
+      error, 
+      body: req.body 
+    });
+
+    if (error instanceof UserNotFoundError ||
         error instanceof WalletError) {
       return res.status((error as any).statusCode || 400).json({
         success: false,

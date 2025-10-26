@@ -495,4 +495,99 @@ export class WalletService extends BaseService<WalletResponse, WalletCreateInput
       throw error;
     }
   }
+
+  /**
+   * Supprime plusieurs wallets en une seule opération (bulk delete)
+   * @param privyUserId ID Privy de l'utilisateur
+   * @param walletIds Array de wallet IDs à supprimer
+   * @returns Statistiques du bulk delete
+   */
+  public async bulkDeleteWallets(privyUserId: string, walletIds: number[]) {
+    try {
+      logDeduplicator.info('Starting bulk wallet delete', { 
+        privyUserId, 
+        walletsCount: walletIds.length 
+      });
+
+      // Utiliser le service de transaction pour le bulk delete
+      const result = await transactionService.execute(async (tx) => {
+        // Configurer les repositories pour utiliser le client transactionnel
+        this.repository.setPrismaClient(tx);
+        userWalletRepository.setPrismaClient(tx);
+
+        // Vérifier que l'utilisateur existe
+        const user = await tx.user.findUnique({
+          where: { privyUserId }
+        });
+
+        if (!user) {
+          throw new UserNotFoundError();
+        }
+
+        // Vérifier quels wallets existent pour cet utilisateur
+        const existingUserWallets = await userWalletRepository.findManyByUserAndWallets(
+          user.id,
+          walletIds
+        );
+
+        const existingWalletIds = new Set(existingUserWallets.map(uw => uw.walletId));
+        
+        // Identifier les wallets qui n'existent pas
+        const errors: Array<{ walletId: number; reason: string }> = [];
+        walletIds.forEach(walletId => {
+          if (!existingWalletIds.has(walletId)) {
+            errors.push({
+              walletId,
+              reason: 'Wallet not found or not owned by user'
+            });
+          }
+        });
+
+        // Supprimer les associations existantes
+        const validWalletIds = walletIds.filter(id => existingWalletIds.has(id));
+        let deleted = 0;
+
+        if (validWalletIds.length > 0) {
+          const deleteResult = await userWalletRepository.bulkDeleteByUserAndWallets(
+            user.id,
+            validWalletIds
+          );
+          deleted = deleteResult.count;
+        }
+
+        return {
+          total: walletIds.length,
+          deleted,
+          failed: errors.length,
+          errors
+        };
+      });
+
+      // Réinitialiser les clients Prisma
+      this.repository.resetPrismaClient();
+      userWalletRepository.resetPrismaClient();
+
+      // Invalider le cache
+      await this.invalidateEntityListCache();
+
+      logDeduplicator.info('Bulk wallet delete completed', { 
+        privyUserId,
+        total: result.total,
+        deleted: result.deleted,
+        failed: result.failed
+      });
+
+      return result;
+    } catch (error) {
+      if (error instanceof UserNotFoundError) {
+        throw error;
+      }
+      logDeduplicator.error('Error in bulk wallet delete:', { 
+        error, 
+        privyUserId,
+        walletsCount: walletIds.length
+      });
+      throw error;
+    }
+  }
 }

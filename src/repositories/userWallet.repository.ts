@@ -106,6 +106,17 @@ export class UserWalletRepository {
       }
     });
   }
+
+  async bulkDeleteByUserAndWallets(userId: number, walletIds: number[]) {
+    return this.prismaClient.userWallet.deleteMany({
+      where: {
+        userId,
+        walletId: {
+          in: walletIds
+        }
+      }
+    });
+  }
 }
 
 export const userWalletRepository = new UserWalletRepository(); 

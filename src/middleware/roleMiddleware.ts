@@ -7,10 +7,12 @@ export const requireRole = (allowedRoles: UserRole[]) => {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const privyUserId = req.user?.sub;
-      console.log('Role middleware - has privyUserId:', !!privyUserId);
       
       if (!privyUserId) {
-        console.log('Role middleware - No privyUserId found');
+        logDeduplicator.warn('Role middleware - No privyUserId found', { 
+          path: req.path,
+          method: req.method 
+        });
         res.status(401).json({ 
           success: false, 
           error: 'User not authenticated', 
@@ -20,7 +22,6 @@ export const requireRole = (allowedRoles: UserRole[]) => {
       }
 
       // Récupérer l'utilisateur avec son rôle
-      console.log('Role middleware - Looking for user');
       const user = await prisma.user.findUnique({
         where: { privyUserId },
         select: {
@@ -30,10 +31,11 @@ export const requireRole = (allowedRoles: UserRole[]) => {
         }
       });
 
-      console.log('Role middleware - User found:', { id: user?.id, role: user?.role });
-
       if (!user) {
-        console.log('Role middleware - User not found in database');
+        logDeduplicator.warn('Role middleware - User not found in database', { 
+          privyUserId,
+          path: req.path 
+        });
         res.status(401).json({ 
           success: false, 
           error: 'User not found', 
@@ -41,13 +43,10 @@ export const requireRole = (allowedRoles: UserRole[]) => {
         });
         return;
       }
-
-      console.log('Role middleware - User role:', user.role, 'Required roles:', allowedRoles);
       
       if (!allowedRoles.includes(user.role)) {
-        console.log('Role middleware - Insufficient permissions');
-        logDeduplicator.warn('Insufficient permissions', {
-          privyUserId,
+        logDeduplicator.warn('Role middleware - Insufficient permissions', {
+          userId: user.id,
           userRole: user.role,
           requiredRoles: allowedRoles,
           path: req.path,
@@ -68,12 +67,6 @@ export const requireRole = (allowedRoles: UserRole[]) => {
         role: user.role,
         privyUserId: user.privyUserId
       };
-      
-      logDeduplicator.info('DEBUG: requireModerator calling next()', { 
-        userId: user.id, 
-        role: user.role,
-        path: req.path 
-      });
       
       next();
     } catch (error) {

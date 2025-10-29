@@ -4,6 +4,7 @@ import { logDeduplicator } from './utils/logDeduplicator';
 
 import { createServer } from 'http';
 import { sanitizeInput } from './middleware/validation';
+import { requestIdMiddleware } from './middleware/requestId.middleware';
 import { SECURITY_CONSTANTS } from './constants/security.constants';
 import { securityHeaders } from './middleware/security.middleware';
 
@@ -48,10 +49,16 @@ const server = createServer(app);
 // Désactiver l'en-tête X-Powered-By pour des raisons de sécurité
 app.disable('x-powered-by');
 
+// Ajouter Request ID pour traçabilité (doit être en premier)
+app.use(requestIdMiddleware);
+
 // Configuration CORS basée sur les constantes de sécurité
 app.use(cors({
   origin: (origin, callback) => {
-    // En développement, autoriser toutes les origines
+    // ✅ CORS Strategy:
+    // - DEV: Permissive (facilitates local development, tunnels, mobile testing)
+    // - PROD: Whitelist only (SECURITY_CONSTANTS.ALLOWED_ORIGINS)
+    // This is intentional and follows industry best practices
     if (process.env.NODE_ENV === 'development') {
       callback(null, true);
     }
@@ -59,7 +66,6 @@ app.use(cors({
     else if (!origin || SECURITY_CONSTANTS.ALLOWED_ORIGINS.includes(origin as typeof SECURITY_CONSTANTS.ALLOWED_ORIGINS[number])) {
       callback(null, true);
     } else {
-      // ✅ TEMPORAIRE : Log pour debug CORS
       logDeduplicator.warn('CORS blocked origin', { 
         origin, 
         allowedOrigins: SECURITY_CONSTANTS.ALLOWED_ORIGINS,

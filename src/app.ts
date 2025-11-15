@@ -43,6 +43,7 @@ import leaderboardRoutes from './routes/leaderboard/leaderboard.routes';
 
 import healthRoutes from './routes/health.routes';
 import migrateRoutes from './routes/admin/migrate.routes';
+import updateUrlsRoutes from './routes/admin/update-urls.routes';
 
 const app = express();
 const server = createServer(app);
@@ -121,6 +122,7 @@ app.use('/market/perp/globalstats', globalPerpStatsRoutes);
 app.use('/leaderboard', leaderboardRoutes);
 app.use('/api/health', healthRoutes);
 app.use('/admin', migrateRoutes);
+app.use('/admin', updateUrlsRoutes);
 
 const PORT = process.env.PORT || 3002;
 

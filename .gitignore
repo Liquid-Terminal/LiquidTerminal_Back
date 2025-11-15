@@ -9,6 +9,9 @@ build/
 tests/
 scripts/
 
+# Uploads (now on Cloudflare R2, local files not needed)
+/uploads/
+
 # Environment variables
 .env
 .env.local

@@ -22,12 +22,15 @@
     "prisma:studio": "prisma studio",
     "cleanup-logs": "tsx scripts/cleanup-logs.ts cleanup",
     "log-stats": "tsx scripts/cleanup-logs.ts stats",
-    "test-logs": "tsx scripts/test-log-rotation.ts"
+    "test-logs": "tsx scripts/test-log-rotation.ts",
+    "migrate:csv": "tsx scripts/export-and-migrate-csv.ts"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.919.0",
+    "@aws-sdk/s3-request-presigner": "^3.919.0",
     "@prisma/client": "^6.13.0",
     "@types/multer": "^2.0.0",
     "@types/pino": "^7.0.5",

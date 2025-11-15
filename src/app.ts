@@ -42,6 +42,7 @@ import dashboardGlobalStatsRoutes from './routes/globalStats.routes';
 import leaderboardRoutes from './routes/leaderboard/leaderboard.routes';
 
 import healthRoutes from './routes/health.routes';
+import migrateRoutes from './routes/admin/migrate.routes';
 
 const app = express();
 const server = createServer(app);
@@ -89,26 +90,8 @@ app.use(express.urlencoded({ extended: true }));
 // Appliquer la sanitization globalement
 app.use(sanitizeInput);
 
-// Servir les fichiers statiques (uploads)
-app.use('/uploads', express.static('uploads'));
-
-// S'assurer que les dossiers d'upload existent
-import fs from 'fs';
-const uploadDirs = [
-  'uploads', 
-  'uploads/logos', 
-  'uploads/csv-projects',
-  'uploads/publicgoods',
-  'uploads/publicgoods/logos',
-  'uploads/publicgoods/banners',
-  'uploads/publicgoods/screenshots'
-];
-uploadDirs.forEach(dir => {
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-    logDeduplicator.info(`Created upload directory: ${dir}`);
-  }
-});
+// Note: File uploads now use Cloudflare R2 directly (no local /uploads folder)
+// Legacy /uploads endpoints removed as all images are stored in R2
 
 // Routes Pages
 app.use('/auth', authRoutes);
@@ -137,6 +120,7 @@ app.use('/market/spot/globalstats', globalSpotStatsRoutes);
 app.use('/market/perp/globalstats', globalPerpStatsRoutes);
 app.use('/leaderboard', leaderboardRoutes);
 app.use('/api/health', healthRoutes);
+app.use('/admin', migrateRoutes);
 
 const PORT = process.env.PORT || 3002;
 

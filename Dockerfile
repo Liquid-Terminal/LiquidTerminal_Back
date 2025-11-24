@@ -3,6 +3,10 @@ FROM node:20.19.0-alpine
 
 WORKDIR /app
 
+# Build arg pour DATABASE_URL (nécessaire pour prisma generate)
+ARG DATABASE_URL
+ENV DATABASE_URL=$DATABASE_URL
+
 # Copie des fichiers de dépendances
 COPY package*.json ./
 COPY prisma ./prisma/
@@ -26,5 +30,5 @@ RUN npm prune --omit=dev
 # Expose le port (Railway injecte PORT automatiquement)
 EXPOSE 3002
 
-# Commande de démarrage (sans migrate deploy car déjà fait en local/CI)
+# Commande de démarrage
 CMD ["node", "dist/app.js"]

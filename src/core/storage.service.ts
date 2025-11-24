@@ -10,7 +10,7 @@ import crypto from 'crypto';
  */
 export class StorageService {
   private static instance: StorageService;
-  private s3Client: S3Client;
+  private s3Client?: S3Client;
   private bucketName: string;
   private publicUrl: string;
 
@@ -23,24 +23,29 @@ export class StorageService {
 
     if (!accountId || !accessKeyId || !secretAccessKey) {
       logDeduplicator.warn('R2 credentials not configured, storage service disabled');
-      // En dev, on peut continuer sans R2
-      if (process.env.NODE_ENV !== 'development') {
+
+      // En production, les credentials R2 sont obligatoires
+      if (process.env.NODE_ENV === 'production') {
         throw new Error('R2 credentials are required in production');
       }
+
+      // En dev / test, on désactive simplement le client R2
+      this.s3Client = undefined;
+      return;
     }
 
     this.s3Client = new S3Client({
       region: 'auto',
       endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
       credentials: {
-        accessKeyId: accessKeyId!,
-        secretAccessKey: secretAccessKey!
+        accessKeyId,
+        secretAccessKey
       }
     });
 
-    logDeduplicator.info('Storage service initialized', { 
+    logDeduplicator.info('Storage service initialized', {
       bucket: this.bucketName,
-      hasPublicUrl: !!this.publicUrl 
+      hasPublicUrl: !!this.publicUrl
     });
   }
 
@@ -81,6 +86,9 @@ export class StorageService {
     mimetype: string
   ): Promise<{ key: string; url: string }> {
     try {
+      if (!this.s3Client) {
+        throw new Error('Storage service is not configured (R2 disabled for this environment)');
+      }
       const key = this.generateKey(folder, originalName);
 
       const command = new PutObjectCommand({
@@ -150,6 +158,9 @@ export class StorageService {
    */
   async deleteFile(key: string): Promise<void> {
     try {
+      if (!this.s3Client) {
+        throw new Error('Storage service is not configured (R2 disabled for this environment)');
+      }
       const command = new DeleteObjectCommand({
         Bucket: this.bucketName,
         Key: key
@@ -171,6 +182,9 @@ export class StorageService {
    */
   async fileExists(key: string): Promise<boolean> {
     try {
+      if (!this.s3Client) {
+        return false;
+      }
       const command = new HeadObjectCommand({
         Bucket: this.bucketName,
         Key: key
@@ -191,6 +205,9 @@ export class StorageService {
    */
   async getSignedUrl(key: string, expiresIn: number = 3600): Promise<string> {
     try {
+      if (!this.s3Client) {
+        throw new Error('Storage service is not configured (R2 disabled for this environment)');
+      }
       const command = new HeadObjectCommand({
         Bucket: this.bucketName,
         Key: key

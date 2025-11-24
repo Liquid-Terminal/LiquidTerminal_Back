@@ -33,7 +33,7 @@ class PrismaService {
         .then(() => {
           logDeduplicator.info('Successfully connected to database');
         })
-        .catch((error) => {
+        .catch((error: unknown) => {
           logDeduplicator.error('Failed to connect to database', { error });
         });
     }

@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import { logDeduplicator } from './utils/logDeduplicator';
-
+import 'dotenv/config';
 import { createServer } from 'http';
 import { sanitizeInput } from './middleware/validation';
 import { requestIdMiddleware } from './middleware/requestId.middleware';

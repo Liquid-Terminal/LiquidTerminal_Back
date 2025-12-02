@@ -23,6 +23,7 @@ import { CACHE_TTL } from '../../constants/cache.constants';
 import { PrismaWalletListItemRepository } from '../../repositories/prisma/prisma.walletlist-item.repository';
 import { PrismaWalletListRepository } from '../../repositories/prisma/prisma.walletlist.repository';
 import { prisma } from '../../core/prisma.service';
+import { xpService } from '../xp/xp.service';
 
 // Type pour les paramètres de requête
 type WalletListItemQueryParams = {
@@ -110,7 +111,7 @@ export class WalletListItemService extends BaseService<
   }
 
   /**
-   * Override de la méthode create pour ajouter la validation et gérer l'ordre
+   * Override de la méthode create pour ajouter la validation, gérer l'ordre et attribuer XP
    */
   async create(data: WalletListItemCreateInput): Promise<WalletListItemResponse> {
     try {
@@ -128,6 +129,25 @@ export class WalletListItemService extends BaseService<
       // Invalider le cache de la wallet list parent
       if (data.walletListId) {
         await this.invalidateWalletListItemCache(data.walletListId);
+        
+        // Attribuer l'XP pour ajout de wallet à la liste
+        // Récupérer le userId via la wallet list
+        const walletList = await this.walletListRepository.findById(data.walletListId);
+        if (walletList) {
+          try {
+            await xpService.grantXp({
+              userId: walletList.userId,
+              actionType: 'ADD_WALLET_TO_LIST',
+              referenceId: `walletlistitem-${result.id}`,
+              description: 'Added wallet to list',
+            });
+          } catch (xpError) {
+            logDeduplicator.warn('Failed to grant XP for adding wallet to list', {
+              walletListId: data.walletListId,
+              error: xpError instanceof Error ? xpError.message : String(xpError),
+            });
+          }
+        }
       }
 
       return result;

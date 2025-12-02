@@ -1,5 +1,6 @@
 import { prisma } from '../../core/prisma.service';
 import { logDeduplicator } from '../../utils/logDeduplicator';
+import { xpService } from '../xp/xp.service';
 
 export interface ReferralStats {
   referralCount: number;
@@ -103,6 +104,26 @@ export class ReferralService {
           data: { referralCount: { increment: 1 } }
         });
       });
+      
+      // Attribuer l'XP de referral au parrain
+      try {
+        await xpService.grantXp({
+          userId: referrer.id,
+          actionType: 'REFERRAL_SUCCESS',
+          referenceId: `referral-${userId}`,
+          description: `Referral bonus for inviting user ${userId}`,
+        });
+        logDeduplicator.info('Referral XP granted', { 
+          referrerId: referrer.id, 
+          referredUserId: userId 
+        });
+      } catch (xpError) {
+        logDeduplicator.warn('Failed to grant referral XP', {
+          referrerId: referrer.id,
+          referredUserId: userId,
+          error: xpError instanceof Error ? xpError.message : String(xpError),
+        });
+      }
       
       logDeduplicator.info('Referrer assigned successfully', { 
         userId, 

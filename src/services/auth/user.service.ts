@@ -29,6 +29,11 @@ export class UserService {
       verified: user.verified,
       referredBy: user.referredBy,
       referralCount: user.referralCount,
+      // XP System
+      totalXp: user.totalXp,
+      level: user.level,
+      lastLoginAt: user.lastLoginAt,
+      loginStreak: user.loginStreak,
       // Masquer email et privyUserId par défaut
       email: undefined,
       privyUserId: undefined

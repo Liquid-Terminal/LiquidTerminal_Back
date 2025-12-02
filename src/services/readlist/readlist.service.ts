@@ -23,6 +23,7 @@ import { BaseService } from '../../core/crudBase.service';
 import { cacheService } from '../../core/cache.service';
 import { CACHE_TTL } from '../../constants/cache.constants';
 import { ReadListItemService } from './readlist-item.service';
+import { xpService } from '../xp/xp.service';
 
 // Type pour les paramètres de requête
 type ReadListQueryParams = {
@@ -207,11 +208,28 @@ export class ReadListService extends BaseService<
   }
 
   /**
-   * Override de la méthode create pour invalider les caches spécifiques
+   * Override de la méthode create pour invalider les caches spécifiques et attribuer XP
    */
   async create(data: ReadListCreateInput): Promise<ReadListResponse> {
     const result = await super.create(data);
     await this.invalidateReadListCache(result.id, data.userId);
+    
+    // Attribuer l'XP pour création de readlist
+    try {
+      await xpService.grantXp({
+        userId: data.userId,
+        actionType: 'CREATE_READLIST',
+        referenceId: `readlist-${result.id}`,
+        description: `Created read list: ${data.name}`,
+      });
+    } catch (error) {
+      logDeduplicator.warn('Failed to grant XP for readlist creation', {
+        userId: data.userId,
+        readListId: result.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    
     return result;
   }
 
@@ -297,6 +315,23 @@ export class ReadListService extends BaseService<
       const completeReadList = await this.repository.findById(newReadList.id);
       if (!completeReadList) {
         throw new ReadListError('Failed to retrieve copied read list', 500, 'INTERNAL_ERROR');
+      }
+
+      // Attribuer l'XP pour copie de readlist publique
+      try {
+        await xpService.grantXp({
+          userId,
+          actionType: 'COPY_PUBLIC_READLIST',
+          referenceId: `copy-${readListId}-to-${newReadList.id}`,
+          description: `Copied public read list: ${originalReadList.name}`,
+        });
+      } catch (xpError) {
+        logDeduplicator.warn('Failed to grant XP for readlist copy', {
+          userId,
+          originalReadListId: readListId,
+          newReadListId: newReadList.id,
+          error: xpError instanceof Error ? xpError.message : String(xpError),
+        });
       }
 
       logDeduplicator.info('Read list copied successfully', { 

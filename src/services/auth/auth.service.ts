@@ -4,6 +4,7 @@ import { JWKSError, SigningKeyError, TokenValidationError, UserNotFoundError } f
 import { logDeduplicator } from "../../utils/logDeduplicator";
 import { userRepository } from "../../repositories/user.repository";
 import { ReferralService } from "./referral.service";
+import { xpService } from "../xp/xp.service";
 
 const JWKS_URL = process.env.JWKS_URL!;
 
@@ -151,6 +152,23 @@ export class AuthService {
 
       // Vérifier si l'utilisateur vient d'être créé (dans les 5 dernières secondes)
       const isNewUser = (Date.now() - user.createdAt.getTime()) < 5000;
+      
+      // Attribuer l'XP d'inscription si nouvel utilisateur
+      if (isNewUser) {
+        try {
+          await xpService.grantXp({
+            userId: user.id,
+            actionType: 'REGISTRATION',
+            description: 'Welcome bonus for registration',
+          });
+          logDeduplicator.info('Registration XP granted', { userId: user.id });
+        } catch (error) {
+          logDeduplicator.warn('Failed to grant registration XP', {
+            userId: user.id,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
       
       logDeduplicator.info('User found or created', {
         userId: user.id,

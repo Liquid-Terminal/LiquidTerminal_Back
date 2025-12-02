@@ -1,4 +1,4 @@
-import { XpActionType } from '@prisma/client';
+import { XpActionType, DailyTaskType, WeeklyChallengeType } from '@prisma/client';
 
 /**
  * Configuration des récompenses XP par action
@@ -35,6 +35,45 @@ export const XP_REWARDS: Record<XpActionType, number> = {
     // Admin (valeur par défaut, peut être override)
     ADMIN_BONUS: 0,
     ADMIN_PENALTY: 0,
+};
+
+/**
+ * Caps journaliers par type d'action (anti-farm)
+ * null = pas de limite
+ */
+export const DAILY_CAPS: Partial<Record<XpActionType, number>> = {
+    CREATE_READLIST: 3,           // Max 3/jour = 45 XP max
+    MARK_RESOURCE_READ: 10,       // Max 10/jour = 50 XP max
+    CREATE_WALLETLIST: 3,         // Max 3/jour = 45 XP max
+    ADD_WALLET_TO_LIST: 10,       // Max 10/jour = 100 XP max
+    COPY_PUBLIC_READLIST: 5,      // Max 5/jour = 50 XP max
+    CREATE_EDUCATIONAL_CATEGORY: 2, // Max 2/jour = 60 XP max
+    ADD_EDUCATIONAL_RESOURCE: 5,  // Max 5/jour = 125 XP max
+};
+
+/**
+ * Configuration des daily tasks
+ */
+export const DAILY_TASKS_CONFIG: Record<DailyTaskType, { xp: number; description: string }> = {
+    LOGIN: { xp: 10, description: 'Se connecter' },
+    READ_RESOURCE: { xp: 5, description: 'Lire une ressource' },
+    ADD_WALLET: { xp: 5, description: 'Ajouter un wallet à une liste' },
+    EXPLORE_LEADERBOARD: { xp: 5, description: 'Explorer le leaderboard' },
+};
+
+/**
+ * Bonus XP si toutes les daily tasks sont complétées
+ */
+export const DAILY_COMPLETION_BONUS = 15;
+
+/**
+ * Configuration des weekly challenges
+ */
+export const WEEKLY_CHALLENGES_CONFIG: Record<WeeklyChallengeType, { target: number; xp: number; description: string }> = {
+    READ_20_RESOURCES: { target: 20, xp: 100, description: 'Lire 20 ressources' },
+    CREATE_5_READLISTS: { target: 5, xp: 75, description: 'Créer 5 readlists' },
+    LOGIN_7_DAYS: { target: 7, xp: 100, description: 'Se connecter 7 jours' },
+    ADD_15_WALLETS: { target: 15, xp: 100, description: 'Ajouter 15 wallets' },
 };
 
 /**

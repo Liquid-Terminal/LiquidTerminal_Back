@@ -30,5 +30,5 @@ RUN npm prune --omit=dev
 # Expose le port (Railway injecte PORT automatiquement)
 EXPOSE 3002
 
-# Commande de démarrage
-CMD ["node", "dist/app.js"]
+# Commande de démarrage (applique les migrations puis lance le serveur)
+CMD ["sh", "-c", "npx prisma migrate deploy && node dist/app.js"]

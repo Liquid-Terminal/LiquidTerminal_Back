@@ -23,6 +23,7 @@ import { cacheService } from '../../core/cache.service';
 import { CACHE_TTL } from '../../constants/cache.constants';
 import { PrismaWalletListRepository } from '../../repositories/prisma/prisma.walletlist.repository';
 import { WalletListItemService } from './walletlist-item.service';
+import { xpService } from '../xp/xp.service';
 
 // Type pour les paramètres de requête
 type WalletListQueryParams = {
@@ -207,11 +208,28 @@ export class WalletListService extends BaseService<
   }
 
   /**
-   * Override de la méthode create pour invalider les caches spécifiques
+   * Override de la méthode create pour invalider les caches spécifiques et attribuer XP
    */
   async create(data: WalletListCreateInput): Promise<WalletListResponse> {
     const result = await super.create(data);
     await this.invalidateWalletListCache(result.id, data.userId);
+    
+    // Attribuer l'XP pour création de wallet list
+    try {
+      await xpService.grantXp({
+        userId: data.userId,
+        actionType: 'CREATE_WALLETLIST',
+        referenceId: `walletlist-${result.id}`,
+        description: `Created wallet list: ${data.name}`,
+      });
+    } catch (error) {
+      logDeduplicator.warn('Failed to grant XP for wallet list creation', {
+        userId: data.userId,
+        walletListId: result.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    
     return result;
   }
 

@@ -14,6 +14,7 @@ import { walletListCreateSchema } from '../../schemas/walletlist.schema';
 import { WalletListError } from '../../errors/walletlist.errors';
 import { logDeduplicator } from '../../utils/logDeduplicator';
 import { prisma } from '../../core/prisma.service';
+import { XP_REWARDS } from '../../constants/xp.constants';
 
 const router = express.Router();
 const walletListService = new WalletListService();
@@ -42,7 +43,11 @@ router.post('/', validatePrivyToken, (async (req: Request, res: Response) => {
     const validatedData = walletListCreateSchema.parse({ ...req.body, userId: user.id });
     
     const walletList = await walletListService.create(validatedData);
-    res.status(201).json({ success: true, data: walletList });
+    res.status(201).json({ 
+      success: true, 
+      data: walletList,
+      xpGranted: XP_REWARDS.CREATE_WALLETLIST
+    });
   } catch (error) {
     logDeduplicator.error('Error creating wallet list:', { error });
     if (error instanceof WalletListError) {
@@ -308,7 +313,11 @@ router.post('/:id/items', validatePrivyToken, validateCreateWalletListItem, (asy
       walletListId
     });
 
-    res.status(201).json({ success: true, data: item });
+    res.status(201).json({ 
+      success: true, 
+      data: item,
+      xpGranted: XP_REWARDS.ADD_WALLET_TO_LIST
+    });
   } catch (error) {
     logDeduplicator.error('Error adding wallet to list:', { error, walletListId: req.params.id });
     if (error instanceof WalletListError) {

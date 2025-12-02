@@ -63,6 +63,60 @@ enum BudgetRange {
   RANGE_50K_PLUS
 }
 
+// ==================== XP SYSTEM ====================
+
+enum XpActionType {
+  // Onboarding
+  REGISTRATION
+  
+  // Engagement
+  DAILY_LOGIN
+  LOGIN_STREAK_7
+  LOGIN_STREAK_30
+  
+  // Social
+  REFERRAL_SUCCESS
+  
+  // Educational
+  CREATE_EDUCATIONAL_CATEGORY
+  ADD_EDUCATIONAL_RESOURCE
+  
+  // ReadLists
+  CREATE_READLIST
+  MARK_RESOURCE_READ
+  COPY_PUBLIC_READLIST
+  
+  // Wallet Lists
+  CREATE_WALLETLIST
+  ADD_WALLET_TO_LIST
+  
+  // Public Goods
+  SUBMIT_PUBLIC_GOOD
+  PUBLIC_GOOD_APPROVED
+  
+  // Admin
+  ADMIN_BONUS
+  ADMIN_PENALTY
+}
+
+model XpTransaction {
+  id          Int          @id @default(autoincrement())
+  userId      Int
+  actionType  XpActionType
+  xpAmount    Int
+  referenceId String?      @db.VarChar(255) // ID de l'entité liée (readlist, publicgood, etc.)
+  description String?      @db.VarChar(255)
+  createdAt   DateTime     @default(now()) @db.Timestamp(6)
+  
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@unique([userId, actionType, referenceId]) // Évite les doublons
+  @@index([userId])
+  @@index([actionType])
+  @@index([createdAt])
+  @@map("xp_transactions")
+}
+
 model User {
   id                              Int                           @id @default(autoincrement())
   privyUserId                     String                        @unique
@@ -76,6 +130,12 @@ model User {
   referredBy                      String?                       @db.VarChar(255)
   referralCount                   Int                           @default(0)
   
+  // Système XP & Niveau
+  totalXp                         Int                           @default(0)
+  level                           Int                           @default(1)
+  lastLoginAt                     DateTime?                     @db.Timestamp(6)
+  loginStreak                     Int                           @default(0)
+  
   // Relations
   referrals                       User[]                        @relation("UserReferrals")
   referrer                        User?                         @relation("UserReferrals", fields: [referredBy], references: [name])
@@ -88,6 +148,10 @@ model User {
   walletLists                     WalletList[]
   submittedPublicGoods            PublicGood[]                  @relation("SubmittedGoods")
   reviewedPublicGoods             PublicGood[]                  @relation("ReviewedGoods")
+  xpTransactions                  XpTransaction[]
+  
+  @@index([totalXp])
+  @@index([level])
 }
 
 model Wallet {

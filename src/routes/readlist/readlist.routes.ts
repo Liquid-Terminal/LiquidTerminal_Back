@@ -14,6 +14,7 @@ import { readListCreateSchema } from '../../schemas/readlist.schema';
 import { ReadListError } from '../../errors/readlist.errors';
 import { logDeduplicator } from '../../utils/logDeduplicator';
 import { prisma } from '../../core/prisma.service';
+import { XP_REWARDS } from '../../constants/xp.constants';
 
 const router = express.Router();
 const readListService = new ReadListService();
@@ -43,7 +44,12 @@ router.post('/', validatePrivyToken, (async (req: Request, res: Response) => {
     readListCreateSchema.parse(dataWithUserId);
 
     const readList = await readListService.create(dataWithUserId);
-    res.status(201).json({ success: true, message: 'Read list created successfully', data: readList });
+    res.status(201).json({ 
+      success: true, 
+      message: 'Read list created successfully', 
+      data: readList,
+      xpGranted: XP_REWARDS.CREATE_READLIST
+    });
   } catch (error) {
     logDeduplicator.error('Error creating read list:', { error, body: req.body });
     if (error instanceof ReadListError) {
@@ -343,8 +349,13 @@ router.patch('/items/:itemId/read-status', validatePrivyToken, (async (req: Requ
       return res.status(400).json({ success: false, error: 'isRead must be a boolean', code: 'INVALID_READ_STATUS' });
     }
 
-    const item = await readListItemService.toggleReadStatus(itemId, user.id, isRead);
-    res.json({ success: true, message: `Item marked as ${isRead ? 'read' : 'unread'}`, data: item });
+    const { item, xpGranted } = await readListItemService.toggleReadStatus(itemId, user.id, isRead);
+    res.json({ 
+      success: true, 
+      message: `Item marked as ${isRead ? 'read' : 'unread'}`, 
+      data: item,
+      xpGranted
+    });
   } catch (error) {
     logDeduplicator.error('Error toggling read status:', { error, id: req.params.itemId, body: req.body });
     if (error instanceof ReadListError) {
@@ -379,7 +390,8 @@ router.post('/copy/:id', validatePrivyToken, (async (req: Request, res: Response
     res.json({ 
       success: true, 
       data: copiedReadList,
-      message: 'Read list copied successfully'
+      message: 'Read list copied successfully',
+      xpGranted: XP_REWARDS.COPY_PUBLIC_READLIST + XP_REWARDS.CREATE_READLIST // Copie + création
     });
   } catch (error) {
     logDeduplicator.error('Error copying read list:', { error, id: req.params.id, privyUserId: req.user?.sub });

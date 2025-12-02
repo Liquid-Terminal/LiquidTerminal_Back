@@ -40,6 +40,7 @@ import unstakingRoutes from './routes/staking/unstaking.routes';
 import stakedHoldersRoutes from './routes/staking/stakedHolders.routes';
 import dashboardGlobalStatsRoutes from './routes/globalStats.routes';
 import leaderboardRoutes from './routes/leaderboard/leaderboard.routes';
+import xpRoutes from './routes/xp/xp.routes';
 
 import healthRoutes from './routes/health.routes';
 
@@ -66,10 +67,10 @@ app.use(cors({
     else if (!origin || SECURITY_CONSTANTS.ALLOWED_ORIGINS.includes(origin as typeof SECURITY_CONSTANTS.ALLOWED_ORIGINS[number])) {
       callback(null, true);
     } else {
-      logDeduplicator.warn('CORS blocked origin', { 
-        origin, 
+      logDeduplicator.warn('CORS blocked origin', {
+        origin,
         allowedOrigins: SECURITY_CONSTANTS.ALLOWED_ORIGINS,
-        nodeEnv: process.env.NODE_ENV 
+        nodeEnv: process.env.NODE_ENV
       });
       callback(new Error('Not allowed by CORS'));
     }
@@ -95,8 +96,8 @@ app.use('/uploads', express.static('uploads'));
 // S'assurer que les dossiers d'upload existent
 import fs from 'fs';
 const uploadDirs = [
-  'uploads', 
-  'uploads/logos', 
+  'uploads',
+  'uploads/logos',
   'uploads/csv-projects',
   'uploads/publicgoods',
   'uploads/publicgoods/logos',
@@ -136,6 +137,7 @@ app.use('/home/globalstats', dashboardGlobalStatsRoutes);
 app.use('/market/spot/globalstats', globalSpotStatsRoutes);
 app.use('/market/perp/globalstats', globalPerpStatsRoutes);
 app.use('/leaderboard', leaderboardRoutes);
+app.use('/xp', xpRoutes);
 app.use('/api/health', healthRoutes);
 
 const PORT = process.env.PORT || 3002;
@@ -147,7 +149,7 @@ const clientInitializer = ClientInitializerService.getInstance();
 clientInitializer.initialize()
   .then(() => {
     logDeduplicator.info('All clients initialized, starting server...');
-    
+
     // Démarrer le service de nettoyage automatique des fichiers
     const fileCleanupService = FileCleanupService.getInstance();
     fileCleanupService.startAutoCleanup();

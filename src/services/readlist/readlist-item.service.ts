@@ -1,10 +1,10 @@
-import { 
-  ReadListItemResponse, 
-  ReadListItemCreateInput, 
+import {
+  ReadListItemResponse,
+  ReadListItemCreateInput,
   ReadListItemUpdateInput
 } from '../../types/readlist.types';
-import { 
-  ReadListItemNotFoundError, 
+import {
+  ReadListItemNotFoundError,
   ReadListItemAlreadyExistsError,
   ReadListItemValidationError,
   ReadListNotFoundError,
@@ -13,16 +13,17 @@ import {
 } from '../../errors/readlist.errors';
 import { logDeduplicator } from '../../utils/logDeduplicator';
 import { CACHE_PREFIX, CACHE_KEYS } from '../../constants/cache.constants';
-import { 
-  readListItemCreateSchema, 
-  readListItemUpdateSchema, 
-  readListItemQuerySchema 
+import {
+  readListItemCreateSchema,
+  readListItemUpdateSchema,
+  readListItemQuerySchema
 } from '../../schemas/readlist.schema';
 import { readListItemRepository, readListRepository, educationalResourceRepository } from '../../repositories';
 import { BaseService } from '../../core/crudBase.service';
 import { cacheService } from '../../core/cache.service';
 import { transactionService } from '../../core/transaction.service';
 import { CACHE_TTL } from '../../constants/cache.constants';
+import { xpService } from '../xp/xp.service';
 
 // Type pour les paramètres de requête
 type ReadListItemQueryParams = {
@@ -36,9 +37,9 @@ type ReadListItemQueryParams = {
 };
 
 export class ReadListItemService extends BaseService<
-  ReadListItemResponse, 
-  ReadListItemCreateInput, 
-  ReadListItemUpdateInput, 
+  ReadListItemResponse,
+  ReadListItemCreateInput,
+  ReadListItemUpdateInput,
   ReadListItemQueryParams
 > {
   protected repository = readListItemRepository;
@@ -106,7 +107,7 @@ export class ReadListItemService extends BaseService<
         if (!data.readListId) {
           throw new ReadListItemValidationError('readListId is required');
         }
-        
+
         const readList = await readListRepository.findById(data.readListId);
         if (!readList) {
           throw new ReadListNotFoundError();
@@ -142,8 +143,8 @@ export class ReadListItemService extends BaseService<
    * @returns Liste paginée des items
    */
   async getByReadListWithPermission(
-    readListId: number, 
-    userId: number, 
+    readListId: number,
+    userId: number,
     query: ReadListItemQueryParams = {}
   ) {
     try {
@@ -184,11 +185,11 @@ export class ReadListItemService extends BaseService<
    * @param itemId ID de l'item
    * @param userId ID de l'utilisateur demandeur
    * @param isRead Statut de lecture
-   * @returns Item mis à jour
+   * @returns Item mis à jour + XP accordé
    */
-  async toggleReadStatus(itemId: number, userId: number, isRead: boolean): Promise<ReadListItemResponse> {
+  async toggleReadStatus(itemId: number, userId: number, isRead: boolean): Promise<{ item: ReadListItemResponse; xpGranted: number }> {
     try {
-      return await transactionService.execute(async (tx) => {
+      const result = await transactionService.execute(async (tx) => {
         this.repository.setPrismaClient(tx);
         readListRepository.setPrismaClient(tx);
 
@@ -205,12 +206,34 @@ export class ReadListItemService extends BaseService<
 
         // Mettre à jour le statut
         const updatedItem = await this.repository.toggleReadStatus(itemId, isRead);
-        
+
         // Invalider les caches
         await this.invalidateReadListItemCache(itemId, item.readListId);
 
-        return updatedItem;
+        return { updatedItem, wasUnread: !item.isRead };
       });
+
+      let xpGranted = 0;
+
+      // Attribuer l'XP si marqué comme lu (et n'était pas déjà lu)
+      if (isRead && result.wasUnread) {
+        try {
+          xpGranted = await xpService.grantXp({
+            userId,
+            actionType: 'MARK_RESOURCE_READ',
+            referenceId: `readitem-${itemId}`,
+            description: 'Marked resource as read',
+          });
+        } catch (xpError) {
+          logDeduplicator.warn('Failed to grant XP for marking resource as read', {
+            userId,
+            itemId,
+            error: xpError instanceof Error ? xpError.message : String(xpError),
+          });
+        }
+      }
+
+      return { item: result.updatedItem, xpGranted };
     } catch (error) {
       throw error;
     } finally {
@@ -226,8 +249,8 @@ export class ReadListItemService extends BaseService<
    * @param itemOrders Nouveau ordre des items
    */
   async reorderItems(
-    readListId: number, 
-    userId: number, 
+    readListId: number,
+    userId: number,
     itemOrders: { id: number; order: number }[]
   ): Promise<void> {
     try {
@@ -242,7 +265,7 @@ export class ReadListItemService extends BaseService<
 
         // Réorganiser les items
         await this.repository.reorderItems(readListId, itemOrders);
-        
+
         // Invalider les caches
         await this.invalidateReadListItemsCache(readListId);
 
@@ -284,7 +307,7 @@ export class ReadListItemService extends BaseService<
 
         // Supprimer l'item
         await this.delete(itemId);
-        
+
         logDeduplicator.info('Read list item deleted successfully', { itemId, userId });
       });
     } catch (error) {

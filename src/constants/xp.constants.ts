@@ -55,10 +55,10 @@ export const DAILY_CAPS: Partial<Record<XpActionType, number>> = {
  * Configuration des daily tasks
  */
 export const DAILY_TASKS_CONFIG: Record<DailyTaskType, { xp: number; description: string }> = {
-    LOGIN: { xp: 10, description: 'Se connecter' },
-    READ_RESOURCE: { xp: 5, description: 'Lire une ressource' },
-    ADD_WALLET: { xp: 5, description: 'Ajouter un wallet à une liste' },
-    EXPLORE_LEADERBOARD: { xp: 5, description: 'Explorer le leaderboard' },
+    LOGIN: { xp: 10, description: 'Log in' },
+    READ_RESOURCE: { xp: 5, description: 'Read a resource' },
+    ADD_WALLET: { xp: 5, description: 'Add a wallet to a list' },
+    EXPLORE_LEADERBOARD: { xp: 5, description: 'Explore the leaderboard' },
 };
 
 /**
@@ -70,10 +70,10 @@ export const DAILY_COMPLETION_BONUS = 15;
  * Configuration des weekly challenges
  */
 export const WEEKLY_CHALLENGES_CONFIG: Record<WeeklyChallengeType, { target: number; xp: number; description: string }> = {
-    READ_20_RESOURCES: { target: 20, xp: 100, description: 'Lire 20 ressources' },
-    CREATE_5_READLISTS: { target: 5, xp: 75, description: 'Créer 5 readlists' },
-    LOGIN_7_DAYS: { target: 7, xp: 100, description: 'Se connecter 7 jours' },
-    ADD_15_WALLETS: { target: 15, xp: 100, description: 'Ajouter 15 wallets' },
+    READ_20_RESOURCES: { target: 20, xp: 100, description: 'Read 20 resources' },
+    CREATE_5_READLISTS: { target: 5, xp: 75, description: 'Create 5 readlists' },
+    LOGIN_7_DAYS: { target: 7, xp: 100, description: 'Log in 7 days' },
+    ADD_15_WALLETS: { target: 15, xp: 100, description: 'Add 15 wallets' },
 };
 
 /**

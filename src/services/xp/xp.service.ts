@@ -286,16 +286,18 @@ export class XpService {
         throw new Error('User not found');
       }
 
-      const progress = calculateLevelProgress(userData.totalXp);
+      // S'assurer que totalXp est un nombre valide (pas null/undefined)
+      const totalXp = userData.totalXp ?? 0;
+      const progress = calculateLevelProgress(totalXp);
 
       return {
-        totalXp: userData.totalXp,
-        level: userData.level,
+        totalXp: totalXp,
+        level: progress.currentLevel, // Utiliser le niveau calculé plutôt que celui de la DB pour cohérence
         currentLevelXp: progress.currentLevelXp,
         nextLevelXp: progress.nextLevelXp,
         progressPercent: progress.progressPercent,
         xpToNextLevel: progress.xpToNextLevel,
-        loginStreak: userData.loginStreak,
+        loginStreak: userData.loginStreak ?? 0,
         lastLoginAt: userData.lastLoginAt,
       };
     } catch (error) {
@@ -547,16 +549,23 @@ export class XpService {
     weekEnd.setHours(23, 59, 59, 999);
 
     return {
-      challenges: challenges.map((c) => ({
-        type: c.challengeType,
-        description: WEEKLY_CHALLENGES_CONFIG[c.challengeType].description,
-        progress: c.progress,
-        target: c.target,
-        progressPercent: Math.min(100, Math.floor((c.progress / c.target) * 100)),
-        xpReward: c.xpReward,
-        completed: c.completed,
-        completedAt: c.completedAt,
-      })),
+      challenges: challenges.map((c) => {
+        // Protection contre division par zéro et valeurs négatives
+        const progress = Math.max(0, c.progress);
+        const target = Math.max(1, c.target); // Minimum 1 pour éviter division par zéro
+        const progressPercent = Math.min(100, Math.max(0, Math.floor((progress / target) * 100)));
+        
+        return {
+          type: c.challengeType,
+          description: WEEKLY_CHALLENGES_CONFIG[c.challengeType].description,
+          progress: c.progress,
+          target: c.target,
+          progressPercent,
+          xpReward: c.xpReward,
+          completed: c.completed,
+          completedAt: c.completedAt,
+        };
+      }),
       weekStart,
       weekEnd,
     };

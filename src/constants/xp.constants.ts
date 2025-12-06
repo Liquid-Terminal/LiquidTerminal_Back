@@ -110,10 +110,15 @@ export function calculateLevelProgress(totalXp: number): {
     const currentLevelXp = xpRequiredForLevel(currentLevel);
     const nextLevelXp = xpRequiredForLevel(currentLevel + 1);
 
-    const xpInCurrentLevel = totalXp - currentLevelXp;
+    const xpInCurrentLevel = Math.max(0, totalXp - currentLevelXp);
     const xpNeededForNext = nextLevelXp - currentLevelXp;
-    const progressPercent = Math.min(100, Math.floor((xpInCurrentLevel / xpNeededForNext) * 100));
-    const xpToNextLevel = nextLevelXp - totalXp;
+    
+    // Protection contre division par zéro
+    const progressPercent = xpNeededForNext > 0
+      ? Math.min(100, Math.max(0, Math.floor((xpInCurrentLevel / xpNeededForNext) * 100)))
+      : 100; // Si pas besoin d'XP pour next level, considérer à 100%
+    
+    const xpToNextLevel = Math.max(0, nextLevelXp - totalXp);
 
     return {
         currentLevel,

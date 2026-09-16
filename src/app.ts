@@ -66,6 +66,7 @@ import activeUsersRoutes from './routes/activeusers/activeusers.routes';
 import buildersRoutes from './routes/builders/builders.routes';
 import indexerRoutes from './routes/indexer';
 import defillamaRoutes from './routes/defillama/defillama.routes';
+import hyperfolioRoutes from './routes/hyperfolio/hyperfolio.routes';
 import exportRoutes from './routes/export/export.routes';
 
 const app = express();
@@ -168,6 +169,7 @@ app.use('/active-users', activeUsersRoutes);
 app.use('/builders', buildersRoutes);
 app.use('/indexer', indexerRoutes);
 app.use('/defillama', defillamaRoutes);
+app.use('/hyperfolio', hyperfolioRoutes);
 app.use('/export', exportRoutes);
 app.use(notFoundHandler);
 app.use(errorHandler);

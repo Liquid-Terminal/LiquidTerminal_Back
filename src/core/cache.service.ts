@@ -15,10 +15,16 @@ export class CacheService {
    * @returns La donnée du cache ou celle récupérée par fetchFn
    */
   async getOrSet<T>(
-    key: string, 
-    fetchFn: () => Promise<T>, 
+    key: string,
+    fetchFn: () => Promise<T>,
     ttl: number = CACHE_TTL.MEDIUM
   ): Promise<T> {
+    // Redis unhealthy (circuit open) → skip the cache entirely and serve from
+    // source. Without this a wedged Redis connection would stall every request
+    // through the get → lock → get → set path until the edge returns 502.
+    if (!redisService.isHealthy()) {
+      return fetchFn();
+    }
     try {
       const cachedData = await redisService.get(key);
       if (cachedData) {

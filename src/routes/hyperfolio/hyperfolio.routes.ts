@@ -28,6 +28,7 @@ import {
   HyperfolioStreamEvent,
 } from '../../types/hyperfolio.types';
 import { logDeduplicator } from '../../utils/logDeduplicator';
+import { rateLimitKeyForIp } from '../../utils/client-ip';
 
 const router = Router();
 const service = HyperfolioService.getInstance();
@@ -65,8 +66,9 @@ function run(handler: (req: Request) => Promise<unknown>, label: string): Reques
 const address = (req: Request): string => String(req.params.address);
 
 /** Caller key for the per-IP upstream budget (`trust proxy` is set in app.ts). */
+/** Budget key for the caller: its IP, or its /64 when on IPv6. */
 function clientIp(req: Request): string {
-  return req.ip || req.socket.remoteAddress || 'unknown';
+  return rateLimitKeyForIp(req.ip || req.socket.remoteAddress || 'unknown');
 }
 
 // ==================== Wallet (JSON) ====================

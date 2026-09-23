@@ -9,10 +9,12 @@ import {
   hyperfolioJsonHeaders,
   isHyperfolioConfigured,
 } from './hyperfolio-api.config';
+import { consumeHyperfolioDailyBudget } from './hyperfolio.quota';
 import {
   HyperfolioBadInputError,
   HyperfolioError,
   HyperfolioNotConfiguredError,
+  HyperfolioQuotaExhaustedError,
   HyperfolioRateLimitedError,
   HyperfolioThrottledError,
   HyperfolioUnauthorizedError,
@@ -117,12 +119,28 @@ function isBurstLimit(error: unknown): boolean {
  * count toward the circuit breaker: otherwise five requests for an
  * unresolvable `.hype` name would open it and cut Hyperfolio for everyone.
  */
-function isCallerSideFailure(error: unknown): boolean {
-  if (error instanceof HyperfolioBadInputError || error instanceof HyperfolioThrottledError) return true;
-  if (error instanceof HttpApiError) {
-    return error.statusCode === 400 || error.statusCode === 429 || isBurstLimit(error);
+function isCallerSideFailure(error: unknown, slowEndpoint: boolean): boolean {
+  if (
+    error instanceof HyperfolioBadInputError ||
+    error instanceof HyperfolioThrottledError ||
+    error instanceof HyperfolioQuotaExhaustedError
+  ) {
+    return true;
   }
-  return false;
+  if (error instanceof HttpApiError) {
+    if (isBurstLimit(error)) return true;
+    // 401/403 mean our key is rejected — a real outage for everyone. Any other
+    // 4xx is about this request's input (odd page, unknown wallet…).
+    return error.statusCode >= 400 && error.statusCode < 500 && error.statusCode !== 401 && error.statusCode !== 403;
+  }
+  // A cold per-wallet scan (transactions, positions) can outlast its timeout
+  // on one heavy wallet while upstream is healthy; callers can pick such
+  // wallets on purpose, so those timeouts must not open the breaker.
+  return slowEndpoint && isTimeout(error);
+}
+
+function isTimeout(error: unknown): boolean {
+  return error instanceof Error && error.message === 'Request timeout';
 }
 
 function isErrorBody(payload: unknown): payload is HyperfolioErrorBody {
@@ -230,7 +248,7 @@ export class HyperfolioClient extends BaseApiService {
             }
             return { ok: true as const, payload: payload as T };
           } catch (error) {
-            if (isCallerSideFailure(error)) return { ok: false as const, error };
+            if (isCallerSideFailure(error, timeoutMs > DEFAULT_TIMEOUT_MS)) return { ok: false as const, error };
             throw error;
           }
         });
@@ -259,15 +277,21 @@ export class HyperfolioClient extends BaseApiService {
    * request for minutes (3 × 45 s on a cold transactions fetch).
    */
   private async getWithBurstRetry<T>(path: string, timeoutMs: number): Promise<T> {
-    await this.throttle.acquire();
+    await this.acquireUpstream();
     try {
       return await this.getSingleAttempt<T>(path, timeoutMs);
     } catch (error) {
       if (!isBurstLimit(error)) throw error;
       await new Promise((resolve) => setTimeout(resolve, 1_100));
-      await this.throttle.acquire();
+      await this.acquireUpstream();
       return this.getSingleAttempt<T>(path, timeoutMs);
     }
+  }
+
+  /** Every outbound call: per-second slot, then one unit of the daily budget. */
+  private async acquireUpstream(): Promise<void> {
+    await this.throttle.acquire();
+    await consumeHyperfolioDailyBudget();
   }
 
   /** `GET /wallet/composition` — HyperEVM token balances. */
@@ -329,7 +353,7 @@ export class HyperfolioClient extends BaseApiService {
   ): Promise<ReadableStream<Uint8Array>> {
     this.assertConfigured();
     const url = `${HYPERFOLIO_API_URL}/positions/stream${buildHyperfolioQuery({ address })}`;
-    await this.throttle.acquire();
+    await this.acquireUpstream();
     let response: globalThis.Response;
     try {
       response = await fetch(url, {

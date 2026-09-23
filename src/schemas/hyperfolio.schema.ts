@@ -17,7 +17,23 @@ const walletInput = z
   .max(128)
   .refine((v) => ETH_ADDRESS.test(v) || HL_NAME.test(v), 'Expected a 0x address, a .hype or a .hl name');
 
-const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected YYYY-MM-DD');
+/**
+ * A real calendar day (not just the YYYY-MM-DD shape: `2024-99-99` used to go
+ * straight upstream). Odd inputs are refused here rather than risking upstream
+ * 5xx/timeouts that would count toward the shared circuit breaker.
+ */
+const isoDate = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected YYYY-MM-DD')
+  .refine((v) => {
+    const time = Date.parse(`${v}T00:00:00Z`);
+    return (
+      Number.isFinite(time) &&
+      new Date(time).toISOString().startsWith(v) &&
+      v >= '2020-01-01' &&
+      time <= Date.now() + 24 * 60 * 60 * 1000
+    );
+  }, 'Expected a valid date');
 
 /** Accept `?k=a&k=b` (array) and `?k=a` (string) alike. */
 const stringList = <T extends z.ZodType<string>>(item: T) =>
@@ -38,14 +54,24 @@ export const hyperfolioHistorySchema = z.object({
   params: z.object({ address: ethAddress }),
 });
 
-export const hyperfolioTransactionsQuerySchema = z.object({
-  page: z.coerce.number().int().min(1).max(10_000).optional(),
-  offset: z.coerce.number().int().min(1).max(100).optional(),
-  search: z.string().max(120).optional(),
-  startDate: isoDate.optional(),
-  endDate: isoDate.optional(),
-  type: z.enum(['all', 'normal', 'token', 'internal']).optional(),
-});
+/**
+ * Page caps: deep pages are what makes upstream slow (cold scans) and each one
+ * is a fresh cache miss. 500 × 100 transactions / 200 × 100 NFTs / 100 × 200
+ * pools is far past anything the UI pages through.
+ */
+export const hyperfolioTransactionsQuerySchema = z
+  .object({
+    page: z.coerce.number().int().min(1).max(500).optional(),
+    offset: z.coerce.number().int().min(1).max(100).optional(),
+    search: z.string().max(120).optional(),
+    startDate: isoDate.optional(),
+    endDate: isoDate.optional(),
+    type: z.enum(['all', 'normal', 'token', 'internal']).optional(),
+  })
+  .refine((q) => !q.startDate || !q.endDate || q.startDate <= q.endDate, {
+    message: 'startDate must not be after endDate',
+    path: ['startDate'],
+  });
 
 export const hyperfolioTransactionsSchema = z.object({
   query: hyperfolioTransactionsQuerySchema,
@@ -53,7 +79,7 @@ export const hyperfolioTransactionsSchema = z.object({
 });
 
 export const hyperfolioNftsQuerySchema = z.object({
-  page: z.coerce.number().int().min(1).max(10_000).optional(),
+  page: z.coerce.number().int().min(1).max(200).optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
   collection: z.string().max(120).optional(),
 });
@@ -64,7 +90,7 @@ export const hyperfolioNftsSchema = z.object({
 });
 
 export const hyperfolioYieldQuerySchema = z.object({
-  page: z.coerce.number().int().min(1).max(1_000).optional(),
+  page: z.coerce.number().int().min(1).max(100).optional(),
   page_size: z.coerce.number().int().min(1).max(200).optional(),
   search: z.string().max(120).optional(),
   categories: stringList(z.enum(['lending', 'amm', 'yield', 'staking', 'derivatives'])).optional(),

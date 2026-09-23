@@ -45,6 +45,16 @@ export class HyperfolioThrottledError extends HyperfolioError {
 }
 
 /**
+ * Today's global budget of upstream calls is spent (see hyperfolio.quota.ts).
+ * Our own guard, like the throttle: it must not open the circuit breaker.
+ */
+export class HyperfolioQuotaExhaustedError extends HyperfolioError {
+  constructor(message = 'Hyperfolio data is temporarily unavailable') {
+    super(message, 503, 'HYPERFOLIO_QUOTA_EXHAUSTED');
+  }
+}
+
+/**
  * Upstream rejected the input (HTTP 200 with a body-level `error`, or 400):
  * unsupported address form or an unresolvable .hype/.hl domain.
  */

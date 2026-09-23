@@ -67,13 +67,13 @@ describe('GET /hyperfolio/* validation smoke', () => {
     const res = await request(app).get(`/hyperfolio/wallet/${ADDRESS}/composition`);
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ success: true, data: { data: { tokens: [] } } });
-    expect(mockService.getComposition).toHaveBeenCalledWith(ADDRESS);
+    expect(mockService.getComposition).toHaveBeenCalledWith(ADDRESS, expect.any(String));
   });
 
   it('accepts .hl names on wallet endpoints', async () => {
     const res = await request(app).get('/hyperfolio/wallet/hyperfolio.hl/points');
     expect(res.status).toBe(200);
-    expect(mockService.getPoints).toHaveBeenCalledWith('hyperfolio.hl');
+    expect(mockService.getPoints).toHaveBeenCalledWith('hyperfolio.hl', expect.any(String));
   });
 
   it('rejects a malformed address with 400', async () => {
@@ -90,7 +90,7 @@ describe('GET /hyperfolio/* validation smoke', () => {
     expect(tooLong.status).toBe(400);
     const ok = await request(app).get(`/hyperfolio/wallet/${ADDRESS}/history?days=7`);
     expect(ok.status).toBe(200);
-    expect(mockService.getPortfolioHistory).toHaveBeenCalledWith(ADDRESS, 7);
+    expect(mockService.getPortfolioHistory).toHaveBeenCalledWith(ADDRESS, 7, expect.any(String));
   });
 
   it('coerces transaction filters and rejects unknown types', async () => {
@@ -104,7 +104,7 @@ describe('GET /hyperfolio/* validation smoke', () => {
       type: 'token',
       search: 'swap',
       startDate: '2026-01-01',
-    });
+    }, expect.any(String));
     const bad = await request(app).get(`/hyperfolio/wallet/${ADDRESS}/transactions?type=weird`);
     expect(bad.status).toBe(400);
   });
@@ -119,7 +119,7 @@ describe('GET /hyperfolio/* validation smoke', () => {
       protocols: ['hyperlend', 'felix'],
       sort_by: 'apy',
       min_apy: 5,
-    });
+    }, expect.any(String));
     const bad = await request(app).get('/hyperfolio/yield?categories=nope');
     expect(bad.status).toBe(400);
   });

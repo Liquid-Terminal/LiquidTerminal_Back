@@ -11,8 +11,10 @@ import {
 } from './hyperfolio-api.config';
 import {
   HyperfolioBadInputError,
+  HyperfolioError,
   HyperfolioNotConfiguredError,
   HyperfolioRateLimitedError,
+  HyperfolioThrottledError,
   HyperfolioUnauthorizedError,
   HyperfolioUpstreamError,
 } from '../../errors/hyperfolio.errors';
@@ -30,8 +32,26 @@ import {
   HyperfolioYieldResponse,
 } from '../../types/hyperfolio.types';
 
+/** Default upstream timeout for the fast wallet/yield endpoints. */
+const DEFAULT_TIMEOUT_MS = 30_000;
+
 /** Cold `/wallet/transactions` fetches were measured at 33 s upstream. */
 const TRANSACTIONS_TIMEOUT_MS = 45_000;
+
+/** Blocking `/positions` fans out to 30+ protocols upstream. */
+const POSITIONS_TIMEOUT_MS = 60_000;
+
+/**
+ * Process-wide ceiling on calls sent to Hyperfolio. Its per-second burst limit
+ * (~20 req/s per key) is shared by every visitor, so one client busting the
+ * cache (random `search`, many wallets) must not be able to push the whole key
+ * into the 403/429 zone. Kept well under the upstream limit because the stream
+ * route and the JSON routes draw from the same budget. Per process: with N
+ * backend instances the effective ceiling is N × this value.
+ */
+const UPSTREAM_MAX_PER_SECOND = 8;
+/** How long a call may queue for a free upstream slot before failing fast. */
+const UPSTREAM_MAX_WAIT_MS = 2_000;
 
 /** Upstream burst limit answers 403 with this message (not 429). */
 const BURST_LIMIT_MESSAGE = /limit exceeded/i;
@@ -60,6 +80,51 @@ export function buildHyperfolioQuery(
   return qs ? `?${qs}` : '';
 }
 
+/** Sliding one-second window over outbound Hyperfolio calls (all routes). */
+class UpstreamThrottle {
+  private stamps: number[] = [];
+
+  constructor(private readonly maxPerSecond: number, private readonly maxWaitMs: number) {}
+
+  public async acquire(): Promise<void> {
+    const deadline = Date.now() + this.maxWaitMs;
+    for (;;) {
+      const now = Date.now();
+      while (this.stamps.length > 0 && now - this.stamps[0] >= 1_000) this.stamps.shift();
+      if (this.stamps.length < this.maxPerSecond) {
+        this.stamps.push(now);
+        return;
+      }
+      const wait = 1_000 - (now - this.stamps[0]) + 5;
+      if (now + wait > deadline) {
+        throw new HyperfolioThrottledError();
+      }
+      await new Promise((resolve) => setTimeout(resolve, wait));
+    }
+  }
+}
+
+function isBurstLimit(error: unknown): boolean {
+  return (
+    error instanceof HttpApiError &&
+    error.statusCode === 403 &&
+    BURST_LIMIT_MESSAGE.test(error.responseBody ?? '')
+  );
+}
+
+/**
+ * Failures the caller or the quota caused, not a sick upstream. They must not
+ * count toward the circuit breaker: otherwise five requests for an
+ * unresolvable `.hype` name would open it and cut Hyperfolio for everyone.
+ */
+function isCallerSideFailure(error: unknown): boolean {
+  if (error instanceof HyperfolioBadInputError || error instanceof HyperfolioThrottledError) return true;
+  if (error instanceof HttpApiError) {
+    return error.statusCode === 400 || error.statusCode === 429 || isBurstLimit(error);
+  }
+  return false;
+}
+
 function isErrorBody(payload: unknown): payload is HyperfolioErrorBody {
   return (
     typeof payload === 'object' &&
@@ -79,12 +144,13 @@ export class HyperfolioClient extends BaseApiService {
 
   private circuitBreaker: CircuitBreakerService;
   private rateLimiter: RateLimiterService;
+  private throttle = new UpstreamThrottle(UPSTREAM_MAX_PER_SECOND, UPSTREAM_MAX_WAIT_MS);
 
   private constructor() {
     super(HYPERFOLIO_API_URL, hyperfolioJsonHeaders);
     this.circuitBreaker = CircuitBreakerService.getInstance('hyperfolio', {
       maxFailures: 5,
-      resetTimeout: 30_000,
+      circuitBreakerTimeout: 30_000,
     });
     this.rateLimiter = RateLimiterService.getInstance('hyperfolio', {
       maxWeightPerMinute: HyperfolioClient.MAX_WEIGHT_PER_MINUTE,
@@ -99,25 +165,32 @@ export class HyperfolioClient extends BaseApiService {
     return HyperfolioClient.instance;
   }
 
+  /**
+   * Per-IP budget of upstream (cache-missing) lookups — 30 per minute with the
+   * weights above. Cache hits never reach this, so browsing cached wallets is
+   * free; only fan-out that actually costs Hyperfolio quota is metered.
+   */
   public checkRateLimit(ip: string): boolean {
     return this.rateLimiter.checkRateLimit(ip);
   }
 
-  /** Translate transport failures into Hyperfolio domain errors. */
+  /**
+   * Translate transport failures into Hyperfolio domain errors. Client-facing
+   * messages stay generic: transport details (DNS, socket, breaker state) are
+   * logged here, never echoed to the browser.
+   */
   public static toDomainError(error: unknown): Error {
+    if (error instanceof HyperfolioError) return error;
     if (error instanceof HttpApiError) {
-      if (error.statusCode === 429) return new HyperfolioRateLimitedError();
-      if (error.statusCode === 403 && BURST_LIMIT_MESSAGE.test(error.responseBody ?? '')) {
-        return new HyperfolioRateLimitedError();
-      }
-      if (error.statusCode === 401) return new HyperfolioUnauthorizedError();
+      if (error.statusCode === 429 || isBurstLimit(error)) return new HyperfolioRateLimitedError();
+      if (error.statusCode === 401 || error.statusCode === 403) return new HyperfolioUnauthorizedError();
       if (error.statusCode === 400) return new HyperfolioBadInputError();
       return new HyperfolioUpstreamError(`Hyperfolio answered ${error.statusCode}`);
     }
-    if (error instanceof HyperfolioRateLimitedError || error instanceof HyperfolioBadInputError) {
-      return error;
-    }
-    return new HyperfolioUpstreamError(error instanceof Error ? error.message : String(error));
+    logDeduplicator.warn('Hyperfolio transport failure', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return new HyperfolioUpstreamError();
   }
 
   private assertConfigured(): void {
@@ -126,12 +199,18 @@ export class HyperfolioClient extends BaseApiService {
     }
   }
 
+  /** Wait for a slot in the process-wide upstream budget (or fail fast). */
+  public acquireUpstreamSlot(): Promise<void> {
+    return this.throttle.acquire();
+  }
+
   /**
    * GET through the circuit breaker with single-flight dedup. A 200 whose
    * body carries `error` (bad address, unresolvable domain) is a 400 for us.
-   * The burst 403 is retried once after a short pause before giving up.
+   * Caller-side failures (bad input, throttles) are carried out of the breaker
+   * as values so they never count as upstream failures.
    */
-  private async getPath<T>(path: string, timeoutMs?: number): Promise<T> {
+  private async getPath<T>(path: string, timeoutMs: number = DEFAULT_TIMEOUT_MS): Promise<T> {
     this.assertConfigured();
     const key = `GET ${path}`;
     const existing = inFlight.get(key);
@@ -141,14 +220,22 @@ export class HyperfolioClient extends BaseApiService {
 
     const promise = (async (): Promise<T> => {
       try {
-        return await this.circuitBreaker.execute(async () => {
+        const outcome = await this.circuitBreaker.execute(async () => {
           logDeduplicator.info('HyperfolioClient', { path: maskSensitiveUrl(path) });
-          const payload = await this.getWithBurstRetry<unknown>(path, timeoutMs);
-          if (isErrorBody(payload)) {
-            throw new HyperfolioBadInputError(payload.error);
+          try {
+            const payload = await this.getWithBurstRetry<unknown>(path, timeoutMs);
+            if (isErrorBody(payload)) {
+              logDeduplicator.info('Hyperfolio rejected input', { path: maskSensitiveUrl(path), error: payload.error });
+              return { ok: false as const, error: new HyperfolioBadInputError() };
+            }
+            return { ok: true as const, payload: payload as T };
+          } catch (error) {
+            if (isCallerSideFailure(error)) return { ok: false as const, error };
+            throw error;
           }
-          return payload as T;
         });
+        if (!outcome.ok) throw outcome.error;
+        return outcome.payload;
       } catch (error) {
         throw HyperfolioClient.toDomainError(error);
       }
@@ -165,21 +252,21 @@ export class HyperfolioClient extends BaseApiService {
     return promise;
   }
 
-  private async getWithBurstRetry<T>(path: string, timeoutMs?: number): Promise<T> {
+  /**
+   * One attempt, plus a single retry after the per-second burst 403. Never the
+   * generic `withRetry` of BaseApiService: it replays 429s and timeouts up to
+   * three times, which multiplies load on a throttled upstream and can hold a
+   * request for minutes (3 × 45 s on a cold transactions fetch).
+   */
+  private async getWithBurstRetry<T>(path: string, timeoutMs: number): Promise<T> {
+    await this.throttle.acquire();
     try {
-      return timeoutMs
-        ? await this.getSingleAttempt<T>(path, timeoutMs)
-        : await this.get<T>(path);
+      return await this.getSingleAttempt<T>(path, timeoutMs);
     } catch (error) {
-      const burst =
-        error instanceof HttpApiError &&
-        error.statusCode === 403 &&
-        BURST_LIMIT_MESSAGE.test(error.responseBody ?? '');
-      if (!burst) throw error;
+      if (!isBurstLimit(error)) throw error;
       await new Promise((resolve) => setTimeout(resolve, 1_100));
-      return timeoutMs
-        ? this.getSingleAttempt<T>(path, timeoutMs)
-        : this.getSingleAttempt<T>(path);
+      await this.throttle.acquire();
+      return this.getSingleAttempt<T>(path, timeoutMs);
     }
   }
 
@@ -194,7 +281,7 @@ export class HyperfolioClient extends BaseApiService {
   public getPositions(address: string): Promise<HyperfolioPositionsResponse> {
     return this.getPath<HyperfolioPositionsResponse>(
       `/positions${buildHyperfolioQuery({ address })}`,
-      60_000
+      POSITIONS_TIMEOUT_MS
     );
   }
 
@@ -242,6 +329,7 @@ export class HyperfolioClient extends BaseApiService {
   ): Promise<ReadableStream<Uint8Array>> {
     this.assertConfigured();
     const url = `${HYPERFOLIO_API_URL}/positions/stream${buildHyperfolioQuery({ address })}`;
+    await this.throttle.acquire();
     let response: globalThis.Response;
     try {
       response = await fetch(url, {

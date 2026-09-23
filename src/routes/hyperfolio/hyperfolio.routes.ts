@@ -14,7 +14,12 @@ import {
 import { HyperfolioService } from '../../services/hyperfolio/hyperfolio.service';
 import { HyperfolioClient } from '../../clients/hyperfolio/hyperfolio.client';
 import { isHyperfolioConfigured } from '../../clients/hyperfolio/hyperfolio-api.config';
-import { HyperfolioError, HyperfolioNotConfiguredError, HyperfolioRateLimitedError } from '../../errors/hyperfolio.errors';
+import {
+  HyperfolioError,
+  HyperfolioNotConfiguredError,
+  HyperfolioRateLimitedError,
+  HyperfolioThrottledError,
+} from '../../errors/hyperfolio.errors';
 import { HYPERFOLIO_STREAM } from '../../constants/hyperfolio.cache';
 import {
   HyperfolioPortfolioStats,
@@ -59,20 +64,25 @@ function run(handler: (req: Request) => Promise<unknown>, label: string): Reques
 
 const address = (req: Request): string => String(req.params.address);
 
+/** Caller key for the per-IP upstream budget (`trust proxy` is set in app.ts). */
+function clientIp(req: Request): string {
+  return req.ip || req.socket.remoteAddress || 'unknown';
+}
+
 // ==================== Wallet (JSON) ====================
 
 router.get(
   '/wallet/:address/composition',
   marketRateLimiter,
   validateGetRequest(hyperfolioWalletParamsSchema),
-  run((req) => service.getComposition(address(req)), 'GET /hyperfolio/wallet/:address/composition')
+  run((req) => service.getComposition(address(req), clientIp(req)), 'GET /hyperfolio/wallet/:address/composition')
 );
 
 router.get(
   '/wallet/:address/positions',
   marketRateLimiter,
   validateGetRequest(hyperfolioWalletParamsSchema),
-  run((req) => service.getPositions(address(req)), 'GET /hyperfolio/wallet/:address/positions')
+  run((req) => service.getPositions(address(req), clientIp(req)), 'GET /hyperfolio/wallet/:address/positions')
 );
 
 router.get(
@@ -81,7 +91,7 @@ router.get(
   validateGetRequest(hyperfolioHistorySchema),
   run((req) => {
     const days = req.query.days ? Number(req.query.days) : DEFAULT_HISTORY_DAYS;
-    return service.getPortfolioHistory(address(req), days);
+    return service.getPortfolioHistory(address(req), days, clientIp(req));
   }, 'GET /hyperfolio/wallet/:address/history')
 );
 
@@ -91,7 +101,7 @@ router.get(
   validateGetRequest(hyperfolioTransactionsSchema),
   run((req) => {
     const query = hyperfolioTransactionsQuerySchema.parse(req.query);
-    return service.getTransactions(address(req), query);
+    return service.getTransactions(address(req), query, clientIp(req));
   }, 'GET /hyperfolio/wallet/:address/transactions')
 );
 
@@ -101,7 +111,7 @@ router.get(
   validateGetRequest(hyperfolioNftsSchema),
   run((req) => {
     const query = hyperfolioNftsQuerySchema.parse(req.query);
-    return service.getNfts(address(req), query);
+    return service.getNfts(address(req), query, clientIp(req));
   }, 'GET /hyperfolio/wallet/:address/nfts')
 );
 
@@ -109,7 +119,7 @@ router.get(
   '/wallet/:address/points',
   marketRateLimiter,
   validateGetRequest(hyperfolioWalletParamsSchema),
-  run((req) => service.getPoints(address(req)), 'GET /hyperfolio/wallet/:address/points')
+  run((req) => service.getPoints(address(req), clientIp(req)), 'GET /hyperfolio/wallet/:address/points')
 );
 
 // ==================== Yield (JSON) ====================
@@ -118,17 +128,16 @@ router.get(
   '/yield',
   marketRateLimiter,
   validateGetRequest(hyperfolioYieldSchema),
-  run((req) => service.getYield(hyperfolioYieldQuerySchema.parse(req.query)), 'GET /hyperfolio/yield')
+  run(
+    (req) => service.getYield(hyperfolioYieldQuerySchema.parse(req.query), clientIp(req)),
+    'GET /hyperfolio/yield'
+  )
 );
 
 // ==================== Positions stream (SSE proxy) ====================
 
 const streamsPerIp = new Map<string, number>();
 let totalStreams = 0;
-
-function clientIp(req: Request): string {
-  return req.ip || req.socket.remoteAddress || 'unknown';
-}
 
 function writeEvent(res: Response, id: number, payload: unknown): boolean {
   return res.write(`event: message\nid: ${id}\ndata: ${JSON.stringify(payload)}\n\n`);
@@ -201,10 +210,14 @@ class SseBlockParser {
  * Proxies Hyperfolio's SSE so the API key never reaches the browser. A fresh
  * cached `/positions` answer is replayed instantly; otherwise the upstream
  * stream is forwarded chunk by chunk and, once complete, warms that cache.
- * No marketRateLimiter (long-lived connection) — capped per IP instead.
+ * Guarded like the JSON routes: marketRateLimiter counts the open (not its
+ * duration), an upstream open spends the caller's per-IP budget — so an
+ * open/abort loop cannot fan out fresh 30-protocol scans — and concurrent
+ * streams are capped per IP and in total.
  */
 router.get(
   '/wallet/:address/positions/stream',
+  marketRateLimiter,
   validateGetRequest(hyperfolioWalletParamsSchema),
   (async (req: Request, res: Response) => {
     const wallet = address(req);
@@ -237,6 +250,11 @@ router.get(
         code: 'SSE_CONNECTION_LIMIT',
       });
     }
+    if (!client.checkRateLimit(ip)) {
+      const err = new HyperfolioThrottledError();
+      res.setHeader('Retry-After', '10');
+      return res.status(err.statusCode).json({ success: false, error: err.message, code: err.code });
+    }
     streamsPerIp.set(ip, perIp + 1);
     totalStreams += 1;
 
@@ -248,6 +266,7 @@ router.get(
     const protocols: HyperfolioProtocol[] = [];
     let portfolioStats: HyperfolioPortfolioStats | undefined;
     let completed = false;
+    let timedOut = false;
     let released = false;
     let heartbeat: NodeJS.Timeout | null = null;
 
@@ -264,7 +283,10 @@ router.get(
     req.on('close', release);
     req.on('error', release);
 
-    const upstreamTimeout = setTimeout(() => controller.abort(), HYPERFOLIO_STREAM.UPSTREAM_TIMEOUT_MS);
+    const upstreamTimeout = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, HYPERFOLIO_STREAM.UPSTREAM_TIMEOUT_MS);
 
     let upstream: ReadableStream<Uint8Array>;
     try {
@@ -273,10 +295,10 @@ router.get(
       clearTimeout(upstreamTimeout);
       release();
       if (error instanceof HyperfolioError) {
-        if (error.statusCode === 429) {
-          service.markRateLimited();
-          res.setHeader('Retry-After', '10');
-        }
+        // Only a real upstream throttle opens the shared cooldown; our own
+        // process-wide budget refusing a slot must not lock everyone out.
+        if (error instanceof HyperfolioRateLimitedError) service.markRateLimited();
+        if (error.statusCode === 429) res.setHeader('Retry-After', '10');
         return res.status(error.statusCode).json({ success: false, error: error.message, code: error.code });
       }
       logDeduplicator.error('GET /hyperfolio/wallet/:address/positions/stream', {
@@ -320,14 +342,15 @@ router.get(
         if (req.destroyed || res.writableEnded) break;
       }
     } catch (error) {
-      if (!controller.signal.aborted && !res.writableEnded) {
+      // A client disconnect aborts too; only then is there nobody to tell.
+      if ((timedOut || !controller.signal.aborted) && !res.writableEnded) {
         writeEvent(res, 0, {
           type: 'error',
-          error: 'Upstream stream interrupted',
+          error: timedOut ? 'Upstream stream timed out' : 'Upstream stream interrupted',
           fatal: true,
         });
       }
-      if (controller.signal.aborted) {
+      if (controller.signal.aborted && !timedOut) {
         logDeduplicator.info('Hyperfolio positions stream closed by client');
       } else {
         logDeduplicator.warn('Hyperfolio positions stream interrupted', {

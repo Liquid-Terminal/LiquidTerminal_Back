@@ -32,6 +32,19 @@ export class HyperfolioRateLimitedError extends HyperfolioError {
 }
 
 /**
+ * Our own guard refused the call before it reached Hyperfolio: the process-wide
+ * upstream budget is saturated, or this caller spent its per-IP budget of
+ * cache-missing lookups. Same 429 + code as an upstream throttle so the
+ * frontend treats both alike, but a distinct class so it does NOT open the
+ * shared cooldown (one noisy client must not lock everyone else out).
+ */
+export class HyperfolioThrottledError extends HyperfolioError {
+  constructor(message = 'Too many Hyperfolio lookups, retry shortly') {
+    super(message, 429, 'HYPERFOLIO_RATE_LIMITED');
+  }
+}
+
+/**
  * Upstream rejected the input (HTTP 200 with a body-level `error`, or 400):
  * unsupported address form or an unresolvable .hype/.hl domain.
  */

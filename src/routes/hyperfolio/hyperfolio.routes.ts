@@ -255,6 +255,9 @@ router.get(
       res.setHeader('Retry-After', '10');
       return res.status(err.statusCode).json({ success: false, error: err.message, code: err.code });
     }
+    // The client may have left during the awaits above: its `close` already
+    // fired, so a slot taken now would never be released.
+    if (req.destroyed || res.destroyed) return;
     streamsPerIp.set(ip, perIp + 1);
     totalStreams += 1;
 
@@ -282,6 +285,8 @@ router.get(
 
     req.on('close', release);
     req.on('error', release);
+    res.on('close', release);
+    res.on('error', release);
 
     const upstreamTimeout = setTimeout(() => {
       timedOut = true;
@@ -307,9 +312,22 @@ router.get(
       return res.status(502).json({ success: false, error: 'Upstream error', code: 'HYPERFOLIO_ERROR' });
     }
 
+    // Client gone while the upstream was opening: release() already ran, so a
+    // heartbeat started now would never be cleared.
+    if (released || res.destroyed) {
+      clearTimeout(upstreamTimeout);
+      upstream.cancel().catch(() => undefined);
+      release();
+      return;
+    }
+
     sseHeaders(res, 'upstream');
     heartbeat = setInterval(() => {
-      if (!res.writableEnded) res.write(': ping\n\n');
+      if (res.destroyed || res.writableEnded) {
+        release();
+        return;
+      }
+      res.write(': ping\n\n');
     }, HYPERFOLIO_STREAM.HEARTBEAT_INTERVAL_MS);
 
     const decoder = new TextDecoder();
@@ -320,17 +338,26 @@ router.get(
         if (done) break;
         const text = decoder.decode(value, { stream: true });
         if (!res.write(text)) {
+          // A destroyed response never emits drain/close again, and a stalled
+          // reader must not outlive the upstream timeout: also wake on abort.
+          if (res.destroyed) break;
           await new Promise<void>((resolve) => {
+            const { signal } = controller;
             const finish = (): void => {
               res.off('drain', finish);
               res.off('close', finish);
               res.off('error', finish);
+              signal.removeEventListener('abort', finish);
               resolve();
             };
+            if (signal.aborted) return resolve();
             res.once('drain', finish);
             res.once('close', finish);
             res.once('error', finish);
+            signal.addEventListener('abort', finish, { once: true });
           });
+          if (timedOut) throw new Error('Upstream stream timed out');
+          if (controller.signal.aborted) break;
         }
         for (const event of parser.push(text)) {
           if (event.type === 'protocol') protocols.push(event.data);
@@ -339,7 +366,7 @@ router.get(
             portfolioStats = event.portfolioStats;
           }
         }
-        if (req.destroyed || res.writableEnded) break;
+        if (req.destroyed || res.destroyed || res.writableEnded) break;
       }
     } catch (error) {
       // A client disconnect aborts too; only then is there nobody to tell.

@@ -52,7 +52,12 @@ class LogRotator {
     }
   }
 
-  async rotateFile(filePath: string): Promise<void> {
+  /**
+   * @param onRenamed Appelé juste après le renommage, avant le ménage des
+   *        anciens backups : c'est là que le flux d'écriture doit être rouvert
+   *        sur `filePath`.
+   */
+  async rotateFile(filePath: string, onRenamed?: () => void): Promise<void> {
     try {
       if (!existsSync(filePath)) {
         return;
@@ -62,12 +67,13 @@ class LogRotator {
       const dir = path.dirname(filePath);
       const ext = path.extname(filePath);
       const base = path.basename(filePath, ext);
-      
+
       // Créer le nom du fichier de backup
       const backupPath = path.join(dir, `${base}-${timestamp}${ext}`);
 
       // Renommer le fichier actuel
       await rename(filePath, backupPath);
+      onRenamed?.();
 
       // Supprimer les anciens fichiers si on dépasse maxFiles
       await this.cleanupOldFiles(dir, base, ext);
@@ -132,6 +138,7 @@ class LogDeduplicatorInternal {
 
   private constructor() {
     this.cleanupInterval = setInterval(() => this.cleanupOldEntries(), this.deduplicationWindow);
+    this.cleanupInterval.unref();
   }
 
   public static getInstance(): LogDeduplicatorInternal {
@@ -141,24 +148,21 @@ class LogDeduplicatorInternal {
     return LogDeduplicatorInternal.instance;
   }
 
+  // `logMap` is kept ordered by last occurrence (processLog re-inserts on every
+  // hit), so the oldest entries are always first: expiry and eviction stop at
+  // the first live entry instead of scanning / sorting the whole map.
   private cleanupOldEntries(): void {
     const now = Date.now();
-    for (const [key, log] of this.logMap.entries()) {
-      if (now - log.timestamp > this.deduplicationWindow) {
-        this.logMap.delete(key);
-      }
+    for (const [key, log] of this.logMap) {
+      if (now - log.timestamp <= this.deduplicationWindow) break;
+      this.logMap.delete(key);
     }
   }
 
   public cleanup(): void {
-    if (this.logMap.size > this.maxLogs) {
-      const entries = Array.from(this.logMap.entries());
-      entries.sort(([, a], [, b]) => a.timestamp - b.timestamp);
-      let i = 0;
-      while (this.logMap.size > this.maxLogs && i < entries.length) {
-        this.logMap.delete(entries[i][0]);
-        i++;
-      }
+    for (const key of this.logMap.keys()) {
+      if (this.logMap.size <= this.maxLogs) break;
+      this.logMap.delete(key);
     }
   }
 
@@ -177,10 +181,13 @@ class LogDeduplicatorInternal {
     if (existingLog && (now - existingLog.timestamp < this.deduplicationWindow)) {
       existingLog.count++;
       existingLog.timestamp = now;
+      this.logMap.delete(key);
+      this.logMap.set(key, existingLog);
       return null;
     }
 
     const newLog: LogEntry = { message, level, timestamp: now, count: 1, metadata };
+    this.logMap.delete(key);
     this.logMap.set(key, newLog);
     if (this.logMap.size > this.maxLogs) {
       this.cleanup();
@@ -230,10 +237,12 @@ const logRotator = new LogRotator({
   compress: false // Pas de compression pour l'instant
 });
 
+type FileDestination = ReturnType<typeof pino.destination>;
+
 // Classe pour gérer les streams avec rotation
 class RotatingFileStream {
   private filePath: string;
-  private stream: pino.DestinationStream | null = null;
+  private stream: FileDestination | null = null;
   private rotator: LogRotator;
 
   constructor(filePath: string, rotator: LogRotator) {
@@ -241,14 +250,13 @@ class RotatingFileStream {
     this.rotator = rotator;
   }
 
-  async getStream(): Promise<pino.DestinationStream> {
+  async getStream(): Promise<FileDestination> {
     if (!this.stream) {
+      // Un fichier déjà plein au démarrage est archivé avant d'ouvrir le flux.
+      if (await this.rotator.shouldRotate(this.filePath)) {
+        await this.rotator.rotateFile(this.filePath);
+      }
       await this.initializeStream();
-    }
-
-    // Vérifier si on doit faire une rotation
-    if (await this.rotator.shouldRotate(this.filePath)) {
-      await this.rotate();
     }
 
     return this.stream!;
@@ -259,23 +267,26 @@ class RotatingFileStream {
     this.stream = pino.destination(this.filePath);
   }
 
+  /**
+   * Rotation en place : le fichier est renommé, puis le SonicBoom que pino
+   * tient dans son multistream est rouvert sur le même chemin (il ferme
+   * lui-même l'ancien descripteur). En recréer un nouveau, comme avant, ne
+   * changeait rien pour pino — qui continuait d'écrire dans le backup renommé,
+   * jamais plus rotaté — et fuyait un descripteur à chaque rotation.
+   */
   async rotate(): Promise<void> {
-    if (this.stream) {
-      // Fermer le stream actuel
-      (this.stream as any).flushSync();
-      this.stream = null;
+    const stream = this.stream;
+    if (!stream) {
+      return;
     }
-
-    // Faire la rotation
-    await this.rotator.rotateFile(this.filePath);
-
-    // Recréer le stream
-    await this.initializeStream();
+    await this.rotator.rotateFile(this.filePath, () => stream.reopen());
   }
 
   async flush(): Promise<void> {
-    if (this.stream) {
-      (this.stream as any).flushSync();
+    try {
+      this.stream?.flushSync();
+    } catch (error) {
+      console.error('Error flushing log file:', error);
     }
   }
 }
@@ -319,8 +330,9 @@ async function initializeLogger() {
     }
     errorDebugLogger = pino({ ...baseConfig, level: 'debug' }, pino.multistream(edPinoStreams));
 
-    // Vérifier la rotation toutes les 5 minutes
-    setInterval(async () => {
+    // Seul point de contrôle de la taille : écrire une ligne ne coûte plus un
+    // existsSync + stat. Un fichier peut dépasser maxSize d'une minute de logs.
+    const rotationTimer = setInterval(async () => {
       try {
         if (await logRotator.shouldRotate(combinedLogPath)) {
           await combinedStream.rotate();
@@ -331,7 +343,8 @@ async function initializeLogger() {
       } catch (error) {
         console.error('Error during log rotation check:', error);
       }
-    }, 5 * 60 * 1000); // 5 minutes
+    }, 60 * 1000);
+    rotationTimer.unref();
 
   } catch (err) {
     console.error('Failed to initialize pino logger:', err);
@@ -341,19 +354,6 @@ async function initializeLogger() {
 }
 
 initializeLogger();
-
-async function maybeRotate(level: LogLevel): Promise<void> {
-  if (level === 'info' || level === 'warn') {
-    if (await logRotator.shouldRotate(combinedLogPath)) {
-      await combinedStream.rotate();
-    }
-    return;
-  }
-
-  if (await logRotator.shouldRotate(errorLogPath)) {
-    await errorStream.rotate();
-  }
-}
 
 function getFallbackConsole(level: LogLevel): typeof console.info {
   switch (level) {
@@ -398,7 +398,6 @@ async function writeLog(
     finalMetadata = processedLog.metadata;
   }
 
-  await maybeRotate(level);
   logger[level](finalMetadata, finalMessage);
 }
 

@@ -9,6 +9,7 @@ import {
 import { redisService } from '../../core/redis.service';
 import { CACHE_KEYS } from '../../constants/cache.constants';
 import { logDeduplicator } from '../../utils/logDeduplicator';
+import { SingleFlight } from '../../utils/singleFlight';
 
 interface ChartConfig {
   hours: number;
@@ -31,6 +32,8 @@ const CHART_CONFIG: Record<HistoricalChartPeriod, ChartConfig> = {
 export class HistoricalChartService {
   private static instance: HistoricalChartService;
   private readonly repository: HistoricalLiquidationRepository;
+  /** Concurrent cache misses on the same key share one computation. */
+  private readonly inflight = new SingleFlight();
 
   private constructor() {
     this.repository = historicalLiquidationRepository;
@@ -58,6 +61,14 @@ export class HistoricalChartService {
       return JSON.parse(cached) as HistoricalChartResult;
     }
 
+    return this.inflight.run(cacheKey, () => this.computeChart(period, coin, cacheKey));
+  }
+
+  private async computeChart(
+    period: HistoricalChartPeriod,
+    coin: string | undefined,
+    cacheKey: string
+  ): Promise<HistoricalChartResult> {
     const config = CHART_CONFIG[period];
     const now = new Date();
     const since = new Date(now.getTime() - config.hours * 60 * 60 * 1000);

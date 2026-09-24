@@ -1,7 +1,61 @@
+import { Prisma } from '../../../prisma-historical/generated/client';
 import { prismaHistorical } from '../../core/prisma.historical.service';
 import { BasePrismaRepository } from './base-prisma.repository';
-import { HistoricalLiquidationRepository } from '../interfaces/historical.repository.interface';
+import {
+  HistoricalLiquidationRepository,
+  HistoricalChartWindow,
+  HistoricalStatsWindow,
+} from '../interfaces/historical.repository.interface';
 import { RawLiquidationCreateInput, IngestionStateResponse, HistoricalStats, RawChartBucket } from '../../types/historical.types';
+
+/** One row of the stats queries: plain numbers (SUM/MAX of numerics cast to float8, NULL on no rows). */
+interface StatsRow {
+  liquidations_count: number;
+  total_volume: number | null;
+  max_liq: number | null;
+  long_count: number;
+  long_volume: number | null;
+  short_count: number;
+  short_volume: number | null;
+  top_coin: string | null;
+  top_coin_volume: number | null;
+}
+
+/**
+ * Same figures and rounding as the former aggregate + two groupBy version.
+ * `notional_total` is DOUBLE PRECISION in the database (init migration —
+ * schema.prisma says Decimal): summing per coin first can move the last bit
+ * of a float sum, which the rounding to the cent absorbs.
+ */
+function toHistoricalStats(row: StatsRow | undefined): HistoricalStats {
+  const totalVolume = row?.total_volume ?? 0;
+  const liquidationsCount = row?.liquidations_count ?? 0;
+  const maxLiq = row?.max_liq ?? 0;
+  const longVolume = row?.long_volume ?? 0;
+  const shortVolume = row?.short_volume ?? 0;
+  const topCoinVolume = row?.top_coin_volume ?? 0;
+
+  const avgSize = liquidationsCount > 0
+    ? Math.round((totalVolume / liquidationsCount) * 100) / 100
+    : 0;
+
+  return {
+    totalVolume_USD: Math.round(totalVolume * 100) / 100,
+    liquidationsCount,
+    longCount: row?.long_count ?? 0,
+    shortCount: row?.short_count ?? 0,
+    longVolume_USD: Math.round(longVolume * 100) / 100,
+    shortVolume_USD: Math.round(shortVolume * 100) / 100,
+    topCoin: row?.top_coin ?? 'N/A',
+    topCoinVolume_USD: Math.round(topCoinVolume * 100) / 100,
+    avgSize_USD: avgSize,
+    maxLiq_USD: Math.round(maxLiq * 100) / 100,
+  };
+}
+
+function earliestSince(windows: { since: Date }[]): Date {
+  return new Date(Math.min(...windows.map((w) => w.since.getTime())));
+}
 
 /**
  * Prisma implementation of the HistoricalLiquidationRepository.
@@ -80,83 +134,126 @@ export class PrismaHistoricalLiquidationRepository
     );
   }
 
+  /**
+   * One statement and one scan of the window: per-coin aggregates first, then
+   * everything (totals, long/short split, top coin) derived from that small
+   * set. Replaces an aggregate + two groupBy, i.e. three scans on three pool
+   * connections.
+   */
   async getStats(since: Date, coin?: string): Promise<HistoricalStats> {
     return this.executeWithErrorHandling(
       async () => {
-        const whereFilter: Record<string, unknown> = { time: { gte: since } };
-        if (coin) {
-          whereFilter.coin = coin;
-        }
-
-        const [aggregates, dirGroups, topCoinGroup] = await Promise.all([
-          // 1. Global aggregates: totalVolume, maxLiq, count
-          this.prismaClient.rawLiquidation.aggregate({
-            where: whereFilter,
-            _sum: { notionalTotal: true },
-            _max: { notionalTotal: true },
-            _count: true,
-          }),
-          // 2. Group by liqDir for long/short counts + volumes
-          this.prismaClient.rawLiquidation.groupBy({
-            by: ['liqDir'],
-            where: whereFilter,
-            _sum: { notionalTotal: true },
-            _count: true,
-          }),
-          // 3. Group by coin, ordered by volume DESC, take top 1
-          this.prismaClient.rawLiquidation.groupBy({
-            by: ['coin'],
-            where: whereFilter,
-            _sum: { notionalTotal: true },
-            orderBy: { _sum: { notionalTotal: 'desc' } },
-            take: 1,
-          }),
-        ]);
-
-        const totalVolume = aggregates._sum.notionalTotal ?? 0;
-        const liquidationsCount = aggregates._count ?? 0;
-        const maxLiq = aggregates._max.notionalTotal ?? 0;
-
-        // Extract long/short from direction groups
-        let longCount = 0;
-        let shortCount = 0;
-        let longVolume = 0;
-        let shortVolume = 0;
-
-        for (const group of dirGroups) {
-          if (group.liqDir === 'Long') {
-            longCount = group._count;
-            longVolume = group._sum.notionalTotal ?? 0;
-          } else if (group.liqDir === 'Short') {
-            shortCount = group._count;
-            shortVolume = group._sum.notionalTotal ?? 0;
-          }
-        }
-
-        // Top coin
-        const topCoin = topCoinGroup.length > 0 ? topCoinGroup[0].coin : 'N/A';
-        const topCoinVolume = topCoinGroup.length > 0 ? (topCoinGroup[0]._sum.notionalTotal ?? 0) : 0;
-
-        // Average size
-        const avgSize = liquidationsCount > 0
-          ? Math.round((totalVolume / liquidationsCount) * 100) / 100
-          : 0;
-
-        return {
-          totalVolume_USD: Math.round(totalVolume * 100) / 100,
-          liquidationsCount,
-          longCount,
-          shortCount,
-          longVolume_USD: Math.round(longVolume * 100) / 100,
-          shortVolume_USD: Math.round(shortVolume * 100) / 100,
-          topCoin,
-          topCoinVolume_USD: Math.round(topCoinVolume * 100) / 100,
-          avgSize_USD: avgSize,
-          maxLiq_USD: Math.round(maxLiq * 100) / 100,
-        };
+        const coinFilter = coin ? Prisma.sql`AND coin = ${coin}` : Prisma.empty;
+        const rows: StatsRow[] = await this.prismaClient.$queryRaw`
+          WITH per_coin AS (
+            SELECT
+              coin,
+              COUNT(*) AS n,
+              SUM(notional_total) AS volume,
+              MAX(notional_total) AS max_liq,
+              COUNT(*) FILTER (WHERE liq_dir = 'Long') AS long_n,
+              SUM(notional_total) FILTER (WHERE liq_dir = 'Long') AS long_volume,
+              COUNT(*) FILTER (WHERE liq_dir = 'Short') AS short_n,
+              SUM(notional_total) FILTER (WHERE liq_dir = 'Short') AS short_volume
+            FROM raw_liquidations
+            WHERE time >= ${since} ${coinFilter}
+            GROUP BY coin
+          )
+          SELECT
+            COALESCE(SUM(n), 0)::int AS liquidations_count,
+            SUM(volume)::float8 AS total_volume,
+            MAX(max_liq)::float8 AS max_liq,
+            COALESCE(SUM(long_n), 0)::int AS long_count,
+            SUM(long_volume)::float8 AS long_volume,
+            COALESCE(SUM(short_n), 0)::int AS short_count,
+            SUM(short_volume)::float8 AS short_volume,
+            (SELECT coin FROM per_coin ORDER BY volume DESC, coin LIMIT 1) AS top_coin,
+            (SELECT volume::float8 FROM per_coin ORDER BY volume DESC, coin LIMIT 1) AS top_coin_volume
+          FROM per_coin
+        `;
+        return toHistoricalStats(rows[0]);
       },
       'computing historical stats',
       { since: since.toISOString(), coin }
+    );
+  }
+
+  /**
+   * `getStats` for several windows in one statement: the widest window is
+   * read once into a CTE, then each window aggregates its own slice of it.
+   * Every requested key is present in the result.
+   */
+  async getStatsForPeriods(windows: HistoricalStatsWindow[]): Promise<Map<string, HistoricalStats>> {
+    return this.executeWithErrorHandling(
+      async () => {
+        const result = new Map<string, HistoricalStats>();
+        if (windows.length === 0) return result;
+
+        const perWindow = windows.map((w) => Prisma.sql`
+          SELECT
+            ${w.key}::text AS period,
+            coin,
+            COUNT(*) AS n,
+            SUM(notional_total) AS volume,
+            MAX(notional_total) AS max_liq,
+            COUNT(*) FILTER (WHERE liq_dir = 'Long') AS long_n,
+            SUM(notional_total) FILTER (WHERE liq_dir = 'Long') AS long_volume,
+            COUNT(*) FILTER (WHERE liq_dir = 'Short') AS short_n,
+            SUM(notional_total) FILTER (WHERE liq_dir = 'Short') AS short_volume
+          FROM w
+          WHERE time >= ${w.since}
+          GROUP BY coin
+        `);
+        const rows: (StatsRow & { period: string })[] = await this.prismaClient.$queryRaw`
+          WITH w AS MATERIALIZED (
+            SELECT time, coin, liq_dir, notional_total
+            FROM raw_liquidations
+            WHERE time >= ${earliestSince(windows)}
+          ),
+          per_coin AS (
+            ${Prisma.join(perWindow, ' UNION ALL ')}
+          ),
+          top AS (
+            SELECT DISTINCT ON (period) period, coin, volume
+            FROM per_coin
+            ORDER BY period, volume DESC, coin
+          )
+          SELECT
+            a.period,
+            a.liquidations_count,
+            a.total_volume,
+            a.max_liq,
+            a.long_count,
+            a.long_volume,
+            a.short_count,
+            a.short_volume,
+            top.coin AS top_coin,
+            top.volume::float8 AS top_coin_volume
+          FROM (
+            SELECT
+              period,
+              COALESCE(SUM(n), 0)::int AS liquidations_count,
+              SUM(volume)::float8 AS total_volume,
+              MAX(max_liq)::float8 AS max_liq,
+              COALESCE(SUM(long_n), 0)::int AS long_count,
+              SUM(long_volume)::float8 AS long_volume,
+              COALESCE(SUM(short_n), 0)::int AS short_count,
+              SUM(short_volume)::float8 AS short_volume
+            FROM per_coin
+            GROUP BY period
+          ) a
+          LEFT JOIN top ON top.period = a.period
+        `;
+
+        const byPeriod = new Map(rows.map((row) => [row.period, row]));
+        for (const w of windows) {
+          result.set(w.key, toHistoricalStats(byPeriod.get(w.key)));
+        }
+        return result;
+      },
+      'computing historical stats for periods',
+      { periods: windows.map((w) => w.key).join(',') },
+      { verboseSuccess: false }
     );
   }
 
@@ -164,7 +261,9 @@ export class PrismaHistoricalLiquidationRepository
     return this.executeWithErrorHandling(
       async () => {
         const bucketSeconds = bucketSizeMinutes * 60;
-        const coinParam = coin ?? null;
+        // Only filter on coin when one is given: a `(coin IS NULL OR coin = $x)`
+        // predicate can't use the (coin, time) index.
+        const coinFilter = coin ? Prisma.sql`AND coin = ${coin}` : Prisma.empty;
         return this.prismaClient.$queryRaw<RawChartBucket[]>`
           SELECT
             (to_timestamp(floor(EXTRACT(EPOCH FROM time AT TIME ZONE 'UTC') / ${bucketSeconds}) * ${bucketSeconds}) AT TIME ZONE 'UTC') AS bucket,
@@ -175,14 +274,67 @@ export class PrismaHistoricalLiquidationRepository
             COUNT(CASE WHEN liq_dir = 'Long'  THEN 1 END)::int AS long_count,
             COUNT(CASE WHEN liq_dir = 'Short' THEN 1 END)::int AS short_count
           FROM raw_liquidations
-          WHERE time >= ${since}
-            AND (${coinParam}::text IS NULL OR coin = ${coinParam})
+          WHERE time >= ${since} ${coinFilter}
           GROUP BY 1
           ORDER BY 1 ASC
         `;
       },
       'computing chart buckets',
       { since: since.toISOString(), bucketSizeMinutes, coin }
+    );
+  }
+
+  /**
+   * `getChart` for several windows (each with its own bucket size) in one
+   * statement: the widest window is read once into a CTE — with the epoch
+   * computed once per row — then each window buckets its own slice of it.
+   * Buckets come back in ascending order per key; a key without rows maps to
+   * an empty array.
+   */
+  async getChartForPeriods(windows: HistoricalChartWindow[]): Promise<Map<string, RawChartBucket[]>> {
+    return this.executeWithErrorHandling(
+      async () => {
+        const result = new Map<string, RawChartBucket[]>(windows.map((w) => [w.key, []]));
+        if (windows.length === 0) return result;
+
+        // Same buckets as getChart's `floor(EXTRACT(EPOCH …) / s) * s`: the
+        // epoch has millisecond precision, far above float8 rounding, so the
+        // floor is identical — without numeric arithmetic on every row.
+        const perWindow = windows.map((w) => {
+          const bucketSeconds = w.bucketSizeMinutes * 60;
+          return Prisma.sql`
+            SELECT
+              ${w.key}::text AS period,
+              (to_timestamp(floor(epoch / ${bucketSeconds}::int) * ${bucketSeconds}::int) AT TIME ZONE 'UTC') AS bucket,
+              SUM(notional_total)::float AS total_volume,
+              COUNT(*)::int AS total_count,
+              SUM(CASE WHEN liq_dir = 'Long'  THEN notional_total ELSE 0 END)::float AS long_volume,
+              SUM(CASE WHEN liq_dir = 'Short' THEN notional_total ELSE 0 END)::float AS short_volume,
+              COUNT(CASE WHEN liq_dir = 'Long'  THEN 1 END)::int AS long_count,
+              COUNT(CASE WHEN liq_dir = 'Short' THEN 1 END)::int AS short_count
+            FROM w
+            WHERE time >= ${w.since}
+            GROUP BY 2
+          `;
+        });
+        const rows: (RawChartBucket & { period: string })[] = await this.prismaClient.$queryRaw`
+          WITH w AS MATERIALIZED (
+            SELECT time, liq_dir, notional_total, date_part('epoch', time) AS epoch
+            FROM raw_liquidations
+            WHERE time >= ${earliestSince(windows)}
+          )
+          ${Prisma.join(perWindow, ' UNION ALL ')}
+          ORDER BY 1, 2
+        `;
+
+        for (const { period, ...bucket } of rows) {
+          result.get(period)?.push(bucket);
+        }
+        return result;
+      },
+      'computing chart buckets for periods',
+      { periods: windows.map((w) => w.key).join(',') },
+      { verboseSuccess: false }
     );
   }
 }

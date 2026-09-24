@@ -14,6 +14,7 @@ import {
 } from '../../types/liquidations.types';
 import { AnalyticsLiquidationStatsResponse } from '../../types/analytics-liquidations.types';
 import { logDeduplicator } from '../../utils/logDeduplicator';
+import { SingleFlight } from '../../utils/singleFlight';
 import { redisService } from '../../core/redis.service';
 import { SSEManagerService } from './sse-manager.service';
 import { LiquidationDataProvider } from '../../types/liquidation-provider.interface';
@@ -49,6 +50,8 @@ export class LiquidationsService implements LiquidationDataProvider {
   };
 
   private readonly sseManager: SSEManagerService;
+  /** Concurrent cache misses on the same key share one recomputation. */
+  private readonly inflight = new SingleFlight();
 
   private constructor() {
     this.client = HLIndexerLiquidationsClient.getInstance();
@@ -91,33 +94,55 @@ export class LiquidationsService implements LiquidationDataProvider {
       logDeduplicator.warn('Redis cache error for all-data', { error: String(cacheError) });
     }
 
+    return this.inflight.run(cacheKey, () => this.computeAllData(cacheKey));
+  }
+
+  /**
+   * Two statements for the five windows (stats, charts), each scanning the
+   * last 24h once — this used to be four queries per window, twenty at once
+   * on the pool the ingestion writes through.
+   */
+  private async computeAllData(cacheKey: string): Promise<LiquidationsDataResponse> {
     const startTime = Date.now();
     const periods: ChartPeriod[] = ['2h', '4h', '8h', '12h', '24h'];
     const periodsData: Record<string, PeriodData> = {};
 
     try {
-      await Promise.all(periods.map(async (period) => {
-      const config = LiquidationsService.PERIOD_CONFIG[period];
-        const since = new Date(Date.now() - config.hours * 60 * 60 * 1000);
+      const windows = periods.map((period) => {
+        const config = LiquidationsService.PERIOD_CONFIG[period];
+        return {
+          period,
+          config,
+          key: period,
+          since: new Date(startTime - config.hours * 60 * 60 * 1000),
+          bucketSizeMinutes: config.bucketSizeMinutes,
+        };
+      });
 
-        const [historicalStats, rawBuckets] = await Promise.all([
-          historicalLiquidationRepository.getStats(since),
-          historicalLiquidationRepository.getChart(since, config.bucketSizeMinutes),
-        ]);
+      const [statsByPeriod, chartByPeriod] = await Promise.all([
+        historicalLiquidationRepository.getStatsForPeriods(windows),
+        historicalLiquidationRepository.getChartForPeriods(windows),
+      ]);
 
-        const stats = this.convertHistoricalStats(historicalStats);
-        const buckets = this.convertChartBuckets(rawBuckets, since, new Date(), config.bucketSizeMinutes);
+      const to = new Date();
+      for (const { period, config, since } of windows) {
+        const historicalStats = statsByPeriod.get(period);
+        if (!historicalStats) {
+          throw new Error(`Missing liquidation stats for ${period}`);
+        }
+        periodsData[period] = {
+          stats: this.convertHistoricalStats(historicalStats),
+          chart: {
+            interval: config.interval,
+            buckets: this.convertChartBuckets(chartByPeriod.get(period) ?? [], since, to, config.bucketSizeMinutes),
+          },
+        };
+      }
 
-      periodsData[period] = {
-        stats,
-          chart: { interval: config.interval, buckets },
-      };
-      }));
-
-    const result: LiquidationsDataResponse = {
-      success: true,
-      periods: periodsData as LiquidationsDataResponse['periods'],
-      metadata: {
+      const result: LiquidationsDataResponse = {
+        success: true,
+        periods: periodsData as LiquidationsDataResponse['periods'],
+        metadata: {
           executionTimeMs: Date.now() - startTime,
           cachedAt: new Date().toISOString(),
         },
@@ -134,7 +159,7 @@ export class LiquidationsService implements LiquidationDataProvider {
       logDeduplicator.error('LiquidationsService.getAllData failed', {
         error: error instanceof Error ? error.message : String(error),
       });
-        throw new LiquidationsError(
+      throw new LiquidationsError(
         error instanceof Error ? error.message : 'Failed to fetch unified liquidation data',
         500,
         'ALL_DATA_ERROR'
@@ -158,6 +183,10 @@ export class LiquidationsService implements LiquidationDataProvider {
       logDeduplicator.warn('Redis cache error for stats all', { error: String(cacheError) });
     }
 
+    return this.inflight.run(cacheKey, () => this.computeAllStats(cacheKey));
+  }
+
+  private async computeAllStats(cacheKey: string): Promise<LiquidationStatsAllResponse> {
     const startTime = Date.now();
     const periods = [2, 4, 8, 12, 24] as const;
     const results: Record<string, LiquidationStats | null> = {
@@ -166,18 +195,24 @@ export class LiquidationsService implements LiquidationDataProvider {
     const errors: string[] = [];
 
     try {
-      await Promise.all(periods.map(async (hours) => {
-        try {
-          const since = new Date(Date.now() - hours * 60 * 60 * 1000);
-          const historicalStats = await historicalLiquidationRepository.getStats(since);
-          results[`${hours}h`] = this.convertHistoricalStats(historicalStats);
-        } catch (periodError) {
-          errors.push(`Failed to calculate ${hours}h stats`);
-          logDeduplicator.error(`Failed to calculate ${hours}h stats`, { error: String(periodError) });
-        }
+      const windows = periods.map((hours) => ({
+        key: `${hours}h`,
+        since: new Date(startTime - hours * 60 * 60 * 1000),
       }));
+      const statsByPeriod = await historicalLiquidationRepository.getStatsForPeriods(windows);
+      for (const { key } of windows) {
+        const historicalStats = statsByPeriod.get(key);
+        if (historicalStats) {
+          results[key] = this.convertHistoricalStats(historicalStats);
+        }
+      }
     } catch (error) {
-      errors.push(`Failed to fetch stats: ${error instanceof Error ? error.message : String(error)}`);
+      // One statement serves every window now: when it fails they all do,
+      // reported per window as before.
+      for (const hours of periods) {
+        errors.push(`Failed to calculate ${hours}h stats`);
+      }
+      logDeduplicator.error('Failed to calculate liquidation stats', { error: String(error) });
     }
 
     const result: LiquidationStatsAllResponse = {
@@ -204,7 +239,6 @@ export class LiquidationsService implements LiquidationDataProvider {
   // ============================================================================
 
   public async getChartData(period: ChartPeriod): Promise<LiquidationChartDataResponse> {
-    const config = LiquidationsService.PERIOD_CONFIG[period];
     const cacheKey = `liquidations:chart:${period}`;
     const startTime = Date.now();
 
@@ -216,6 +250,16 @@ export class LiquidationsService implements LiquidationDataProvider {
     } catch (cacheError) {
       logDeduplicator.warn('Redis cache error for chart data', { error: String(cacheError) });
     }
+
+    return this.inflight.run(cacheKey, () => this.computeChartData(period, cacheKey, startTime));
+  }
+
+  private async computeChartData(
+    period: ChartPeriod,
+    cacheKey: string,
+    startTime: number
+  ): Promise<LiquidationChartDataResponse> {
+    const config = LiquidationsService.PERIOD_CONFIG[period];
 
     try {
       const now = new Date();

@@ -4,8 +4,15 @@ import { HistoricalStats } from '../../types/historical.types';
 import { redisService } from '../../core/redis.service';
 import { CACHE_KEYS, CACHE_TTL } from '../../constants/cache.constants';
 import { logDeduplicator } from '../../utils/logDeduplicator';
+import { SingleFlight } from '../../utils/singleFlight';
 
 export type HistoricalStatsPeriod = '1h' | '24h' | '7d' | '14d' | '30d';
+
+export interface HistoricalStatsResult {
+  stats: HistoricalStats;
+  filters: { period: string; coin: string | null };
+  metadata: { computedAt: string; cacheTTL: number; nextUpdateAt: string; dataFrom: string; dataTo: string };
+}
 
 const PERIOD_HOURS: Record<HistoricalStatsPeriod, number> = {
   '1h': 1,
@@ -30,6 +37,8 @@ const PERIOD_CACHE_TTL: Record<HistoricalStatsPeriod, number> = {
 export class HistoricalStatsService {
   private static instance: HistoricalStatsService;
   private readonly repository: HistoricalLiquidationRepository;
+  /** Concurrent cache misses on the same key share one computation. */
+  private readonly inflight = new SingleFlight();
 
   private constructor() {
     this.repository = historicalLiquidationRepository;
@@ -47,11 +56,7 @@ export class HistoricalStatsService {
    * @param period Time window: '24h', '7d', '14d', '30d'
    * @param coin Optional coin filter (e.g. "BTC", "flx:SILVER")
    */
-  async getStats(period: HistoricalStatsPeriod = '24h', coin?: string): Promise<{
-    stats: HistoricalStats;
-    filters: { period: string; coin: string | null };
-    metadata: { computedAt: string; cacheTTL: number; nextUpdateAt: string; dataFrom: string; dataTo: string };
-  }> {
+  async getStats(period: HistoricalStatsPeriod = '24h', coin?: string): Promise<HistoricalStatsResult> {
     const cacheTTL = PERIOD_CACHE_TTL[period];
     const cacheKey = CACHE_KEYS.HISTORICAL_STATS(period, coin);
 
@@ -61,6 +66,15 @@ export class HistoricalStatsService {
       return JSON.parse(cached);
     }
 
+    return this.inflight.run(cacheKey, () => this.computeStats(period, coin, cacheKey, cacheTTL));
+  }
+
+  private async computeStats(
+    period: HistoricalStatsPeriod,
+    coin: string | undefined,
+    cacheKey: string,
+    cacheTTL: number
+  ): Promise<HistoricalStatsResult> {
     // Compute from DB
     const hours = PERIOD_HOURS[period];
     const since = new Date(Date.now() - hours * 60 * 60 * 1000);

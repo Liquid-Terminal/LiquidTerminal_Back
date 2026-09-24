@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import { Request, Response, NextFunction } from 'express';
 import { redisService } from '../core/redis.service';
 import { logDeduplicator } from '../utils/logDeduplicator';
@@ -28,12 +27,51 @@ const RATE_LIMITS = {
   }
 };
 
-// Clés Redis pour les différentes fenêtres de temps
-const getRedisKeys = (ip: string) => ({
-  burstKey: `ratelimit:${ip}:burst`,
-  minuteKey: `ratelimit:${ip}:minute`,
-  hourKey: `ratelimit:${ip}:hour`
-});
+interface RateWindow {
+  name: string;
+  seconds: number;
+}
+
+// Fenêtres de temps, dans l'ordre des compteurs renvoyés par countRequest
+const MARKET_WINDOWS: readonly RateWindow[] = [
+  { name: 'burst', seconds: RATE_LIMITS.BURST_LIMIT.WINDOW },
+  { name: 'minute', seconds: RATE_LIMITS.MINUTE_LIMIT.WINDOW },
+  { name: 'hour', seconds: RATE_LIMITS.HOUR_LIMIT.WINDOW },
+];
+
+/**
+ * Counts this request in one fixed window per entry of `windows` and returns
+ * the counts, in a single round trip (INCR + EXPIRE per window).
+ *
+ * The sorted sets this replaces kept every request as a member for the whole
+ * window — up to 72k per IP for the hour — at twelve commands per request. A
+ * fixed window counts a subset of what the sliding one counted, so it never
+ * rejects a request the old limiter accepted; across a boundary it can admit
+ * up to twice a limit, which these ceilings tolerate. (The 1 s burst window was
+ * already a fixed second: members were scored in whole seconds.)
+ *
+ * Throws on any Redis failure so callers switch to the in-memory fallback —
+ * swallowing it returned a count of 0, which let everything through.
+ */
+async function countRequest(prefix: string, windows: readonly RateWindow[]): Promise<number[]> {
+  const now = Math.floor(Date.now() / 1000);
+  const pipeline = redisService.getClient().pipeline();
+  for (const window of windows) {
+    const key = `${prefix}:${window.name}:${Math.floor(now / window.seconds)}`;
+    pipeline.incr(key);
+    pipeline.expire(key, window.seconds * 2);
+  }
+
+  const results = await pipeline.exec();
+  if (!results) {
+    throw new Error('Rate limiter pipeline aborted');
+  }
+  return windows.map((_, i) => {
+    const [error, count] = results[i * 2];
+    if (error) throw error;
+    return Number(count);
+  });
+}
 
 // In-memory fallback when Redis is down (fail-secure)
 const inMemoryCounters = new Map<string, { count: number; resetAt: number }>();
@@ -85,16 +123,9 @@ export const marketRateLimiter = async (req: Request, res: Response, next: NextF
     return;
   }
 
-  const keys = getRedisKeys(ip);
-  const now = Math.floor(Date.now() / 1000);
-
   try {
     // Vérification multi-niveaux avec Redis
-    const [burstCount, minuteCount, hourCount] = await Promise.all([
-      incrementAndGetCount(keys.burstKey, now, RATE_LIMITS.BURST_LIMIT.WINDOW),
-      incrementAndGetCount(keys.minuteKey, now, RATE_LIMITS.MINUTE_LIMIT.WINDOW),
-      incrementAndGetCount(keys.hourKey, now, RATE_LIMITS.HOUR_LIMIT.WINDOW)
-    ]);
+    const [burstCount, minuteCount, hourCount] = await countRequest(`ratelimit:${ip}`, MARKET_WINDOWS);
 
     // Vérification des limites
     if (burstCount > RATE_LIMITS.BURST_LIMIT.MAX_REQUESTS) {
@@ -125,41 +156,6 @@ export const marketRateLimiter = async (req: Request, res: Response, next: NextF
   }
 };
 
-async function incrementAndGetCount(key: string, now: number, window: number): Promise<number> {
-  try {
-    // ✅ Utiliser un pipeline Redis pour grouper les 4 commandes en 1 seul round-trip
-    const redis = redisService.getClient();
-    const pipeline = redis.pipeline();
-    // The member must be unique per request. It used to be `${now}` — the
-    // timestamp itself — so every request landing in the same second wrote the
-    // SAME member and ZADD merely updated its score. ZCARD then counted
-    // distinct seconds, never requests: the 1s window could not exceed 2, the
-    // minute window 61, the hour window 3601. All three thresholds (20 / 1200 /
-    // 72000) were unreachable, so this middleware limited nothing at all.
-    pipeline.zadd(key, now, `${now}:${randomUUID()}`);
-    pipeline.zremrangebyscore(key, 0, now - window); // Nettoyer les anciennes entrées
-    pipeline.zcard(key);                          // Compter les entrées restantes
-    pipeline.expire(key, window * 2);             // Définir une expiration
-    
-    const results = await pipeline.exec();
-    
-    // Le résultat de zcard est à l'index 2 (3ème commande)
-    // Format: [[err, result], [err, result], ...]
-    const zcardResult = results?.[2];
-    if (zcardResult && zcardResult[0] === null) {
-      return zcardResult[1] as number;
-    }
-    
-    return 0;
-  } catch (error) {
-    logDeduplicator.error('Rate limiter Redis error', {
-      error: error instanceof Error ? error.message : String(error),
-      key
-    });
-    return 0;
-  }
-}
-
 function sendLimitExceededResponse(res: Response, message: string): void {
   res.status(429).json({
     error: 'Rate limit exceeded',
@@ -179,10 +175,10 @@ const PASSTHROUGH_LIMITS = {
   MINUTE: { WINDOW: 60, MAX_REQUESTS: 300 },
 };
 
-const getPassthroughKeys = (ip: string) => ({
-  burstKey: `ratelimit:pt:${ip}:burst`,
-  minuteKey: `ratelimit:pt:${ip}:minute`,
-});
+const PASSTHROUGH_WINDOWS: readonly RateWindow[] = [
+  { name: 'burst', seconds: PASSTHROUGH_LIMITS.BURST.WINDOW },
+  { name: 'minute', seconds: PASSTHROUGH_LIMITS.MINUTE.WINDOW },
+];
 
 export const passthroughRateLimiter = async (
   req: Request,
@@ -195,14 +191,8 @@ export const passthroughRateLimiter = async (
     return;
   }
 
-  const keys = getPassthroughKeys(ip);
-  const now = Math.floor(Date.now() / 1000);
-
   try {
-    const [burstCount, minuteCount] = await Promise.all([
-      incrementAndGetCount(keys.burstKey, now, PASSTHROUGH_LIMITS.BURST.WINDOW),
-      incrementAndGetCount(keys.minuteKey, now, PASSTHROUGH_LIMITS.MINUTE.WINDOW),
-    ]);
+    const [burstCount, minuteCount] = await countRequest(`ratelimit:pt:${ip}`, PASSTHROUGH_WINDOWS);
 
     if (burstCount > PASSTHROUGH_LIMITS.BURST.MAX_REQUESTS) {
       return sendLimitExceededResponse(res, 'Too many indexer requests per second');

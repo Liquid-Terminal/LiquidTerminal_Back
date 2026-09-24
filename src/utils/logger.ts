@@ -13,8 +13,14 @@ import { Writable } from 'stream';
 interface LogEntry {
   message: string;
   level: string;
+  /** Last occurrence: the entry expires one window after it. */
   timestamp: number;
+  /** When a line was last written for it. */
+  emittedAt: number;
+  /** Occurrences the line being written stands for (1 = just this one). */
   count: number;
+  /** Occurrences suppressed since the last line. */
+  pending: number;
   metadata: Record<string, any>;
 }
 
@@ -129,7 +135,7 @@ class LogRotator {
   }
 }
 
-class LogDeduplicatorInternal {
+export class LogDeduplicatorInternal {
   private static instance: LogDeduplicatorInternal;
   private logMap: Map<string, LogEntry> = new Map();
   private readonly deduplicationWindow: number = 60000;
@@ -179,20 +185,31 @@ class LogDeduplicatorInternal {
     const existingLog = this.logMap.get(key);
 
     if (existingLog && (now - existingLog.timestamp < this.deduplicationWindow)) {
-      existingLog.count++;
       existingLog.timestamp = now;
       this.logMap.delete(key);
       this.logMap.set(key, existingLog);
+
+      // A warning or error that keeps recurring is written again once per
+      // window, with the number of occurrences the line stands for — suppressing
+      // it for as long as it recurred hid every failure after the first one.
+      if ((level === 'warn' || level === 'error') && now - existingLog.emittedAt >= this.deduplicationWindow) {
+        existingLog.count = existingLog.pending + 1;
+        existingLog.pending = 0;
+        existingLog.emittedAt = now;
+        existingLog.metadata = metadata;
+        return { ...existingLog };
+      }
+      existingLog.pending++;
       return null;
     }
 
-    const newLog: LogEntry = { message, level, timestamp: now, count: 1, metadata };
+    const newLog: LogEntry = { message, level, timestamp: now, emittedAt: now, count: 1, pending: 0, metadata };
     this.logMap.delete(key);
     this.logMap.set(key, newLog);
     if (this.logMap.size > this.maxLogs) {
       this.cleanup();
     }
-    return newLog;
+    return { ...newLog };
   }
 }
 

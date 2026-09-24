@@ -2,6 +2,7 @@ import { VaultData, VaultQueryParams, VaultsResponse } from '../../types/vault.t
 import { VaultsError } from '../../errors/vault.errors';
 import { logDeduplicator } from '../../utils/logDeduplicator';
 import { redisService } from '../../core/redis.service';
+import { RedisJsonSnapshot } from '../../core/redisSnapshot';
 
 export class VaultsService {
   private static instance: VaultsService;
@@ -10,6 +11,11 @@ export class VaultsService {
   // Variante incluant les vaults fermés (peuplée par le client de polling).
   private readonly ALL_CACHE_KEY = 'vaults:filtered_list_all';
   private lastUpdate: Record<string, number> = {};
+  // Copies parsées des deux listes (2 à 7 Mo de JSON), rafraîchies quand le
+  // poller publie sur UPDATE_CHANNEL — chaque requête les re-parsait.
+  private readonly openVaults = new RedisJsonSnapshot<VaultData[]>(this.FILTERED_CACHE_KEY, this.UPDATE_CHANNEL, 15_000);
+  private readonly allVaults = new RedisJsonSnapshot<VaultData[]>(this.ALL_CACHE_KEY, this.UPDATE_CHANNEL, 15_000);
+  private readonly totalTvlBySnapshot = new WeakMap<VaultData[], number>();
 
   private constructor() {
     this.setupSubscriptions();
@@ -54,14 +60,17 @@ export class VaultsService {
       // Opt-in : la vue includeClosed lit le cache qui retient les vaults
       // fermés. Par défaut on garde le cache open-only (comportement inchangé
       // pour toutes les agrégations TVL existantes).
-      const cacheKey = params.includeClosed ? this.ALL_CACHE_KEY : this.FILTERED_CACHE_KEY;
-      const cachedData = await redisService.get(cacheKey);
-      if (!cachedData) {
+      const vaults = await (params.includeClosed ? this.allVaults : this.openVaults).get();
+      if (!vaults) {
         throw new VaultsError('No vaults data available in cache');
       }
 
-      const vaults = JSON.parse(cachedData) as VaultData[];
-      const totalTvl = this.calculateTotalTVL(vaults);
+      // `vaults` est partagé entre les requêtes : lecture seule.
+      let totalTvl = this.totalTvlBySnapshot.get(vaults);
+      if (totalTvl === undefined) {
+        totalTvl = this.calculateTotalTVL(vaults);
+        this.totalTvlBySnapshot.set(vaults, totalTvl);
+      }
 
       // Appliquer les filtres de recherche
       let filteredVaults = [...vaults].map(vault => ({

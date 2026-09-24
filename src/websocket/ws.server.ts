@@ -66,6 +66,9 @@ export class InternalWebSocketServer {
   /** Coin ids across perps (`BTC`), spot (`@107`, `PURR/USDC`), HIP-3 (`xyz:SKHX`) and HIP-4 (`#10250`). */
   private static readonly L4_COIN_PATTERN = /^[A-Za-z0-9@#:/_.-]{1,32}$/;
 
+  /** Unsent backlog past which a public client is dropped (see dropIfBackedUp). */
+  private static readonly MAX_BUFFERED_BYTES = 4 * 1024 * 1024;
+
   // Heartbeat
   private static readonly HEARTBEAT_INTERVAL_MS = 30000;
   private heartbeatTimer: NodeJS.Timeout | null = null;
@@ -984,6 +987,7 @@ export class InternalWebSocketServer {
    */
   private sendMessage(ws: WebSocket, message: WSServerMessage): void {
     if (ws.readyState !== WebSocket.OPEN) return;
+    if (this.dropIfBackedUp(ws)) return;
 
     try {
       ws.send(JSON.stringify(message));
@@ -999,6 +1003,7 @@ export class InternalWebSocketServer {
    */
   private sendRawMessage(ws: WebSocket, serialized: string): void {
     if (ws.readyState !== WebSocket.OPEN) return;
+    if (this.dropIfBackedUp(ws)) return;
 
     try {
       ws.send(serialized);
@@ -1007,6 +1012,30 @@ export class InternalWebSocketServer {
         error: error instanceof Error ? error.message : String(error),
       });
     }
+  }
+
+  /**
+   * A client that stops reading (backgrounded phone, dead link TCP has not
+   * noticed yet) makes `ws.send` queue frames in this process's memory without
+   * bound — the L4 deltas of a busy coin add up fast. Past MAX_BUFFERED_BYTES a
+   * public client is disconnected: the browser reconnects and resyncs from a
+   * fresh snapshot. The authenticated bot keeps its backlog, as before: its
+   * alerts are already marked as sent and would be lost.
+   */
+  private dropIfBackedUp(ws: WebSocket): boolean {
+    if (ws.bufferedAmount <= InternalWebSocketServer.MAX_BUFFERED_BYTES) return false;
+
+    const clientId = this.clientsBySocket.get(ws);
+    const client = clientId ? this.clients.get(clientId) : undefined;
+    if (client?.isAuthenticated) return false;
+
+    logDeduplicator.warn('InternalWebSocketServer: Dropping client that is not reading', {
+      clientId,
+      ip: client?.ip,
+      bufferedAmount: ws.bufferedAmount,
+    });
+    ws.terminate();
+    return true;
   }
 
   /**

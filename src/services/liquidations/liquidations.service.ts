@@ -336,8 +336,13 @@ export class LiquidationsService implements LiquidationDataProvider {
   public async getRecentLiquidations(params: LiquidationQueryParams = {}): Promise<LiquidationResponse> {
     try {
       const limit = params.limit ?? LiquidationsService.DEFAULT_LIMIT;
-      const hours = params.hours ?? 2;
-      const cacheKey = `liquidations:recent:${hours}h:${limit}`;
+      // Every param shapes the upstream query, so every param is in the key.
+      // Only hours + limit were: a filtered request (coin, user, amount…) could
+      // get the unfiltered answer for 15 s, or the other way round.
+      const { hours, coin, user, start_time, end_time, amount_dollars, cursor, order } = params;
+      const cacheKey = `liquidations:recent:${JSON.stringify({
+        hours, limit, coin, user, start_time, end_time, amount_dollars, cursor, order,
+      })}`;
 
       try {
         const cached = await redisService.get(cacheKey);

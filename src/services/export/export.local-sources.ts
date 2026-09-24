@@ -104,10 +104,12 @@ export const LOCAL_SOURCES: Record<string, LocalSourceResolver> = {
     return { ...paginated(result), pageable: true };
   },
 
+  // The XP ranking the dataset describes — this used to export the Hyperliquid
+  // trading leaderboard (still available as `traders-leaderboard`).
   'xp-leaderboard': async ({ limit, page }) => {
-    const { LeaderboardService } = await import('../leaderboard/leaderboard.service');
-    const result = await LeaderboardService.getInstance().getLeaderboard({ limit, page });
-    return { ...paginated(result), pageable: true };
+    const { xpService } = await import('../xp/xp.service');
+    const result = await xpService.getLeaderboard({ limit, page });
+    return { rows: asRows(result.leaderboard), totalCount: result.total, pageable: true };
   },
 
   'fees-history': async () => {

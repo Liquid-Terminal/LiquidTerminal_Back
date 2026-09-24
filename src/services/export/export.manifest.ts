@@ -490,12 +490,14 @@ export const EXPORT_DATASETS: ExportDataset[] = [
   },
   {
     id: 'xp-leaderboard',
+    // xpService caps a page at 100 rows.
+    pageSize: 100,
     label: 'XP leaderboard',
     group: 'Capital',
     source: 'local',
     description: 'Community leaderboard with XP, level and rank.',
     upstreamPath: '',
-    publicPath: '/leaderboard',
+    publicPath: '/xp/leaderboard',
     params: [],
     pagination: 'offset',
     maxRows: EXPORT_MAX_ROWS,

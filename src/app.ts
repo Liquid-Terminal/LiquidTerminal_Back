@@ -1,6 +1,5 @@
 import express from 'express';
 import cors from 'cors';
-import compression from 'compression';
 import { logDeduplicator } from './utils/logDeduplicator';
 import 'dotenv/config';
 import { createServer } from 'http';
@@ -9,6 +8,7 @@ import { requestIdMiddleware } from './middleware/requestId.middleware';
 import { SECURITY_CONSTANTS } from './constants/security.constants';
 import { securityHeaders } from './middleware/security.middleware';
 import { errorHandler, notFoundHandler } from './middleware/error.middleware';
+import { compressionMiddleware } from './middleware/compression.middleware';
 
 import { ClientInitializerService } from './core/client.initializer.service';
 import { startPoolMonitor } from './core/poolRegistry';
@@ -78,8 +78,8 @@ let forceExitTimer: NodeJS.Timeout | null = null;
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
 
-// Compression gzip des réponses (réduit la bande passante de 60-80%)
-app.use(compression());
+// Compression gzip des réponses (réduit la bande passante de 60-80%), hors SSE
+app.use(compressionMiddleware);
 
 // Ajouter Request ID pour traçabilité (doit être en premier)
 app.use(requestIdMiddleware);

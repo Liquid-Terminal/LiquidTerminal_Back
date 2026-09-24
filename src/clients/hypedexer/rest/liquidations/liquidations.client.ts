@@ -5,6 +5,7 @@ import { CircuitBreakerService } from '../../../../core/circuit.breaker.service'
 import { RateLimiterService } from '../../../../core/hyperLiquid.ratelimiter.service';
 import { logDeduplicator } from '../../../../utils/logDeduplicator';
 import { coerceHypedexerListApiResponse } from '../../../../utils/hypedexer-api-response.util';
+import { reliableLiquidationTimeMs } from '../../../../utils/liquidation-time';
 import { HYPEDEXER_API_URL, hypedexerJsonHeaders } from '../shared/hypedexer-api.config';
 import { HypeDexerBaseClient } from '../shared/hypedexer-base.client';
 
@@ -50,10 +51,23 @@ export class HLIndexerLiquidationsClient extends HypeDexerBaseClient {
 
   private liquidationsFromUnwrapped(raw: unknown): LiquidationResponse {
     const r = coerceHypedexerListApiResponse<Liquidation>(raw);
-    return {
+    return this.withReliableTimes({
       ...r,
       has_more: r.has_more ?? false,
-    };
+    });
+  }
+
+  /** Repairs rows whose `time_ms` came doubled (see reliableLiquidationTimeMs). */
+  private withReliableTimes<T extends { data?: Liquidation[] }>(response: T): T {
+    if (!Array.isArray(response?.data)) return response;
+    let repaired = false;
+    const data = response.data.map((liq) => {
+      const timeMs = reliableLiquidationTimeMs(liq.time, liq.time_ms);
+      if (timeMs === liq.time_ms) return liq;
+      repaired = true;
+      return { ...liq, time_ms: timeMs };
+    });
+    return repaired ? { ...response, data } : response;
   }
 
   /**
@@ -134,7 +148,7 @@ export class HLIndexerLiquidationsClient extends HypeDexerBaseClient {
   private async fetchRecentLiquidationsFromApi(params: LiquidationQueryParams): Promise<LiquidationResponse> {
     const queryString = this.buildQueryString(params);
     const endpoint = `/liquidations/recent${queryString}`;
-    return this.get<LiquidationResponse>(endpoint);
+    return this.withReliableTimes(await this.get<LiquidationResponse>(endpoint));
   }
 
   /**

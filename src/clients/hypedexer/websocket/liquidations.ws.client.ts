@@ -9,6 +9,7 @@ import {
   WSConnectionState,
 } from '../../../types/websocket.types';
 import { Liquidation } from '../../../types/liquidations.types';
+import { reliableLiquidationTimeMs } from '../../../utils/liquidation-time';
 
 /**
  * Callback type for liquidation events
@@ -307,13 +308,14 @@ export class HypeDexerLiquidationsWSClient extends BaseWebSocketService {
   /**
    * Normalize HypeDexer liquidation format to internal format
    * - Converts liq_dir from lowercase to PascalCase
+   * - Repairs a doubled time_ms from the ISO time (reliableLiquidationTimeMs)
    * - Ensures consistent field naming
    */
   private normalizeLiquidation(raw: HypeDexerWSLiquidation): Liquidation {
     return {
       tid: raw.tid,
       time: raw.time,
-      time_ms: raw.time_ms,
+      time_ms: reliableLiquidationTimeMs(raw.time, raw.time_ms),
       coin: raw.coin,
       hash: raw.hash,
       liquidated_user: raw.liquidated_user,

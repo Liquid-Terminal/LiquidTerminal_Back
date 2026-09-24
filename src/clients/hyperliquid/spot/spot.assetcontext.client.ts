@@ -68,8 +68,14 @@ export class HyperliquidSpotClient extends BaseApiService {
         return acc;
       }, {} as Record<number, Token>);
 
+      // Indexed once instead of a linear `find` per market (first match wins, as before).
+      const contextByCoin = new Map<string, AssetContext>();
+      for (const ctx of assetContexts) {
+        if (!contextByCoin.has(ctx.coin)) contextByCoin.set(ctx.coin, ctx);
+      }
+
       const markets: MarketData[] = spotContext.universe.map((market: Market) => {
-        const ctx = assetContexts.find((a) => a.coin === market.name);
+        const ctx = contextByCoin.get(market.name);
         if (!ctx) return null;
 
         const tokenIndex = market.tokens[0];
@@ -100,8 +106,9 @@ export class HyperliquidSpotClient extends BaseApiService {
       // Trier les marchés par volume décroissant
       markets.sort((a, b) => b.volume - a.volume);
 
+      const pairedTokens = new Set(spotContext.universe.map((market) => market.tokens[0]));
       const tokensWithoutPairs = spotContext.tokens
-        .filter(token => !spotContext.universe.some(market => market.tokens[0] === token.index))
+        .filter(token => !pairedTokens.has(token.index))
         .map(token => token.name);
 
       logDeduplicator.info('Caching data to Redis...');

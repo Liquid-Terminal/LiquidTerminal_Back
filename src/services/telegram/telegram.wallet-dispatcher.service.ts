@@ -25,6 +25,12 @@ interface ActiveSubscription {
   minAmountUsd: number;
 }
 
+/** A subscription with its wallet addresses lower-cased into a set. */
+interface CompiledWalletSubscription {
+  sub: ActiveSubscription;
+  wallets: Set<string>;
+}
+
 /**
  * TelegramWalletDispatcherService
  *
@@ -38,6 +44,9 @@ interface ActiveSubscription {
  * 5. Pushes matching events to InternalWebSocketServer.broadcastWalletEvent()
  *    → Bot receives { type: 'wallet_event', data: { telegramId, trade, subscriptionName } }
  *    → Bot routes by telegramId and sends the Telegram message
+ *
+ * The stream is network-wide while every subscription is wallet-scoped: once
+ * the subscriptions are known, only trades of a watched wallet are queued.
  */
 export class TelegramWalletDispatcherService {
   private static instance: TelegramWalletDispatcherService;
@@ -45,9 +54,15 @@ export class TelegramWalletDispatcherService {
   private wsClient: HypeDexerCompletedTradesWSClient | null = null;
   private unsubscribeCallback: (() => void) | null = null;
 
-  private subscriptionCache: ActiveSubscription[] = [];
+  private subscriptionCache: CompiledWalletSubscription[] = [];
   private cacheLoadedAt: number = 0;
   private static readonly CACHE_TTL_MS = 30_000;
+  // Until the first load succeeds every batch is queued, as before.
+  private subscriptionsLoaded = false;
+  // Union of every subscription's wallets.
+  private watchedWallets = new Set<string>();
+  private cacheRefresh: Promise<void> | null = null;
+  private refreshTimer: NodeJS.Timeout | null = null;
 
   // In-memory dedup: absorbs WS re-flushes/reconnects so the DB is hit once per alert
   private readonly recentAlerts = new RecentEventCache();
@@ -74,8 +89,20 @@ export class TelegramWalletDispatcherService {
     // Enqueue each batch onto a serial chain — batches never run concurrently,
     // so the DB connection pool can't be exhausted by overlapping dispatches.
     this.unsubscribeCallback = this.wsClient.onCompletedTrade((trades) => {
-      this.queue.enqueue(() => this.processBatch(trades));
+      const relevant = this.subscriptionsLoaded
+        ? trades.filter((trade) => this.watchedWallets.has(trade.user))
+        : trades;
+      if (relevant.length === 0) return;
+      this.queue.enqueue(() => this.processBatch(relevant));
     });
+
+    // The subscriptions are refreshed on a timer, not only from dispatch():
+    // trades of unwatched wallets never reach dispatch() any more.
+    void this.refreshSubscriptions();
+    this.refreshTimer = setInterval(() => {
+      void this.refreshSubscriptions();
+    }, TelegramWalletDispatcherService.CACHE_TTL_MS);
+    this.refreshTimer.unref();
 
     this.purgeTimer = startSentAlertPurge(
       (cutoff) =>
@@ -111,8 +138,14 @@ export class TelegramWalletDispatcherService {
       clearInterval(this.purgeTimer);
       this.purgeTimer = null;
     }
+    if (this.refreshTimer) {
+      clearInterval(this.refreshTimer);
+      this.refreshTimer = null;
+    }
     this.subscriptionCache = [];
     this.cacheLoadedAt = 0;
+    this.subscriptionsLoaded = false;
+    this.watchedWallets = new Set();
     this.recentAlerts.clear();
 
     logDeduplicator.info('TelegramWalletDispatcherService: Stopped');
@@ -127,9 +160,35 @@ export class TelegramWalletDispatcherService {
    */
   private async ensureCacheFresh(): Promise<void> {
     if (Date.now() - this.cacheLoadedAt < TelegramWalletDispatcherService.CACHE_TTL_MS) return;
+    await this.refreshSubscriptions();
+  }
 
+  /** Reload the active subscriptions; concurrent callers share one query. */
+  private refreshSubscriptions(): Promise<void> {
+    if (!this.cacheRefresh) {
+      this.cacheRefresh = this.loadSubscriptions().finally(() => {
+        this.cacheRefresh = null;
+      });
+    }
+    return this.cacheRefresh;
+  }
+
+  private async loadSubscriptions(): Promise<void> {
     try {
-      this.subscriptionCache = await TelegramWalletSubscriptionService.getInstance().getActiveSubscriptions();
+      const subscriptions: ActiveSubscription[] =
+        await TelegramWalletSubscriptionService.getInstance().getActiveSubscriptions();
+      const compiled = subscriptions.map((sub) => ({
+        sub,
+        wallets: new Set(sub.walletAddresses.map((addr) => addr.toLowerCase())),
+      }));
+      const watched = new Set<string>();
+      for (const { wallets } of compiled) {
+        for (const wallet of wallets) watched.add(wallet);
+      }
+
+      this.subscriptionCache = compiled;
+      this.watchedWallets = watched;
+      this.subscriptionsLoaded = true;
       this.cacheLoadedAt = Date.now();
 
       logDeduplicator.info('TelegramWalletDispatcherService: Subscription cache refreshed', {
@@ -150,12 +209,9 @@ export class TelegramWalletDispatcherService {
 
     if (this.subscriptionCache.length === 0) return;
 
-    for (const sub of this.subscriptionCache) {
+    for (const { sub, wallets } of this.subscriptionCache) {
       // Filter by wallet address (case-insensitive, user is already lowercase)
-      const matchesWallet = sub.walletAddresses.some(
-        (addr) => addr.toLowerCase() === trade.user
-      );
-      if (!matchesWallet) continue;
+      if (!wallets.has(trade.user)) continue;
 
       // Filter by event type — if eventTypes is empty, all types pass
       if (sub.eventTypes.length > 0 && !sub.eventTypes.includes('TRADE')) continue;

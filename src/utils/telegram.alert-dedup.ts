@@ -82,18 +82,36 @@ export class RecentEventCache {
 /**
  * Serializes async batches into a single non-overlapping chain, so dispatch
  * batches never run concurrently and the DB connection usage stays bounded.
+ * With `maxPending`, a task arriving while that many are already waiting is
+ * dropped (and logged) instead of growing the chain without limit.
  */
 export class SerialQueue {
   private tail: Promise<void> = Promise.resolve();
+  private pending = 0;
 
-  constructor(private readonly context: string) {}
+  constructor(
+    private readonly context: string,
+    private readonly maxPending: number = Number.POSITIVE_INFINITY
+  ) {}
 
   enqueue(task: () => Promise<void>): void {
-    this.tail = this.tail.then(task).catch((error) => {
-      logDeduplicator.error(`${this.context}: queued task failed`, {
-        error: error instanceof Error ? error.message : String(error),
+    if (this.pending >= this.maxPending) {
+      logDeduplicator.warn(`${this.context}: dispatch queue full, task dropped`, {
+        maxPending: this.maxPending,
       });
-    });
+      return;
+    }
+    this.pending += 1;
+    this.tail = this.tail
+      .then(task)
+      .catch((error) => {
+        logDeduplicator.error(`${this.context}: queued task failed`, {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      })
+      .then(() => {
+        this.pending -= 1;
+      });
   }
 }
 

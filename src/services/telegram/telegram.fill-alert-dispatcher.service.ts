@@ -16,6 +16,13 @@ import {
 
 const CONTEXT = 'TelegramFillAlertDispatcherService';
 
+/** A subscription with its coin / wallet filters lower-cased into sets (null = no filter). */
+interface CompiledFillSubscription {
+  sub: ActiveFillSubscription;
+  coins: Set<string> | null;
+  wallets: Set<string> | null;
+}
+
 /**
  * TelegramFillAlertDispatcherService
  *
@@ -32,6 +39,11 @@ const CONTEXT = 'TelegramFillAlertDispatcherService';
  * 6. Pushes matching alerts to InternalWebSocketServer.broadcastFillAlert()
  *    → Bot receives { type: 'fill_alert', data: { telegramId, message } }
  *    → Bot routes by telegramId and calls bot.api.sendMessage()
+ *
+ * Both streams are network-wide, so fills are dropped as early as possible
+ * once the subscriptions are known: all of them when nobody is subscribed,
+ * those of unwatched wallets when every subscription is wallet-scoped (before
+ * aggregation), and orders matching no subscription (before the DB queue).
  */
 export class TelegramFillAlertDispatcherService {
   private static instance: TelegramFillAlertDispatcherService;
@@ -41,20 +53,33 @@ export class TelegramFillAlertDispatcherService {
   private unsubscribePerp: (() => void) | null = null;
   private unsubscribeSpot: (() => void) | null = null;
 
-  private subscriptionCache: ActiveFillSubscription[] = [];
+  private subscriptionCache: CompiledFillSubscription[] = [];
   private cacheLoadedAt: number = 0;
   private static readonly CACHE_TTL_MS = 30_000;
+  // Until the first load succeeds nothing is filtered upstream of dispatch().
+  private subscriptionsLoaded = false;
+  // Union of the watched wallets when every subscription is wallet-scoped, else null.
+  private watchedWallets: Set<string> | null = null;
+  private cacheRefresh: Promise<void> | null = null;
+  private refreshTimer: NodeJS.Timeout | null = null;
+  /** Orders waiting for the DB beyond this are dropped rather than piling up in memory. */
+  private static readonly MAX_QUEUED_ORDERS = 10_000;
 
   // In-memory dedup: absorbs WS re-flushes/reconnects so the DB is hit once per alert
   private readonly recentAlerts = new RecentEventCache();
   // Serializes dispatch batches (perp + spot) so they never overlap and exhaust the DB pool
-  private readonly queue = new SerialQueue(CONTEXT);
+  private readonly queue = new SerialQueue(CONTEXT, TelegramFillAlertDispatcherService.MAX_QUEUED_ORDERS);
   private purgeTimer: NodeJS.Timeout | null = null;
 
   // Groups the many fills of one order into a single alert (anti-spam).
-  private readonly aggregator = new FillAggregator((agg) =>
-    this.queue.enqueue(() => this.dispatch(agg))
-  );
+  private readonly aggregator = new FillAggregator((agg) => {
+    // dispatch() re-checks against a fresh cache; this only spares the queue
+    // the orders nobody can be alerted about.
+    if (this.subscriptionsLoaded && !this.subscriptionCache.some((c) => this.matchesFilters(agg, c))) {
+      return;
+    }
+    this.queue.enqueue(() => this.dispatch(agg));
+  });
 
   private constructor() {}
 
@@ -75,12 +100,27 @@ export class TelegramFillAlertDispatcherService {
     // Both streams feed the aggregator; it emits one AggregatedFill per order,
     // which is then enqueued onto the serial dispatch queue.
     this.unsubscribePerp = this.liveDataClient.onFill((fills) => {
-      for (const fill of fills) this.aggregator.add(fill);
+      if (this.nobodySubscribed()) return;
+      for (const fill of fills) {
+        if (this.isWatched(fill.wallet)) this.aggregator.add(fill);
+      }
     });
 
     this.unsubscribeSpot = this.spotClient.onSpotFill((fills) => {
-      for (const fill of fills) this.aggregator.add(this.spotToNormalized(fill));
+      if (this.nobodySubscribed()) return;
+      for (const fill of fills) {
+        const normalized = this.spotToNormalized(fill);
+        if (this.isWatched(normalized.wallet)) this.aggregator.add(normalized);
+      }
     });
+
+    // The subscriptions are refreshed on a timer, not only from dispatch():
+    // with nobody subscribed, fills never reach dispatch() at all.
+    void this.refreshSubscriptions();
+    this.refreshTimer = setInterval(() => {
+      void this.refreshSubscriptions();
+    }, TelegramFillAlertDispatcherService.CACHE_TTL_MS);
+    this.refreshTimer.unref();
 
     this.purgeTimer = startSentAlertPurge(
       (cutoff) =>
@@ -119,9 +159,15 @@ export class TelegramFillAlertDispatcherService {
       clearInterval(this.purgeTimer);
       this.purgeTimer = null;
     }
+    if (this.refreshTimer) {
+      clearInterval(this.refreshTimer);
+      this.refreshTimer = null;
+    }
     this.aggregator.clear();
     this.subscriptionCache = [];
     this.cacheLoadedAt = 0;
+    this.subscriptionsLoaded = false;
+    this.watchedWallets = null;
     this.recentAlerts.clear();
 
     logDeduplicator.info('TelegramFillAlertDispatcherService: Stopped');
@@ -149,14 +195,42 @@ export class TelegramFillAlertDispatcherService {
     };
   }
 
+  /** True once the subscriptions are known and there are none: every fill can be dropped. */
+  private nobodySubscribed(): boolean {
+    return this.subscriptionsLoaded && this.subscriptionCache.length === 0;
+  }
+
+  /**
+   * False only when no subscription can match a fill from this wallet. All the
+   * fills of an order share its wallet, so dropping them before aggregation
+   * cannot change what is dispatched.
+   */
+  private isWatched(wallet: string): boolean {
+    return this.watchedWallets === null || this.watchedWallets.has(wallet);
+  }
+
   /**
    * Reload subscription cache if stale (every 30s).
    */
   private async ensureCacheFresh(): Promise<void> {
     if (Date.now() - this.cacheLoadedAt < TelegramFillAlertDispatcherService.CACHE_TTL_MS) return;
+    await this.refreshSubscriptions();
+  }
 
+  /** Reload the active subscriptions; concurrent callers share one query. */
+  private refreshSubscriptions(): Promise<void> {
+    if (!this.cacheRefresh) {
+      this.cacheRefresh = this.loadSubscriptions().finally(() => {
+        this.cacheRefresh = null;
+      });
+    }
+    return this.cacheRefresh;
+  }
+
+  private async loadSubscriptions(): Promise<void> {
     try {
-      this.subscriptionCache = await TelegramFillSubscriptionService.getInstance().getActiveSubscriptions();
+      const subscriptions = await TelegramFillSubscriptionService.getInstance().getActiveSubscriptions();
+      this.setSubscriptions(subscriptions);
       this.cacheLoadedAt = Date.now();
 
       logDeduplicator.debug('TelegramFillAlertDispatcherService: Subscription cache refreshed', {
@@ -169,6 +243,27 @@ export class TelegramFillAlertDispatcherService {
     }
   }
 
+  private setSubscriptions(subscriptions: ActiveFillSubscription[]): void {
+    const compiled = subscriptions.map((sub) => ({
+      sub,
+      coins: sub.filterCoins.length > 0 ? new Set(sub.filterCoins.map((c) => c.toLowerCase())) : null,
+      wallets: sub.filterWallets.length > 0 ? new Set(sub.filterWallets.map((w) => w.toLowerCase())) : null,
+    }));
+
+    let watched: Set<string> | null = new Set();
+    for (const { wallets } of compiled) {
+      if (!wallets) {
+        watched = null;
+        break;
+      }
+      for (const wallet of wallets) watched.add(wallet);
+    }
+
+    this.subscriptionCache = compiled;
+    this.watchedWallets = compiled.length > 0 ? watched : null;
+    this.subscriptionsLoaded = true;
+  }
+
   /**
    * Dispatch a single aggregated order to all matching subscriptions.
    */
@@ -177,8 +272,9 @@ export class TelegramFillAlertDispatcherService {
 
     if (this.subscriptionCache.length === 0) return;
 
-    for (const sub of this.subscriptionCache) {
-      if (!this.matchesFilters(fill, sub)) continue;
+    for (const compiled of this.subscriptionCache) {
+      if (!this.matchesFilters(fill, compiled)) continue;
+      const { sub } = compiled;
 
       // Deduplicate — in-memory first (no DB hit), then atomic insert.
       const dedupKey = `${sub.id}|${fill.eventId}`;
@@ -220,7 +316,7 @@ export class TelegramFillAlertDispatcherService {
   /**
    * Check if a fill matches a subscription's filters.
    */
-  private matchesFilters(fill: AggregatedFill, sub: ActiveFillSubscription): boolean {
+  private matchesFilters(fill: AggregatedFill, { sub, coins, wallets }: CompiledFillSubscription): boolean {
     // Filter by minimum notional USD.
     if (sub.minUsd > 0 && fill.notionalUsd < sub.minUsd) {
       return false;
@@ -232,18 +328,13 @@ export class TelegramFillAlertDispatcherService {
     }
 
     // Filter by coin (case-insensitive).
-    if (sub.filterCoins.length > 0) {
-      const coinLower = fill.coin.toLowerCase();
-      if (!sub.filterCoins.some((c) => c.toLowerCase() === coinLower)) {
-        return false;
-      }
+    if (coins && !coins.has(fill.coin.toLowerCase())) {
+      return false;
     }
 
     // Filter by wallet (compare lowercase — fill.wallet is already lowercase).
-    if (sub.filterWallets.length > 0) {
-      if (!sub.filterWallets.some((w) => w.toLowerCase() === fill.wallet)) {
-        return false;
-      }
+    if (wallets && !wallets.has(fill.wallet)) {
+      return false;
     }
 
     // Filter by side: 'BUY' → 'B', 'SELL' → 'A'.

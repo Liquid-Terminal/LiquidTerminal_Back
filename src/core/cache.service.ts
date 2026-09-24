@@ -2,11 +2,24 @@ import { redisService } from './redis.service';
 import { logDeduplicator } from '../utils/logDeduplicator';
 import { CACHE_TTL } from '../constants/cache.constants';
 
+/** What a recomputation produced, and the JSON it stored when it could. */
+interface Recomputed<T> {
+  data: T;
+  serialized?: string;
+}
+
 /**
  * Service de gestion du cache
  * Encapsule la logique de cache utilisée dans les services
  */
 export class CacheService {
+  /**
+   * Misses being recomputed by this process, by key. The Redis lock below
+   * only made concurrent misses poll for 600 ms and then call fetchFn
+   * themselves, so a slow fetchFn still ran once per waiting request.
+   */
+  private readonly recomputing = new Map<string, Promise<Recomputed<unknown>>>();
+
   /**
    * Récupère une donnée du cache ou l'obtient via une fonction de récupération
    * @param key Clé de cache
@@ -25,41 +38,23 @@ export class CacheService {
         return JSON.parse(cachedData);
       }
 
-      // Try to acquire lock to prevent cache stampede
-      const lockKey = `lock:${key}`;
-      const redis = redisService.getClient();
-      const acquired = await redis.set(lockKey, '1', 'EX', 30, 'NX');
-
-      if (acquired) {
-        try {
-          // Double-check cache (another request may have populated it)
-          const freshCache = await redisService.get(key);
-          if (freshCache) {
-            await redisService.delete(lockKey);
-            return JSON.parse(freshCache);
-          }
-
-          const data = await fetchFn();
-          await redisService.set(key, JSON.stringify(data), ttl);
-          await redisService.delete(lockKey);
-          return data;
-        } catch (error) {
-          await redisService.delete(lockKey);
-          throw error;
-        }
+      // Already being recomputed here: share it. Like the lock waiters, get a
+      // copy of what was stored rather than the object handed to the first caller.
+      const inflight = this.recomputing.get(key) as Promise<Recomputed<T>> | undefined;
+      if (inflight) {
+        const { serialized } = await inflight;
+        return serialized !== undefined ? JSON.parse(serialized) : await fetchFn();
       }
 
-      // Lock not acquired — wait for the lock holder to populate cache
-      for (let i = 0; i < 3; i++) {
-        await new Promise(resolve => setTimeout(resolve, 200));
-        const retryCache = await redisService.get(key);
-        if (retryCache) {
-          return JSON.parse(retryCache);
+      const recomputation = this.recompute(key, fetchFn, ttl);
+      this.recomputing.set(key, recomputation);
+      try {
+        return (await recomputation).data;
+      } finally {
+        if (this.recomputing.get(key) === recomputation) {
+          this.recomputing.delete(key);
         }
       }
-
-      // Lock holder may have failed, fetch directly
-      return await fetchFn();
     } catch (error) {
       logDeduplicator.warn('Cache error, falling back to direct fetch', { 
         key,
@@ -67,6 +62,53 @@ export class CacheService {
       });
       return fetchFn();
     }
+  }
+
+  /** Cache miss path, coordinated across instances by a Redis lock. */
+  private async recompute<T>(key: string, fetchFn: () => Promise<T>, ttl: number): Promise<Recomputed<T>> {
+    // Try to acquire lock to prevent cache stampede
+    const lockKey = `lock:${key}`;
+    const redis = redisService.getClient();
+    const acquired = await redis.set(lockKey, '1', 'EX', 30, 'NX');
+
+    if (acquired) {
+      try {
+        // Double-check cache (another request may have populated it)
+        const freshCache = await redisService.get(key);
+        if (freshCache) {
+          await redisService.delete(lockKey);
+          return { data: JSON.parse(freshCache), serialized: freshCache };
+        }
+
+        const data = await fetchFn();
+        const serialized = JSON.stringify(data);
+        await redisService.set(key, serialized, ttl);
+        await redisService.delete(lockKey);
+        return { data, serialized };
+      } catch (error) {
+        await redisService.delete(lockKey);
+        throw error;
+      }
+    }
+
+    // Lock not acquired — wait for the lock holder to populate cache
+    for (let i = 0; i < 3; i++) {
+      await new Promise(resolve => setTimeout(resolve, 200));
+      const retryCache = await redisService.get(key);
+      if (retryCache) {
+        return { data: JSON.parse(retryCache), serialized: retryCache };
+      }
+    }
+
+    // Lock holder may have failed, fetch directly
+    const data = await fetchFn();
+    let serialized: string | undefined;
+    try {
+      serialized = JSON.stringify(data);
+    } catch {
+      serialized = undefined;
+    }
+    return { data, serialized };
   }
   
   /**

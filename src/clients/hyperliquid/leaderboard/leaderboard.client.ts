@@ -2,20 +2,37 @@ import { BaseApiService } from '../../../core/base.api.service';
 import { LeaderboardResponse } from '../../../types/leaderboard.types';
 import { CircuitBreakerService } from '../../../core/circuit.breaker.service';
 import { RateLimiterService } from '../../../core/hyperLiquid.ratelimiter.service';
-import { redisService } from '../../../core/redis.service';
 import { logDeduplicator } from '../../../utils/logDeduplicator';
-import { startGuardedInterval } from '../../../utils/guardedInterval';
 
+interface LeaderboardSnapshot {
+  data: LeaderboardResponse;
+  fetchedAt: number;
+}
+
+/**
+ * Fetched on demand, never polled. The upstream payload is ~40 MB (~47k rows)
+ * and only `/leaderboard` and the CSV export read it, yet it used to be
+ * downloaded, parsed and written to Redis every minute — and parsed again from
+ * Redis on every request. It now lives in memory while someone asks for it.
+ */
 export class HyperliquidLeaderboardClient extends BaseApiService {
   private static instance: HyperliquidLeaderboardClient;
   private static readonly API_URL = process.env.HYPERLIQUID_STATS_URL || 'https://stats-data.hyperliquid.xyz/Mainnet';
   private static readonly REQUEST_WEIGHT = 10;
   private static readonly MAX_WEIGHT_PER_MINUTE = 1200;
 
-  private readonly CACHE_KEY = 'leaderboard:data';
-  private readonly UPDATE_CHANNEL = 'leaderboard:updated';
-  private readonly UPDATE_INTERVAL = 60000; // 1 minute
-  private pollingInterval: NodeJS.Timeout | null = null;
+  /** Served as-is while younger than this (the former poll interval). */
+  private static readonly FRESH_MS = 60_000;
+  /**
+   * Past FRESH_MS and up to this age the snapshot is still served while a
+   * single refresh runs in the background; past it, callers wait for the
+   * refresh and the snapshot is dropped (the former Redis TTL).
+   */
+  private static readonly MAX_STALE_MS = 5 * 60_000;
+
+  private snapshot: LeaderboardSnapshot | null = null;
+  private inflight: Promise<LeaderboardSnapshot | null> | null = null;
+  private evictionTimer: NodeJS.Timeout | null = null;
 
   private circuitBreaker: CircuitBreakerService;
   private rateLimiter: RateLimiterService;
@@ -36,65 +53,65 @@ export class HyperliquidLeaderboardClient extends BaseApiService {
     return HyperliquidLeaderboardClient.instance;
   }
 
-  public startPolling(): void {
-    if (this.pollingInterval) {
-      logDeduplicator.warn('Leaderboard polling already started');
-      return;
+  public async getLeaderboardData(): Promise<LeaderboardResponse | null> {
+    const snapshot = this.snapshot;
+    const age = snapshot ? Date.now() - snapshot.fetchedAt : Infinity;
+
+    if (snapshot && age < HyperliquidLeaderboardClient.FRESH_MS) {
+      return snapshot.data;
+    }
+    if (snapshot && age < HyperliquidLeaderboardClient.MAX_STALE_MS) {
+      void this.refresh();
+      return snapshot.data;
     }
 
-    logDeduplicator.info('Starting leaderboard polling');
-    this.pollingInterval = startGuardedInterval(
-      'Leaderboard polling',
-      () => this.updateLeaderboardData(),
-      this.UPDATE_INTERVAL
-    );
+    const fresh = await this.refresh();
+    return fresh ? fresh.data : null;
   }
 
-  public stopPolling(): void {
-    if (this.pollingInterval) {
-      clearInterval(this.pollingInterval);
-      this.pollingInterval = null;
-      logDeduplicator.info('Leaderboard polling stopped');
+  /** Fetch time of the snapshot currently served, 0 before the first fetch. */
+  public getLastUpdate(): number {
+    return this.snapshot?.fetchedAt ?? 0;
+  }
+
+  /** One upstream download at a time, whatever the number of callers. */
+  private refresh(): Promise<LeaderboardSnapshot | null> {
+    if (!this.inflight) {
+      this.inflight = this.fetchSnapshot().finally(() => {
+        this.inflight = null;
+      });
     }
+    return this.inflight;
   }
 
-  private async updateLeaderboardData(): Promise<void> {
+  private async fetchSnapshot(): Promise<LeaderboardSnapshot | null> {
     try {
-      const leaderboardData = await this.circuitBreaker.execute(() =>
+      const data = await this.circuitBreaker.execute(() =>
         this.get<LeaderboardResponse>('/leaderboard')
       );
 
-      await redisService.set(this.CACHE_KEY, JSON.stringify(leaderboardData), 300); // 5 minutes TTL
+      const snapshot: LeaderboardSnapshot = { data, fetchedAt: Date.now() };
+      this.snapshot = snapshot;
+      this.scheduleEviction(snapshot);
 
-      await redisService.publish(this.UPDATE_CHANNEL, JSON.stringify({
-        type: 'DATA_UPDATED',
-        timestamp: Date.now(),
-      }));
-
-      logDeduplicator.info('Leaderboard data updated & cached', {
-        entries: leaderboardData.leaderboardRows.length,
+      logDeduplicator.info('Leaderboard data fetched', {
+        entries: data?.leaderboardRows?.length,
       });
+      return snapshot;
     } catch (error) {
       logDeduplicator.error('Failed to update leaderboard data:', { error: error instanceof Error ? error.message : String(error) });
+      return null;
     }
   }
 
-  public async getLeaderboardData(): Promise<LeaderboardResponse | null> {
-    try {
-      const cachedData = await redisService.get(this.CACHE_KEY);
-      if (cachedData) {
-        return JSON.parse(cachedData);
-      }
-
-      // Si pas de cache, déclencher une mise à jour
-      await this.updateLeaderboardData();
-      
-      const newCachedData = await redisService.get(this.CACHE_KEY);
-      return newCachedData ? JSON.parse(newCachedData) : null;
-    } catch (error) {
-      logDeduplicator.error('Error getting leaderboard data:', { error: error instanceof Error ? error.message : String(error) });
-      return null;
-    }
+  /** A snapshot past MAX_STALE_MS is never served again: free the parsed payload instead of holding it. */
+  private scheduleEviction(snapshot: LeaderboardSnapshot): void {
+    if (this.evictionTimer) clearTimeout(this.evictionTimer);
+    this.evictionTimer = setTimeout(() => {
+      this.evictionTimer = null;
+      if (this.snapshot === snapshot) this.snapshot = null;
+    }, HyperliquidLeaderboardClient.MAX_STALE_MS);
+    this.evictionTimer.unref();
   }
 
   public static getRequestWeight(): number {
@@ -104,4 +121,4 @@ export class HyperliquidLeaderboardClient extends BaseApiService {
   public checkRateLimit(ip: string): boolean {
     return this.rateLimiter.checkRateLimit(ip);
   }
-} 
+}

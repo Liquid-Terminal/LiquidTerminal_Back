@@ -156,8 +156,9 @@ export class LiquidationsIngestionService {
       typeof liq.liquidated_user === 'string' && liq.liquidated_user.length > 0 &&
       typeof liq.notional_total === 'number' && Number.isFinite(liq.notional_total) &&
       typeof liq.mark_px === 'number' && Number.isFinite(liq.mark_px) && liq.mark_px > 0
-      // liq_dir may be 'Long', 'Short' or null: directionless liquidations are
-      // valid and counted in totals; they just don't add to long/short splits.
+      // liq_dir may be 'Long', 'Short' or null: directionless rows are the
+      // liquidator lists HypeDexer sends next to a priced liquidation (zero
+      // notional). Stored as raw data; the stats queries leave them out.
     );
   }
 

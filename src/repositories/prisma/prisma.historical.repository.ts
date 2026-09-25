@@ -60,6 +60,12 @@ function earliestSince(windows: { since: Date }[]): Date {
 /**
  * Prisma implementation of the HistoricalLiquidationRepository.
  * Uses prismaHistorical (separate DB) instead of the default prisma client.
+ *
+ * Stats and charts only read rows with a direction (`liq_dir IS NOT NULL`):
+ * since 2026-09 HypeDexer sends, next to a priced liquidation, companion rows
+ * that only list liquidators (no direction, zero size and notional). They are
+ * kept as raw data but are not liquidations — counting them inflated
+ * `liquidationsCount` by 7–59 % a day.
  */
 export class PrismaHistoricalLiquidationRepository
   extends BasePrismaRepository
@@ -156,7 +162,7 @@ export class PrismaHistoricalLiquidationRepository
               COUNT(*) FILTER (WHERE liq_dir = 'Short') AS short_n,
               SUM(notional_total) FILTER (WHERE liq_dir = 'Short') AS short_volume
             FROM raw_liquidations
-            WHERE time >= ${since} ${coinFilter}
+            WHERE time >= ${since} AND liq_dir IS NOT NULL ${coinFilter}
             GROUP BY coin
           )
           SELECT
@@ -208,7 +214,7 @@ export class PrismaHistoricalLiquidationRepository
           WITH w AS MATERIALIZED (
             SELECT time, coin, liq_dir, notional_total
             FROM raw_liquidations
-            WHERE time >= ${earliestSince(windows)}
+            WHERE time >= ${earliestSince(windows)} AND liq_dir IS NOT NULL
           ),
           per_coin AS (
             ${Prisma.join(perWindow, ' UNION ALL ')}
@@ -274,7 +280,7 @@ export class PrismaHistoricalLiquidationRepository
             COUNT(CASE WHEN liq_dir = 'Long'  THEN 1 END)::int AS long_count,
             COUNT(CASE WHEN liq_dir = 'Short' THEN 1 END)::int AS short_count
           FROM raw_liquidations
-          WHERE time >= ${since} ${coinFilter}
+          WHERE time >= ${since} AND liq_dir IS NOT NULL ${coinFilter}
           GROUP BY 1
           ORDER BY 1 ASC
         `;
@@ -321,7 +327,7 @@ export class PrismaHistoricalLiquidationRepository
           WITH w AS MATERIALIZED (
             SELECT time, liq_dir, notional_total, date_part('epoch', time) AS epoch
             FROM raw_liquidations
-            WHERE time >= ${earliestSince(windows)}
+            WHERE time >= ${earliestSince(windows)} AND liq_dir IS NOT NULL
           )
           ${Prisma.join(perWindow, ' UNION ALL ')}
           ORDER BY 1, 2

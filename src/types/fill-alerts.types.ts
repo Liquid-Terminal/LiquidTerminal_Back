@@ -1,45 +1,10 @@
 /**
  * Fill Alerts Types for LiquidTerminal
  *
- * Defines types for the HypeDexer WebSocket streams powering the Fill Telegram alert:
- * - perp fills → HypeDexer live-data `allFills` (/ws?mode=mirror)
- * - spot fills → HypeDexer multiplex `fills_spot` (/ws)
- *
- * Both raw shapes are normalized to a single `NormalizedFill` consumed by the dispatcher.
+ * Defines types for the HypeDexer WebSocket stream powering the Fill Telegram alert:
+ * HypeDexer live-data `allFills` (/ws?mode=mirror), which carries perp and spot
+ * fills alike. Each fill is normalized to a `NormalizedFill` consumed by the dispatcher.
  */
-
-// ============================================================================
-// HYPEDEXER RAW TYPES — fills_spot (multiplex /ws)
-// ============================================================================
-
-/**
- * Raw spot fill from HypeDexer `fills_spot` WebSocket event.
- */
-export interface HypeDexerSpotFill {
-  user: string;
-  coin: string;
-  coin_meaning: string;
-  px: number;
-  sz: number;
-  side: 'A' | 'B'; // A = sell, B = buy
-  time: string;
-  tid: number;
-  oid: number;
-  hash: string;
-  fee: number;
-  fee_token: string;
-  fee_usdc: number;
-  type_trade: string;
-}
-
-/**
- * HypeDexer `fills_spot` WebSocket event (server → client, multiplex endpoint).
- */
-export interface HypeDexerSpotFillEvent {
-  type: 'fills_spot';
-  count: number;
-  data: HypeDexerSpotFill[];
-}
 
 // ============================================================================
 // HYPEDEXER RAW TYPES — allFills (live-data /ws?mode=mirror)
@@ -94,33 +59,15 @@ export interface HypeDexerAllFillsEvent {
 // ============================================================================
 
 /**
- * Normalized spot fill — camelCase, numeric fields, user lowercase.
- */
-export interface SpotFill {
-  tid: number;
-  oid: number;
-  user: string; // Always lowercase
-  coin: string; // coin_meaning || coin
-  rawCoin: string;
-  px: number;
-  sz: number;
-  notionalUsd: number; // px * sz
-  side: 'A' | 'B'; // A = sell, B = buy
-  time: string;
-  hash: string;
-  feeUsdc: number;
-}
-
-/**
- * Unified normalized fill — both perp (`allFills`) and spot (`fills_spot`) fills
- * are normalized to this shape. A single ORDER fragments into many fills sharing
- * one `oid`; the FillAggregator groups them into an `AggregatedFill`.
+ * Unified normalized fill — perp and spot fills from `allFills` are normalized
+ * to this shape. A single ORDER fragments into many fills sharing one `oid`;
+ * the FillAggregator groups them into an `AggregatedFill`.
  */
 export interface NormalizedFill {
   source: 'perp' | 'spot';
   oid: number; // Order id — aggregation key (all fills of one order share it)
   wallet: string; // Always lowercase
-  coin: string;
+  coin: string; // Spot: pair id ("@107") from the client, base token name once resolved
   px: number;
   sz: number;
   notionalUsd: number; // px * sz
@@ -128,7 +75,7 @@ export interface NormalizedFill {
   time: string | number;
   hash: string;
   dir?: string; // Perp only — fill.dir
-  twapId?: number | null; // Perp only — set when the fill belongs to a TWAP order
+  twapId?: number | null; // Set when the fill belongs to a TWAP order
   closedPnl?: number; // Perp only — undefined on spot
 }
 
@@ -150,7 +97,7 @@ export interface AggregatedFill {
   time: string | number; // Earliest fill time
   hash: string;
   dir?: string; // Perp only
-  twapId?: number | null; // Perp only — set when the order is a TWAP
+  twapId?: number | null; // Set when the order is a TWAP
   fillCount: number; // Number of fills aggregated (>= 1)
   /// Perp only — sum of closedPnl across aggregated fills. Undefined if no
   /// fill in the buffer carried a closedPnl (e.g. all spot, or all 0).

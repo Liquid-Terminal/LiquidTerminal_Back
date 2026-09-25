@@ -1,10 +1,10 @@
 import { prismaTelegram } from '../../core/prisma.telegram.service';
 import { logDeduplicator } from '../../utils/logDeduplicator';
 import { HypeDexerLiveDataWSClient } from '../../clients/hypedexer/websocket/live-data.ws.client';
-import { HypeDexerSpotFillsWSClient } from '../../clients/hypedexer/websocket/fills-spot.ws.client';
 import { TelegramFillSubscriptionService, ActiveFillSubscription } from './telegram.fill-subscription.service';
 import { InternalWebSocketServer } from '../../websocket/ws.server';
-import { NormalizedFill, AggregatedFill, SpotFill } from '../../types/fill-alerts.types';
+import { SpotCoinNameService } from '../spot/spotCoinNames.service';
+import { AggregatedFill } from '../../types/fill-alerts.types';
 import { formatFillAlert } from '../../utils/telegram.formatting';
 import { FillAggregator } from './fill-aggregator';
 import {
@@ -26,13 +26,14 @@ interface CompiledFillSubscription {
 /**
  * TelegramFillAlertDispatcherService
  *
- * Bridges HypeDexer fill events (perp `allFills` + spot `fills_spot`) to the
- * Telegram bot via /ws as a single unified "fill_alert".
+ * Bridges HypeDexer fill events (`allFills`, perp and spot) to the Telegram
+ * bot via /ws as a single unified "fill_alert".
  *
  * Flow:
- * 1. Subscribes to HypeDexerLiveDataWSClient (allFills) and HypeDexerSpotFillsWSClient (fills_spot)
- * 2. Feeds every fill into the FillAggregator, which groups the fills of one
- *    order (`oid`) and emits a single AggregatedFill after a short debounce
+ * 1. Subscribes to HypeDexerLiveDataWSClient (allFills)
+ * 2. Feeds every fill into the FillAggregator (spot pair ids resolved to token
+ *    names first), which groups the fills of one order (`oid`) and emits a
+ *    single AggregatedFill after a short debounce
  * 3. On each aggregated order, checks active fill subscriptions (cached 30s)
  * 4. Filters by minUsd, filterCoins, filterWallets
  * 5. Deduplicates via TelegramFillSentAlert unique constraint (subscriptionId, eventId)
@@ -40,7 +41,7 @@ interface CompiledFillSubscription {
  *    → Bot receives { type: 'fill_alert', data: { telegramId, message } }
  *    → Bot routes by telegramId and calls bot.api.sendMessage()
  *
- * Both streams are network-wide, so fills are dropped as early as possible
+ * The stream is network-wide, so fills are dropped as early as possible
  * once the subscriptions are known: all of them when nobody is subscribed,
  * those of unwatched wallets when every subscription is wallet-scoped (before
  * aggregation), and orders matching no subscription (before the DB queue).
@@ -49,9 +50,8 @@ export class TelegramFillAlertDispatcherService {
   private static instance: TelegramFillAlertDispatcherService;
 
   private liveDataClient: HypeDexerLiveDataWSClient | null = null;
-  private spotClient: HypeDexerSpotFillsWSClient | null = null;
-  private unsubscribePerp: (() => void) | null = null;
-  private unsubscribeSpot: (() => void) | null = null;
+  private unsubscribeFills: (() => void) | null = null;
+  private readonly spotNames = SpotCoinNameService.getInstance();
 
   private subscriptionCache: CompiledFillSubscription[] = [];
   private cacheLoadedAt: number = 0;
@@ -67,7 +67,7 @@ export class TelegramFillAlertDispatcherService {
 
   // In-memory dedup: absorbs WS re-flushes/reconnects so the DB is hit once per alert
   private readonly recentAlerts = new RecentEventCache();
-  // Serializes dispatch batches (perp + spot) so they never overlap and exhaust the DB pool
+  // Serializes dispatch batches so they never overlap and exhaust the DB pool
   private readonly queue = new SerialQueue(CONTEXT, TelegramFillAlertDispatcherService.MAX_QUEUED_ORDERS);
   private purgeTimer: NodeJS.Timeout | null = null;
 
@@ -91,26 +91,23 @@ export class TelegramFillAlertDispatcherService {
   }
 
   /**
-   * Start the dispatcher — connect to both HypeDexer fill streams and begin dispatching.
+   * Start the dispatcher — connect to the HypeDexer fill stream and begin dispatching.
    */
   public start(): void {
     this.liveDataClient = HypeDexerLiveDataWSClient.getInstance();
-    this.spotClient = HypeDexerSpotFillsWSClient.getInstance();
+    // Loaded ahead of the first spot fill so its alert already shows the token name.
+    void this.spotNames.reload();
 
-    // Both streams feed the aggregator; it emits one AggregatedFill per order,
+    // The stream feeds the aggregator; it emits one AggregatedFill per order,
     // which is then enqueued onto the serial dispatch queue.
-    this.unsubscribePerp = this.liveDataClient.onFill((fills) => {
+    this.unsubscribeFills = this.liveDataClient.onFill((fills) => {
       if (this.nobodySubscribed()) return;
       for (const fill of fills) {
-        if (this.isWatched(fill.wallet)) this.aggregator.add(fill);
-      }
-    });
-
-    this.unsubscribeSpot = this.spotClient.onSpotFill((fills) => {
-      if (this.nobodySubscribed()) return;
-      for (const fill of fills) {
-        const normalized = this.spotToNormalized(fill);
-        if (this.isWatched(normalized.wallet)) this.aggregator.add(normalized);
+        if (!this.isWatched(fill.wallet)) continue;
+        // Coin filters and alerts name the token ("HYPE"), not the pair id ("@107").
+        this.aggregator.add(
+          fill.source === 'spot' ? { ...fill, coin: this.spotNames.resolve(fill.coin) } : fill
+        );
       }
     });
 
@@ -130,30 +127,21 @@ export class TelegramFillAlertDispatcherService {
 
     // Idempotent — BaseWebSocketService guards against double-connect.
     this.liveDataClient.start();
-    this.spotClient.start();
 
     logDeduplicator.info('TelegramFillAlertDispatcherService: Started');
   }
 
   /**
-   * Stop the dispatcher — remove callbacks and stop the WS clients.
+   * Stop the dispatcher — remove the callback and stop the WS client.
    */
   public stop(): void {
-    if (this.unsubscribePerp) {
-      this.unsubscribePerp();
-      this.unsubscribePerp = null;
-    }
-    if (this.unsubscribeSpot) {
-      this.unsubscribeSpot();
-      this.unsubscribeSpot = null;
+    if (this.unsubscribeFills) {
+      this.unsubscribeFills();
+      this.unsubscribeFills = null;
     }
     if (this.liveDataClient) {
       this.liveDataClient.stop();
       this.liveDataClient = null;
-    }
-    if (this.spotClient) {
-      this.spotClient.stop();
-      this.spotClient = null;
     }
     if (this.purgeTimer) {
       clearInterval(this.purgeTimer);
@@ -176,24 +164,6 @@ export class TelegramFillAlertDispatcherService {
   // ============================================================================
   // PRIVATE METHODS
   // ============================================================================
-
-  /**
-   * Map a normalized SpotFill (from the spot WS client) to the unified NormalizedFill.
-   */
-  private spotToNormalized(fill: SpotFill): NormalizedFill {
-    return {
-      source: 'spot',
-      oid: fill.oid,
-      wallet: fill.user.toLowerCase(),
-      coin: fill.coin,
-      px: fill.px,
-      sz: fill.sz,
-      notionalUsd: fill.notionalUsd,
-      side: fill.side,
-      time: fill.time,
-      hash: fill.hash,
-    };
-  }
 
   /** True once the subscriptions are known and there are none: every fill can be dropped. */
   private nobodySubscribed(): boolean {

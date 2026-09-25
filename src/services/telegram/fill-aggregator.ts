@@ -125,8 +125,8 @@ export class FillAggregator {
 
   /**
    * Convert a `NormalizedFill.time` to epoch ms.
-   * - perp sends `number` (epoch ms)
-   * - spot sends `string` (ISO-8601)
+   * allFills sends `number` (epoch ms) for perp and spot alike; an ISO-8601
+   * `string` (the former fills_spot format) is still accepted.
    */
   private static toEpochMs(time: string | number): number {
     if (typeof time === 'number') return time;

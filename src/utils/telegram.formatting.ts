@@ -155,7 +155,7 @@ function formatDurationMs(durationMs: number): string {
 
 /**
  * Format a Fill alert message for Telegram (HTML parse mode).
- * Driven by HypeDexer `allFills` (perp) and `fills_spot` (spot) — an executed order.
+ * Driven by HypeDexer `allFills` (perp and spot fills) — an executed order.
  */
 export function formatFillAlert(fill: AggregatedFill, subscriptionName: string): string {
   const isBuy = fill.side === 'B';

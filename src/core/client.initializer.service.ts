@@ -348,7 +348,7 @@ export class ClientInitializerService {
       }
     }
 
-    // 5e. Start Telegram Fill Alert Dispatcher (connects to HypeDexer allFills + fills_spot)
+    // 5e. Start Telegram Fill Alert Dispatcher (connects to HypeDexer allFills: perp + spot fills)
     const fillAlertDispatcher = this.clients.get('fillAlertDispatcher');
     if (fillAlertDispatcher) {
       try {

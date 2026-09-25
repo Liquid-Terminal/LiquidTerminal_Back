@@ -1,20 +1,22 @@
 /**
- * The fill-alert dispatcher consumes two network-wide streams. Once the
- * subscriptions are known it drops, before aggregation or any queue / DB work,
- * every fill nobody can be alerted about — and must never drop one the
- * unfiltered pipeline would have alerted on. The oracle below is the matching
- * logic the dispatcher used before those early exits, applied to every order.
+ * The fill-alert dispatcher consumes one network-wide stream (perp and spot
+ * fills). Once the subscriptions are known it drops, before aggregation or any
+ * queue / DB work, every fill nobody can be alerted about — and must never drop
+ * one the unfiltered pipeline would have alerted on. The oracle below is the
+ * matching logic the dispatcher used before those early exits, applied to every
+ * order, with spot pair ids resolved to token names.
  */
-import type { AggregatedFill, NormalizedFill, SpotFill } from '../../../src/types/fill-alerts.types';
+import type { AggregatedFill, NormalizedFill } from '../../../src/types/fill-alerts.types';
 import type { ActiveFillSubscription } from '../../../src/services/telegram/telegram.fill-subscription.service';
 
 const mockState = {
-  perpListeners: new Set<(fills: NormalizedFill[]) => void>(),
-  spotListeners: new Set<(fills: SpotFill[]) => void>(),
+  fillListeners: new Set<(fills: NormalizedFill[]) => void>(),
   subscriptions: [] as ActiveFillSubscription[],
   loadGate: null as Promise<void> | null,
   broadcasts: [] as string[],
   inserted: new Set<string>(),
+  /** Spot pair id → token name, as SpotCoinNameService resolves them. */
+  spotNames: {} as Record<string, string>,
 };
 
 jest.mock('../../../src/utils/logDeduplicator', () => ({
@@ -39,8 +41,8 @@ jest.mock('../../../src/clients/hypedexer/websocket/live-data.ws.client', () => 
   HypeDexerLiveDataWSClient: {
     getInstance: () => ({
       onFill: (cb: (fills: NormalizedFill[]) => void) => {
-        mockState.perpListeners.add(cb);
-        return () => mockState.perpListeners.delete(cb);
+        mockState.fillListeners.add(cb);
+        return () => mockState.fillListeners.delete(cb);
       },
       start: () => undefined,
       stop: () => undefined,
@@ -48,15 +50,11 @@ jest.mock('../../../src/clients/hypedexer/websocket/live-data.ws.client', () => 
   },
 }));
 
-jest.mock('../../../src/clients/hypedexer/websocket/fills-spot.ws.client', () => ({
-  HypeDexerSpotFillsWSClient: {
+jest.mock('../../../src/services/spot/spotCoinNames.service', () => ({
+  SpotCoinNameService: {
     getInstance: () => ({
-      onSpotFill: (cb: (fills: SpotFill[]) => void) => {
-        mockState.spotListeners.add(cb);
-        return () => mockState.spotListeners.delete(cb);
-      },
-      start: () => undefined,
-      stop: () => undefined,
+      reload: async () => undefined,
+      resolve: (coin: string) => mockState.spotNames[coin] ?? coin,
     }),
   },
 }));
@@ -164,9 +162,14 @@ function randomSubscriptions(rnd: () => number, count: number, walletScoped: boo
   );
 }
 
+/** Spot pair ids of COINS ("@0" = BTC, …); "@99" is a pair SpotCoinNameService does not know yet. */
+const SPOT_PAIRS = [...COINS.map((_, i) => `@${i}`), '@99'];
+const SPOT_NAMES: Record<string, string> = Object.fromEntries(COINS.map((coin, i) => [`@${i}`, coin]));
+
 interface Stream {
-  batches: { perp: NormalizedFill[]; spot: SpotFill[] }[];
-  /** Same fills as the dispatcher receives them, spot already normalized. */
+  /** Frames as the live-data client emits them: perp and spot fills mixed, spot coin = pair id. */
+  batches: NormalizedFill[][];
+  /** The same fills as the aggregator must receive them: spot pair ids resolved to token names. */
   normalized: NormalizedFill[];
 }
 
@@ -178,31 +181,26 @@ function randomStream(rnd: () => number, orders: number): Stream {
     oid += 1;
     const source = rnd() < 0.6 ? 'perp' : 'spot';
     const wallet = pick(rnd, WALLETS);
-    const coin = pick(rnd, COINS);
+    const coin = source === 'perp' ? pick(rnd, COINS) : pick(rnd, SPOT_PAIRS);
     const side = rnd() < 0.5 ? 'A' : 'B';
     const dir = pick(rnd, ['Open Long', 'Close Short', 'Open Short', 'Close Long', undefined]);
     const fillCount = 1 + Math.floor(rnd() * 4);
-    const batch: Stream['batches'][number] = { perp: [], spot: [] };
+    const batch: NormalizedFill[] = [];
     for (let f = 0; f < fillCount; f++) {
       const px = 1 + rnd() * 100;
       const sz = rnd() * 200;
+      const common = {
+        oid, wallet, coin, px, sz, notionalUsd: px * sz, side,
+        time: 1_790_000_000_000 + o, hash: `0xh${oid}`, twapId: null,
+      } as const;
       if (source === 'perp') {
-        const fill: NormalizedFill = {
-          source: 'perp', oid, wallet, coin, px, sz, notionalUsd: px * sz, side,
-          time: 1_790_000_000_000 + o, hash: `0xh${oid}`, dir, twapId: null, closedPnl: 0,
-        };
-        batch.perp.push(fill);
+        const fill: NormalizedFill = { source: 'perp', ...common, dir, closedPnl: 0 };
+        batch.push(fill);
         normalized.push(fill);
       } else {
-        const fill: SpotFill = {
-          tid: oid * 10 + f, oid, user: wallet, coin, rawCoin: `@${coin}`, px, sz, notionalUsd: px * sz,
-          side, time: new Date(1_790_000_000_000 + o).toISOString(), hash: `0xh${oid}`, feeUsdc: 0,
-        };
-        batch.spot.push(fill);
-        normalized.push({
-          source: 'spot', oid, wallet, coin, px, sz, notionalUsd: px * sz, side,
-          time: fill.time, hash: fill.hash,
-        });
+        const fill: NormalizedFill = { source: 'spot', ...common };
+        batch.push(fill);
+        normalized.push({ ...fill, coin: SPOT_NAMES[coin] ?? coin });
       }
     }
     batches.push(batch);
@@ -222,12 +220,12 @@ describe('TelegramFillAlertDispatcherService', () => {
   beforeEach(() => {
     jest.resetModules();
     jest.useFakeTimers({ doNotFake: ['setImmediate', 'nextTick'] });
-    mockState.perpListeners.clear();
-    mockState.spotListeners.clear();
+    mockState.fillListeners.clear();
     mockState.subscriptions = [];
     mockState.loadGate = null;
     mockState.broadcasts = [];
     mockState.inserted.clear();
+    mockState.spotNames = SPOT_NAMES;
     FillAggregator = require('../../../src/services/telegram/fill-aggregator').FillAggregator;
     addSpy = jest.spyOn(FillAggregator.prototype, 'add');
     Dispatcher = require('../../../src/services/telegram/telegram.fill-alert-dispatcher.service')
@@ -241,10 +239,7 @@ describe('TelegramFillAlertDispatcherService', () => {
   });
 
   const emit = (stream: Stream): void => {
-    for (const batch of stream.batches) {
-      if (batch.perp.length) for (const cb of mockState.perpListeners) cb(batch.perp);
-      if (batch.spot.length) for (const cb of mockState.spotListeners) cb(batch.spot);
-    }
+    for (const batch of stream.batches) for (const cb of mockState.fillListeners) cb(batch);
   };
 
   /** Alerts the unfiltered pipeline would have produced for this stream. */
@@ -338,6 +333,28 @@ describe('TelegramFillAlertDispatcherService', () => {
     const stream = randomStream(rng(10), 20);
     expect(await run(stream)).toEqual(expectedAlerts(stream, mockState.subscriptions));
     expect(mockState.broadcasts.length).toBe(20);
+  });
+
+  it('filters and alerts spot fills under the token name, not the pair id', async () => {
+    mockState.subscriptions = [
+      subscription('spot-hype', { filterCoins: ['HYPE'], filterSource: 'SPOT' }),
+      subscription('perp-only', { filterSource: 'PERP' }),
+    ];
+    Dispatcher.getInstance().start();
+    await drain();
+
+    const hypeSpot: NormalizedFill = {
+      source: 'spot', oid: 7, wallet: WALLETS[0], coin: '@2', px: 10, sz: 3, notionalUsd: 30,
+      side: 'B', time: 1_790_000_000_000, hash: '0xh7', twapId: null,
+    };
+    // A pair listed after the last load keeps its id until the next reload.
+    const unknownSpot: NormalizedFill = { ...hypeSpot, oid: 8, coin: '@99', hash: '0xh8' };
+    for (const cb of mockState.fillListeners) cb([hypeSpot, unknownSpot]);
+    jest.advanceTimersByTime(2_500);
+    await drain();
+
+    expect(addSpy.mock.calls.map(([fill]) => (fill as NormalizedFill).coin)).toEqual(['HYPE', '@99']);
+    expect(mockState.broadcasts).toEqual([`t-spot-hype|sub-spot-hype|spot:7:${WALLETS[0]}|1|30.000000`]);
   });
 });
 

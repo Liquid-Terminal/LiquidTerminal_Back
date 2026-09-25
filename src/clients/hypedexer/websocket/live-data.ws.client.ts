@@ -8,7 +8,7 @@ import {
 } from '../../../types/fill-alerts.types';
 
 /**
- * Callback type for normalized perp fill events
+ * Callback type for normalized fill events (perp and spot)
  */
 export type FillCallback = (fills: NormalizedFill[]) => void;
 
@@ -16,7 +16,10 @@ export type FillCallback = (fills: NormalizedFill[]) => void;
  * HypeDexer Live-Data WebSocket Client
  *
  * Connects to the live-data (mirror) endpoint wss://api.hypedexer.com/ws?mode=mirror
- * and subscribes to the `allFills` channel (perp fills, market-wide).
+ * and subscribes to the `allFills` channel: every fill, market-wide — native
+ * perps ("BTC"), HIP-3 perps ("xyz:GOLD"), HIP-4 outcomes ("#123") and spot
+ * ("@107"). HypeDexer dropped its separate `fills_spot` channel (2026-09), so
+ * spot fills are told apart here and normalized with `source: 'spot'`.
  *
  * Unlike the multiplex endpoint, live-data messages are discriminated by `channel`
  * (NOT `type`). Heartbeat still uses `{type:'ping'}` / `{type:'pong'}`.
@@ -48,6 +51,9 @@ export class HypeDexerLiveDataWSClient extends BaseWebSocketService {
         reconnectMaxAttempts: 0,
         pingInterval: 30000,
         pingTimeout: 10000,
+        // A frame is one block of fills: ~64 KB at normal load, and the default
+        // 100 KB cap would drop a whole block (so its alerts) under heavy load.
+        maxBufferSize: 1024 * 1024,
       },
       {
         onStateChange: (state: WSConnectionState) => this.handleStateChange(state),
@@ -217,17 +223,22 @@ export class HypeDexerLiveDataWSClient extends BaseWebSocketService {
   }
 
   /**
-   * Normalize a HypeDexer perp fill to the unified NormalizedFill shape.
-   * px/sz are strings — parsed to numbers.
+   * Spot pairs are "@<pair index>" plus the legacy "PURR/USDC"; every other
+   * coin on allFills is a perp-like market (native, HIP-3 "dex:COIN", HIP-4 "#N").
+   */
+  private static isSpotCoin(coin: string): boolean {
+    return coin.startsWith('@') || coin.includes('/');
+  }
+
+  /**
+   * Normalize a HypeDexer fill to the unified NormalizedFill shape.
+   * px/sz are strings — parsed to numbers. Spot fills keep their pair id as
+   * `coin` ("@107"); display names are resolved by the consumer.
    */
   private normalizeFill(address: string, raw: HypeDexerFill): NormalizedFill {
     const px = parseFloat(raw.px);
     const sz = parseFloat(raw.sz);
-    // closedPnl is a string in the HypeDexer schema; default to 0 if it parses to NaN.
-    const closedPnlParsed = parseFloat(raw.closedPnl);
-    const closedPnl = Number.isFinite(closedPnlParsed) ? closedPnlParsed : 0;
-    return {
-      source: 'perp',
+    const fill = {
       oid: raw.oid,
       wallet: address.toLowerCase(),
       coin: raw.coin,
@@ -237,10 +248,19 @@ export class HypeDexerLiveDataWSClient extends BaseWebSocketService {
       side: raw.side,
       time: raw.time,
       hash: raw.hash,
-      dir: raw.dir,
       twapId: raw.twapId ?? null,
-      closedPnl,
     };
+
+    // Spot fills also carry a `dir` ("Buy"/"Sell") and a closedPnl, but alerts
+    // show direction and realized PnL for perps only, as the former `fills_spot` feed did.
+    if (HypeDexerLiveDataWSClient.isSpotCoin(raw.coin)) {
+      return { source: 'spot', ...fill };
+    }
+
+    // closedPnl is a string in the HypeDexer schema; default to 0 if it parses to NaN.
+    const closedPnlParsed = parseFloat(raw.closedPnl);
+    const closedPnl = Number.isFinite(closedPnlParsed) ? closedPnlParsed : 0;
+    return { source: 'perp', ...fill, dir: raw.dir, closedPnl };
   }
 
   /**

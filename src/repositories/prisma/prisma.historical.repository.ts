@@ -58,14 +58,59 @@ function earliestSince(windows: { since: Date }[]): Date {
 }
 
 /**
+ * The liquidations of a window, one row per liquidation — (hash, liquidated
+ * user, coin) — with the columns the stats and charts read.
+ *
+ * Rows without a direction are left out: since 2026-09 HypeDexer sends, next
+ * to a priced liquidation, rows that only list its liquidators (zero size and
+ * notional). They stay as raw data but are not liquidations.
+ *
+ * HypeDexer also lists some liquidations several times under different tids
+ * (its WS and REST disagree on tids): growing partial aggregates up to
+ * 2026-09, and since then cross-coin merges with an absurd fill price (AVAX
+ * at 1.53 for a mark of 11.18). The version kept is the largest whose VWAP
+ * lies within 10 % of the liquidation's mark — the smallest mark_px of its
+ * versions, as the corrupt ones are sums of marks — else the closest one.
+ * Checked against Hyperliquid's own fills for 269 duplicated liquidations:
+ * the notional kept was right every time. The key is only compared for
+ * equality, so it is sorted bytewise whatever the database collation.
+ */
+function liquidationEvents(since: Date, coinFilter: Prisma.Sql = Prisma.empty): Prisma.Sql {
+  return Prisma.sql`
+    SELECT time, coin, liq_dir, notional_total
+    FROM (
+      SELECT
+        time, coin, liq_dir, notional_total,
+        row_number() OVER (
+          PARTITION BY hash COLLATE "C", liquidated_user COLLATE "C", coin COLLATE "C"
+          ORDER BY
+            vwap_deviation <= 0.1 DESC,
+            CASE WHEN vwap_deviation <= 0.1 THEN notional_total END DESC NULLS LAST,
+            vwap_deviation,
+            tid DESC
+        ) AS version_rank
+      FROM (
+        SELECT
+          time, coin, liq_dir, notional_total, tid, hash, liquidated_user,
+          COALESCE(
+            abs(fill_px_vwap / NULLIF(min(mark_px) OVER (
+              PARTITION BY hash COLLATE "C", liquidated_user COLLATE "C", coin COLLATE "C"
+            ), 0) - 1),
+            'Infinity'
+          ) AS vwap_deviation
+        FROM raw_liquidations
+        WHERE time >= ${since} AND liq_dir IS NOT NULL ${coinFilter}
+      ) versions
+    ) ranked
+    WHERE version_rank = 1
+  `;
+}
+
+/**
  * Prisma implementation of the HistoricalLiquidationRepository.
  * Uses prismaHistorical (separate DB) instead of the default prisma client.
  *
- * Stats and charts only read rows with a direction (`liq_dir IS NOT NULL`):
- * since 2026-09 HypeDexer sends, next to a priced liquidation, companion rows
- * that only list liquidators (no direction, zero size and notional). They are
- * kept as raw data but are not liquidations — counting them inflated
- * `liquidationsCount` by 7–59 % a day.
+ * Stats and charts count each liquidation once: see liquidationEvents().
  */
 export class PrismaHistoricalLiquidationRepository
   extends BasePrismaRepository
@@ -161,8 +206,7 @@ export class PrismaHistoricalLiquidationRepository
               SUM(notional_total) FILTER (WHERE liq_dir = 'Long') AS long_volume,
               COUNT(*) FILTER (WHERE liq_dir = 'Short') AS short_n,
               SUM(notional_total) FILTER (WHERE liq_dir = 'Short') AS short_volume
-            FROM raw_liquidations
-            WHERE time >= ${since} AND liq_dir IS NOT NULL ${coinFilter}
+            FROM (${liquidationEvents(since, coinFilter)}) liq
             GROUP BY coin
           )
           SELECT
@@ -212,9 +256,7 @@ export class PrismaHistoricalLiquidationRepository
         `);
         const rows: (StatsRow & { period: string })[] = await this.prismaClient.$queryRaw`
           WITH w AS MATERIALIZED (
-            SELECT time, coin, liq_dir, notional_total
-            FROM raw_liquidations
-            WHERE time >= ${earliestSince(windows)} AND liq_dir IS NOT NULL
+            ${liquidationEvents(earliestSince(windows))}
           ),
           per_coin AS (
             ${Prisma.join(perWindow, ' UNION ALL ')}
@@ -279,8 +321,7 @@ export class PrismaHistoricalLiquidationRepository
             SUM(CASE WHEN liq_dir = 'Short' THEN notional_total ELSE 0 END)::float AS short_volume,
             COUNT(CASE WHEN liq_dir = 'Long'  THEN 1 END)::int AS long_count,
             COUNT(CASE WHEN liq_dir = 'Short' THEN 1 END)::int AS short_count
-          FROM raw_liquidations
-          WHERE time >= ${since} AND liq_dir IS NOT NULL ${coinFilter}
+          FROM (${liquidationEvents(since, coinFilter)}) liq
           GROUP BY 1
           ORDER BY 1 ASC
         `;
@@ -326,8 +367,7 @@ export class PrismaHistoricalLiquidationRepository
         const rows: (RawChartBucket & { period: string })[] = await this.prismaClient.$queryRaw`
           WITH w AS MATERIALIZED (
             SELECT time, liq_dir, notional_total, date_part('epoch', time) AS epoch
-            FROM raw_liquidations
-            WHERE time >= ${earliestSince(windows)} AND liq_dir IS NOT NULL
+            FROM (${liquidationEvents(earliestSince(windows))}) liq
           )
           ${Prisma.join(perWindow, ' UNION ALL ')}
           ORDER BY 1, 2

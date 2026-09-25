@@ -315,7 +315,7 @@ export class ClientInitializerService {
       this.scheduleDailyBackfill(backfillClient);
     }
 
-    // 5. Start Telegram Wallet Dispatcher (connects to HypeDexer completed_trades)
+    // 5. Start Telegram Wallet Dispatcher (polls HypeDexer /completed-trades/)
     const walletDispatcher = this.clients.get('walletDispatcher');
     if (walletDispatcher) {
       try {

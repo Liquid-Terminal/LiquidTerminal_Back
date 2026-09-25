@@ -1,5 +1,5 @@
 /**
- * The wallet dispatcher consumes the network-wide completed_trades stream while
+ * The wallet dispatcher consumes the network-wide completed trades feed while
  * every subscription is wallet-scoped: once the subscriptions are known, only
  * trades of a watched wallet may reach the queue — and the alerts must be
  * exactly those of the unfiltered pipeline (oracle: the pre-refactor matching).
@@ -21,6 +21,7 @@ const mockState = {
   loadGate: null as Promise<void> | null,
   broadcasts: [] as string[],
   inserted: new Set<string>(),
+  paused: [] as boolean[],
 };
 
 jest.mock('../../../src/utils/logDeduplicator', () => ({
@@ -41,12 +42,15 @@ jest.mock('../../../src/core/prisma.telegram.service', () => ({
   },
 }));
 
-jest.mock('../../../src/clients/hypedexer/websocket/completed-trades.ws.client', () => ({
-  HypeDexerCompletedTradesWSClient: {
+jest.mock('../../../src/clients/hypedexer/rest/completed-trades/completed-trades-poller.client', () => ({
+  HypeDexerCompletedTradesPoller: {
     getInstance: () => ({
       onCompletedTrade: (cb: (trades: CompletedTrade[]) => void) => {
         mockState.listeners.add(cb);
         return () => mockState.listeners.delete(cb);
+      },
+      setPaused: (paused: boolean) => {
+        mockState.paused.push(paused);
       },
       start: () => undefined,
       stop: () => undefined,
@@ -150,6 +154,7 @@ describe('TelegramWalletDispatcherService', () => {
     mockState.loadGate = null;
     mockState.broadcasts = [];
     mockState.inserted.clear();
+    mockState.paused = [];
     const { SerialQueue } = require('../../../src/utils/telegram.alert-dedup');
     enqueueSpy = jest.spyOn(SerialQueue.prototype, 'enqueue');
     Dispatcher = require('../../../src/services/telegram/telegram.wallet-dispatcher.service')
@@ -208,5 +213,27 @@ describe('TelegramWalletDispatcherService', () => {
     release();
     await drain();
     expect([...mockState.broadcasts].sort()).toEqual(expectedAlerts(batches, mockState.subscriptions));
+  });
+
+  it('pauses the feed while no wallet is watched and resumes it once one is', async () => {
+    jest.useFakeTimers({ doNotFake: ['setImmediate', 'nextTick'] });
+    try {
+      // A subscription that watches nothing cannot produce an alert either.
+      mockState.subscriptions = [
+        { id: 's0', telegramId: 't0', name: 'empty', walletAddresses: [], eventTypes: [], minAmountUsd: 0 },
+      ];
+      Dispatcher.getInstance().start();
+      await drain();
+      expect(mockState.paused).toEqual([true]);
+
+      mockState.subscriptions = [
+        { id: 's1', telegramId: 't1', name: 'one', walletAddresses: [WALLETS[0]], eventTypes: [], minAmountUsd: 0 },
+      ];
+      jest.advanceTimersByTime(30_000);
+      await drain();
+      expect(mockState.paused).toEqual([true, false]);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });

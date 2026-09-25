@@ -1,6 +1,6 @@
 import { prismaTelegram } from '../../core/prisma.telegram.service';
 import { logDeduplicator } from '../../utils/logDeduplicator';
-import { HypeDexerCompletedTradesWSClient } from '../../clients/hypedexer/websocket/completed-trades.ws.client';
+import { HypeDexerCompletedTradesPoller } from '../../clients/hypedexer/rest/completed-trades/completed-trades-poller.client';
 import { TelegramWalletSubscriptionService } from './telegram.wallet-subscription.service';
 import { InternalWebSocketServer } from '../../websocket/ws.server';
 import { CompletedTrade } from '../../types/wallet-events.types';
@@ -34,10 +34,10 @@ interface CompiledWalletSubscription {
 /**
  * TelegramWalletDispatcherService
  *
- * Bridges HypeDexer completed_trades events to the Telegram bot via /ws.
+ * Bridges HypeDexer completed trades to the Telegram bot via /ws.
  *
  * Flow:
- * 1. Subscribes to HypeDexerCompletedTradesWSClient (1 global sub)
+ * 1. Subscribes to HypeDexerCompletedTradesPoller (network-wide, polled every 5s)
  * 2. On each trade, checks active wallet subscriptions (cached 30s)
  * 3. Filters by walletAddress, eventType, minAmountUsd
  * 4. Deduplicates via TelegramWalletSentAlert unique constraint
@@ -45,13 +45,14 @@ interface CompiledWalletSubscription {
  *    → Bot receives { type: 'wallet_event', data: { telegramId, trade, subscriptionName } }
  *    → Bot routes by telegramId and sends the Telegram message
  *
- * The stream is network-wide while every subscription is wallet-scoped: once
- * the subscriptions are known, only trades of a watched wallet are queued.
+ * The feed is network-wide while every subscription is wallet-scoped: once
+ * the subscriptions are known, only trades of a watched wallet are queued,
+ * and the feed is paused while no wallet is watched at all.
  */
 export class TelegramWalletDispatcherService {
   private static instance: TelegramWalletDispatcherService;
 
-  private wsClient: HypeDexerCompletedTradesWSClient | null = null;
+  private feed: HypeDexerCompletedTradesPoller | null = null;
   private unsubscribeCallback: (() => void) | null = null;
 
   private subscriptionCache: CompiledWalletSubscription[] = [];
@@ -80,21 +81,21 @@ export class TelegramWalletDispatcherService {
   }
 
   /**
-   * Start the dispatcher — connect to HypeDexer and begin dispatching
+   * Start the dispatcher — start the HypeDexer feed and begin dispatching
    */
   public start(): void {
-    this.wsClient = HypeDexerCompletedTradesWSClient.getInstance();
-    this.wsClient.start();
+    this.feed = HypeDexerCompletedTradesPoller.getInstance();
 
     // Enqueue each batch onto a serial chain — batches never run concurrently,
     // so the DB connection pool can't be exhausted by overlapping dispatches.
-    this.unsubscribeCallback = this.wsClient.onCompletedTrade((trades) => {
+    this.unsubscribeCallback = this.feed.onCompletedTrade((trades) => {
       const relevant = this.subscriptionsLoaded
         ? trades.filter((trade) => this.watchedWallets.has(trade.user))
         : trades;
       if (relevant.length === 0) return;
       this.queue.enqueue(() => this.processBatch(relevant));
     });
+    this.feed.start();
 
     // The subscriptions are refreshed on a timer, not only from dispatch():
     // trades of unwatched wallets never reach dispatch() any more.
@@ -123,16 +124,16 @@ export class TelegramWalletDispatcherService {
   }
 
   /**
-   * Stop the dispatcher — disconnect WS and clear cache
+   * Stop the dispatcher — stop the feed and clear cache
    */
   public stop(): void {
     if (this.unsubscribeCallback) {
       this.unsubscribeCallback();
       this.unsubscribeCallback = null;
     }
-    if (this.wsClient) {
-      this.wsClient.stop();
-      this.wsClient = null;
+    if (this.feed) {
+      this.feed.stop();
+      this.feed = null;
     }
     if (this.purgeTimer) {
       clearInterval(this.purgeTimer);
@@ -190,6 +191,8 @@ export class TelegramWalletDispatcherService {
       this.watchedWallets = watched;
       this.subscriptionsLoaded = true;
       this.cacheLoadedAt = Date.now();
+      // No watched wallet, no possible alert: skip the network-wide requests.
+      this.feed?.setPaused(watched.size === 0);
 
       logDeduplicator.info('TelegramWalletDispatcherService: Subscription cache refreshed', {
         count: this.subscriptionCache.length,

@@ -8,16 +8,43 @@ export class LogDeduplicator {
   // Instance singleton
   private static instance: LogDeduplicator;
   
-  // Stockage des timestamps des derniers logs
-  private lastLogTimestamp: Record<string, number> = {};
-  
+  /**
+   * Last emission time per key. Keys embed the JSON metadata (timestamps, URLs,
+   * stacks), so their space is unbounded: before this was pruned it grew for
+   * the life of the process (~200 MB/day in production) until GC thrash froze
+   * the API. An entry older than LOG_THROTTLE_MS can no longer suppress
+   * anything, so pruning it changes no logging behaviour.
+   */
+  private lastLogTimestamp = new Map<string, number>();
+
   // Intervalle de temps en millisecondes pour la déduplication
   private readonly LOG_THROTTLE_MS = 1000;
+
+  /** How often expired keys are swept. */
+  private readonly PRUNE_INTERVAL_MS = 10_000;
+
+  /** Hard ceiling between sweeps, in case a burst of unique keys lands at once. */
+  private readonly MAX_KEYS = 50_000;
 
   /**
    * Constructeur privé pour empêcher l'instanciation directe
    */
-  private constructor() {}
+  private constructor() {
+    // unref: the sweep must never keep the process (or a test run) alive.
+    setInterval(() => this.prune(), this.PRUNE_INTERVAL_MS).unref();
+  }
+
+  /** Drops every key whose throttle window has elapsed. */
+  private prune(now: number = Date.now()): void {
+    for (const [key, ts] of this.lastLogTimestamp) {
+      if (now - ts > this.LOG_THROTTLE_MS) this.lastLogTimestamp.delete(key);
+    }
+  }
+
+  /** Number of keys currently held (exposed for health checks and tests). */
+  public size(): number {
+    return this.lastLogTimestamp.size;
+  }
 
   /**
    * Récupère l'instance singleton du déduplicateur de logs
@@ -43,9 +70,14 @@ export class LogDeduplicator {
     const now = Date.now();
     const key = `${level}:${message}:${JSON.stringify(metadata)}`;
     
-    if (!this.lastLogTimestamp[key] || now - this.lastLogTimestamp[key] > this.LOG_THROTTLE_MS) {
+    const last = this.lastLogTimestamp.get(key);
+    if (last === undefined || now - last > this.LOG_THROTTLE_MS) {
+      if (this.lastLogTimestamp.size >= this.MAX_KEYS) this.prune(now);
+      // Still full after a sweep means a flood of keys all inside the window:
+      // forgetting them costs at most a few duplicate lines, never memory.
+      if (this.lastLogTimestamp.size >= this.MAX_KEYS) this.lastLogTimestamp.clear();
+      this.lastLogTimestamp.set(key, now);
       await logger[level](message, metadata);
-      this.lastLogTimestamp[key] = now;
     }
   }
 
@@ -90,7 +122,7 @@ export class LogDeduplicator {
    * Utile pour les tests ou pour forcer le logging d'un message
    */
   public reset(): void {
-    this.lastLogTimestamp = {};
+    this.lastLogTimestamp.clear();
   }
 }
 

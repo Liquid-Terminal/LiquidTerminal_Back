@@ -10,8 +10,12 @@ import { HypeDexerBaseClient } from '../shared/hypedexer-base.client';
 
 const CACHE_KEY = 'builders:all';
 const UPDATE_CHANNEL = 'builders:updated';
-const UPDATE_INTERVAL = 300000; // 5 minutes
-const CACHE_TTL = 290; // Just under 5 minutes
+// The list only changes when a builder registers, and each refresh costs
+// ~150 credits (1 400+ rows): 15 min instead of 5 saves ~27k credits a day.
+const UPDATE_INTERVAL = 15 * 60_000;
+// Outlives the period so the key never goes cold between two polls (at 290 s
+// for a 300 s period, every cycle left a gap that readers refilled upstream).
+const CACHE_TTL = 20 * 60;
 
 /**
  * Redis-backed poller for GET /builders/list (full list, cached).

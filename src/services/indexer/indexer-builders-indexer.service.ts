@@ -5,15 +5,19 @@ import {
   IndexerBuildersTopQuery,
   IndexerBuildersTimeframe,
 } from '../../clients/hypedexer/rest/builders/builders-indexer.client';
+import { HLIndexerBuildersClient } from '../../clients/hypedexer/rest/builders/builders-list-poller.client';
 import { cacheService } from '../../core/cache.service';
 import { HYPEDEXER_BUILDERS_CACHE_KEY, HYPEDEXER_TTL } from '../../constants/hypedexer.cache';
 
 /**
- * Passthrough for HypeDexer /builders/* REST under /indexer/builders (distinct from Redis poller `builders-list-poller.client.ts`).
+ * Passthrough for HypeDexer /builders/* REST under /indexer/builders. The list
+ * itself comes from the Redis key the poller (`builders-list-poller.client.ts`)
+ * keeps warm.
  */
 export class IndexerBuildersIndexerService {
   private static instance: IndexerBuildersIndexerService;
   private readonly client = HypeDexerBuildersIndexerClient.getInstance();
+  private readonly listPoller = HLIndexerBuildersClient.getInstance();
 
   public static getInstance(): IndexerBuildersIndexerService {
     if (!IndexerBuildersIndexerService.instance) {
@@ -22,8 +26,14 @@ export class IndexerBuildersIndexerService {
     return IndexerBuildersIndexerService.instance;
   }
 
-  public async listBuilders(legacyQuery?: string): Promise<unknown> {
-    return this.client.listBuilders(legacyQuery);
+  /**
+   * Upstream ignores every param of `/builders/list` (same 1 400+ rows, same
+   * order, with or without `limit`/`sort`: checked 2026-09-28), so the poller's
+   * copy is exactly what a direct call would return — minus ~150 credits.
+   */
+  public async listBuilders(): Promise<unknown> {
+    const response = await this.listPoller.getAllBuilders();
+    return response.data;
   }
 
   public async getGlobalStats(timeframe?: IndexerBuildersTimeframe): Promise<unknown> {

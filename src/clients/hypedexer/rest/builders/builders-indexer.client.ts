@@ -60,17 +60,6 @@ export class HypeDexerBuildersIndexerClient extends HypeDexerBaseClient {
     return this.rateLimiter.checkRateLimit(ip);
   }
 
-  /**
-   * OpenAPI: GET /builders/list — optional legacy query for sort/pagination (upstream may accept).
-   */
-  public async listBuilders(legacyQuery?: string): Promise<unknown> {
-    return this.circuitBreaker.execute(async () => {
-      const path = legacyQuery ? `/builders/list${legacyQuery}` : '/builders/list';
-      logDeduplicator.info('HypeDexerBuildersIndexerClient.listBuilders', { path });
-      return this.getUnwrapped<unknown>(path);
-    });
-  }
-
   public async getGlobalStats(timeframe?: IndexerBuildersTimeframe): Promise<unknown> {
     return this.circuitBreaker.execute(async () => {
       const q =

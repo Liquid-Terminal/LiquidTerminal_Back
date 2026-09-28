@@ -105,4 +105,42 @@ describe('CacheService.getOrSet', () => {
     expect(results).toEqual(['mine', 'mine', 'mine', 'mine', 'mine']);
     expect(fetchFn).toHaveBeenCalledTimes(1);
   });
+
+  it('stores a constant TTL as given', async () => {
+    await cache.getOrSet('k', async () => [1], 55);
+    expect(mockRedis.set).toHaveBeenCalledWith('k', '[1]', 55);
+  });
+
+  it('derives the TTL from the fetched value when given a function', async () => {
+    const ttl = jest.fn((rows: number[]) => (rows.length === 0 ? 3600 : 60));
+    await cache.getOrSet('empty', async () => [] as number[], ttl);
+    await cache.getOrSet('busy', async () => [1, 2], ttl);
+    expect(ttl).toHaveBeenNthCalledWith(1, []);
+    expect(ttl).toHaveBeenNthCalledWith(2, [1, 2]);
+    expect(mockRedis.set).toHaveBeenCalledWith('empty', '[]', 3600);
+    expect(mockRedis.set).toHaveBeenCalledWith('busy', '[1,2]', 60);
+  });
+
+  it('never stores a key without expiry, whatever the TTL function returns', async () => {
+    const cases: Array<[string, number, number]> = [
+      ['zero', 0, 1],
+      ['negative', -5, 1],
+      ['fraction', 2.2, 3],
+      ['nan', Number.NaN, 300],
+    ];
+    for (const [key, returned, stored] of cases) {
+      await cache.getOrSet(key, async () => 'v', () => returned);
+      expect(mockRedis.set).toHaveBeenCalledWith(key, '"v"', stored);
+    }
+  });
+
+  it('keeps the fetched value and the default TTL when the TTL function throws', async () => {
+    const fetchFn = jest.fn(async () => 'paid for');
+    const result = await cache.getOrSet('k', fetchFn, () => {
+      throw new Error('bad ttl');
+    });
+    expect(result).toBe('paid for');
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(mockRedis.set).toHaveBeenCalledWith('k', '"paid for"', 300);
+  });
 });

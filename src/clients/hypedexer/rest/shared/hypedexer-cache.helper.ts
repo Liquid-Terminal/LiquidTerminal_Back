@@ -54,21 +54,22 @@ export async function withRedisCache<T>(
 /**
  * Build a stable Redis cache key for HypeDexer pass-through routes.
  * Params are JSON.stringified with sorted keys to stay stable across call sites.
+ * Empty params are dropped like the query builders drop them, so `{}` and
+ * `{ limit: undefined }` — the same upstream call — share one key.
  */
 export function buildHypedexerCacheKey(
   domain: string,
   method: string,
   params?: Record<string, unknown>,
 ): string {
-  if (!params || Object.keys(params).length === 0) {
-    return `hypedexer:${domain}:${method}`;
-  }
-  const sortedKeys = Object.keys(params).sort();
   const normalized: Record<string, unknown> = {};
-  for (const k of sortedKeys) {
-    const v = params[k];
+  for (const k of Object.keys(params ?? {}).sort()) {
+    const v = params?.[k];
     if (v === undefined || v === null || v === '') continue;
     normalized[k] = v;
+  }
+  if (Object.keys(normalized).length === 0) {
+    return `hypedexer:${domain}:${method}`;
   }
   return `hypedexer:${domain}:${method}:${JSON.stringify(normalized)}`;
 }

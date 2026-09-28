@@ -9,6 +9,27 @@ interface Recomputed<T> {
 }
 
 /**
+ * Seconds to keep an entry: a constant, or a function of the value fetched
+ * (e.g. keep an empty upstream answer longer than a busy one).
+ */
+export type CacheTtl<T> = number | ((data: T) => number);
+
+/**
+ * Whole seconds, at least 1: a 0 TTL would store the key without expiry. A
+ * throwing TTL function falls back to the default rather than failing a fetch
+ * that already succeeded (and paid for its upstream call).
+ */
+function resolveTtl<T>(ttl: CacheTtl<T>, data: T): number {
+  let seconds: number;
+  try {
+    seconds = typeof ttl === 'function' ? ttl(data) : ttl;
+  } catch {
+    return CACHE_TTL.MEDIUM;
+  }
+  return Number.isFinite(seconds) ? Math.max(1, Math.ceil(seconds)) : CACHE_TTL.MEDIUM;
+}
+
+/**
  * Service de gestion du cache
  * Encapsule la logique de cache utilisée dans les services
  */
@@ -24,13 +45,13 @@ export class CacheService {
    * Récupère une donnée du cache ou l'obtient via une fonction de récupération
    * @param key Clé de cache
    * @param fetchFn Fonction pour récupérer la donnée si elle n'est pas en cache
-   * @param ttl Durée de vie du cache en secondes
+   * @param ttl Durée de vie du cache en secondes, ou fonction de la donnée récupérée
    * @returns La donnée du cache ou celle récupérée par fetchFn
    */
   async getOrSet<T>(
-    key: string, 
-    fetchFn: () => Promise<T>, 
-    ttl: number = CACHE_TTL.MEDIUM
+    key: string,
+    fetchFn: () => Promise<T>,
+    ttl: CacheTtl<T> = CACHE_TTL.MEDIUM
   ): Promise<T> {
     try {
       const cachedData = await redisService.get(key);
@@ -65,7 +86,7 @@ export class CacheService {
   }
 
   /** Cache miss path, coordinated across instances by a Redis lock. */
-  private async recompute<T>(key: string, fetchFn: () => Promise<T>, ttl: number): Promise<Recomputed<T>> {
+  private async recompute<T>(key: string, fetchFn: () => Promise<T>, ttl: CacheTtl<T>): Promise<Recomputed<T>> {
     // Try to acquire lock to prevent cache stampede
     const lockKey = `lock:${key}`;
     const redis = redisService.getClient();
@@ -82,7 +103,7 @@ export class CacheService {
 
         const data = await fetchFn();
         const serialized = JSON.stringify(data);
-        await redisService.set(key, serialized, ttl);
+        await redisService.set(key, serialized, resolveTtl(ttl, data));
         await redisService.delete(lockKey);
         return { data, serialized };
       } catch (error) {

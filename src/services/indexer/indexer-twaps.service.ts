@@ -4,6 +4,7 @@ import {
   IndexerTwapsStatsQuery,
   IndexerTwapsUserQuery,
 } from '../../clients/hypedexer/rest/twaps/twaps.client';
+import { buildHypedexerCacheKey } from '../../clients/hypedexer/rest/shared/hypedexer-cache.helper';
 import { cacheService } from '../../core/cache.service';
 import { HYPEDEXER_USER_CACHE_KEY, HYPEDEXER_TTL } from '../../constants/hypedexer.cache';
 
@@ -18,8 +19,13 @@ export class IndexerTwapsService {
     return IndexerTwapsService.instance;
   }
 
+  /** TWAP flow card: 150 rows polled every minute by each /market visitor. */
   public listTwaps(params: IndexerTwapsListQuery): Promise<unknown> {
-    return this.client.listTwaps(params);
+    return cacheService.getOrSet(
+      buildHypedexerCacheKey('twaps', 'list', { ...params }),
+      () => this.client.listTwaps(params),
+      HYPEDEXER_TTL.marketList
+    );
   }
 
   public getStats(params: IndexerTwapsStatsQuery): Promise<unknown> {

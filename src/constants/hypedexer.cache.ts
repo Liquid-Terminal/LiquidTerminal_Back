@@ -29,7 +29,9 @@ export const HYPEDEXER_LOCKS = {
 export const HYPEDEXER_TTL = {
   fillsCount:             30,   // existant
   overviewSlice:          55,   // existant
-  globalSnapshot:        300,   // daily-pnl-10d, daily-volume-10d
+  globalSnapshot:        300,   // daily-volume-10d
+  /** daily-pnl-10d: ~3 250 rows (~330 credits) of daily buckets per coin. */
+  dailyPnl10d:          3600,
   globalRolling:          55,   // fenêtres glissantes 24h
   staticList:            120,   // dexs, assets (quasi-statiques)
   userAddress:            30,   // données user-spécifiques
@@ -38,7 +40,7 @@ export const HYPEDEXER_TTL = {
   userFundingSummary:   1800,
   buildersAllTimeframes:  55,   // 55s — très lent chez HypeDexer
   buildersStats:          30,   // 30s — données actives
-  buildersTop:            30,   // 30s — données actives
+  buildersTop:            60,   // polled every 30 s by three pages (limits 3, 5, 100)
   hip4Analytics:          60,   // analytics bucketed — 1h buckets change every hour
   /** Coin-filtered analytics: the live-market volume fan-out asks ~11 chunks
    * of daily buckets per visitor every 5 min, the same chunks for everyone. */
@@ -55,6 +57,15 @@ export const HYPEDEXER_TTL = {
   hip4BaseListRetry:      60,
   /** Enriched settlements (new rows only when a market settles). */
   hip4Settlements:        60,
+  /** HIP-3 market pages: the tape (polled every 10 s), cumulative snapshots
+   * (30 s) and per-market trader aggregates (60 s). */
+  hip3Fills:              15,
+  hip3Snapshots:          60,
+  hip3StatsTraders:      120,
+  /** Market-wide lists polled every minute or more: completed trades (biggest
+   * trades, trade explorer, a wallet's round trips) and their summary, TWAP
+   * flow, fills/priority-fee stats. */
+  marketList:             60,
   /** Enriched markets/questions cache. Lower than `staticList` because the
    * payload includes live mid_price overlays from HL allMids — 2 min is too
    * stale for prediction-market probabilities. */
@@ -62,6 +73,8 @@ export const HYPEDEXER_TTL = {
   evmStats:               30,   // EVM global stats
   evmStatsDaily:         300,   // EVM daily stats (slow-changing)
   evmBlocks:               5,   // EVM blocks (fast-changing)
+  /** Blocks with params (the explorer polls `limit=20` every 15 s). */
+  evmBlocksPage:          15,
   evmTransactions:         5,   // EVM transactions (fast-changing)
   evmBridgeEvents:        30,   // EVM bridge events
   evmLedgerTransfers:     30,   // EVM ledger transfers
@@ -105,8 +118,7 @@ export const HYPEDEXER_CACHE_KEYS = {
   evmStatsDaily:        'hypedexer:evm:stats:daily',
   evmBlocks:            'hypedexer:evm:blocks',
   evmTransactions:      'hypedexer:evm:transactions',
-  evmBridgeEvents:      'hypedexer:evm:bridge:events',
-  evmLedgerTransfers:   'hypedexer:evm:ledger:transfers',
+  // Bridge events / ledger transfers: keyed per param set in indexer-evm.service.ts
   /** Single precomputed payload shared by both leaderboard endpoints — keyed by window. */
   vaultLeaderboards:    (window: string) => `hypedexer:vaults:leaderboards:${window}`,
 } as const;
@@ -115,7 +127,7 @@ export const HYPEDEXER_CACHE_KEYS = {
 export const HYPEDEXER_BUILDERS_CACHE_KEY = {
   statsAllTimeframes: 'hypedexer:builders:stats:all-timeframes',
   stats: (timeframe: string) => `hypedexer:builders:stats:${timeframe}`,
-  top:   (timeframe: string, sort: string) => `hypedexer:builders:top:${timeframe}:${sort}`,
+  top:   (timeframe: string, sort: string, limit: number) => `hypedexer:builders:top:${timeframe}:${sort}:${limit}`,
 } as const;
 
 /** Clés de cache HIP4 paramétrées — fonctions génératrices */

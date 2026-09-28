@@ -33,7 +33,7 @@ export class IndexerOverviewService {
     return cacheService.getOrSet<unknown>(
       HYPEDEXER_CACHE_KEYS.overviewDailyPnl10d,
       () => this.client.getDailyPnl10d(),
-      HYPEDEXER_TTL.globalSnapshot
+      HYPEDEXER_TTL.dailyPnl10d
     );
   }
 

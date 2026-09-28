@@ -1,5 +1,6 @@
 import { HypeDexerEvmIndexerClient } from '../../clients/hypedexer/rest/evm/evm-indexer.client';
 import type { EvmBlocksQuery, EvmBridgeEventsQuery, EvmLedgerTransfersQuery, EvmTransactionsQuery } from '../../clients/hypedexer/rest/evm/evm-indexer.client';
+import { buildHypedexerCacheKey } from '../../clients/hypedexer/rest/shared/hypedexer-cache.helper';
 import { cacheService } from '../../core/cache.service';
 import { HYPEDEXER_CACHE_KEYS, HYPEDEXER_TTL } from '../../constants/hypedexer.cache';
 
@@ -39,7 +40,12 @@ export class IndexerEvmService {
       (params.limit !== undefined || params.start_time !== undefined || params.end_time !== undefined);
 
     if (hasFilter) {
-      return this.client.getEvmBlocks(params);
+      // The explorer polls `limit=20` every 15 s from every open tab.
+      return cacheService.getOrSet<unknown>(
+        buildHypedexerCacheKey('evm', 'blocks', { ...params }),
+        () => this.client.getEvmBlocks(params),
+        HYPEDEXER_TTL.evmBlocksPage
+      );
     }
     return cacheService.getOrSet<unknown>(
       HYPEDEXER_CACHE_KEYS.evmBlocks,
@@ -67,9 +73,11 @@ export class IndexerEvmService {
     );
   }
 
+  // Keyed on every param: the fixed key served the first caller's window and
+  // limit to everyone for 30 s.
   public getEvmBridgeEvents(params?: EvmBridgeEventsQuery): Promise<unknown> {
     return cacheService.getOrSet<unknown>(
-      HYPEDEXER_CACHE_KEYS.evmBridgeEvents,
+      buildHypedexerCacheKey('evm', 'bridge-events', { ...params }),
       () => this.client.getEvmBridgeEvents(params),
       HYPEDEXER_TTL.evmBridgeEvents
     );
@@ -77,7 +85,7 @@ export class IndexerEvmService {
 
   public getEvmLedgerTransfers(params?: EvmLedgerTransfersQuery): Promise<unknown> {
     return cacheService.getOrSet<unknown>(
-      HYPEDEXER_CACHE_KEYS.evmLedgerTransfers,
+      buildHypedexerCacheKey('evm', 'ledger-transfers', { ...params }),
       () => this.client.getEvmLedgerTransfers(params),
       HYPEDEXER_TTL.evmLedgerTransfers
     );

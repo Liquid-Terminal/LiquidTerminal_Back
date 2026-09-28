@@ -56,12 +56,10 @@ export class IndexerBuildersIndexerService {
   public async getTopBuilders(params: IndexerBuildersTopQuery = {}): Promise<unknown> {
     const tf = params.timeframe ?? '24h';
     const sort = params.sort ?? 'volume';
-    // Bypass cache for non-standard limit requests
-    if (params.limit !== undefined && params.limit !== 25) {
-      return this.client.getTopBuilders(params);
-    }
+    // Every limit is cached: the pages ask for 3, 5 and 100, which all used to
+    // bypass the cache (only the default 25 was kept).
     return cacheService.getOrSet(
-      HYPEDEXER_BUILDERS_CACHE_KEY.top(tf, sort),
+      HYPEDEXER_BUILDERS_CACHE_KEY.top(tf, sort, params.limit ?? 25),
       () => this.client.getTopBuilders(params),
       HYPEDEXER_TTL.buildersTop
     );

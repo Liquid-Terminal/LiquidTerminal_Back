@@ -1,4 +1,5 @@
 import { HypeDexerHip3Client } from '../../clients/hypedexer/rest/hip3/hip3.client';
+import { buildHypedexerCacheKey } from '../../clients/hypedexer/rest/shared/hypedexer-cache.helper';
 import { cacheService } from '../../core/cache.service';
 import { HYPEDEXER_CACHE_KEYS, HYPEDEXER_TTL, HYPEDEXER_USER_CACHE_KEY } from '../../constants/hypedexer.cache';
 
@@ -66,8 +67,13 @@ export class IndexerHip3Service {
     return this.client.getAuctionsHistory(p);
   }
 
+  /** A market's tape, polled every 10 s by each open asset page: shared. */
   public getFills(p: Parameters<HypeDexerHip3Client['getFills']>[0]): Promise<unknown> {
-    return this.client.getFills(p);
+    return cacheService.getOrSet(
+      buildHypedexerCacheKey('hip3', 'fills', { ...p }),
+      () => this.client.getFills(p),
+      HYPEDEXER_TTL.hip3Fills
+    );
   }
 
   public getLeaderboard(p: Parameters<HypeDexerHip3Client['getLeaderboard']>[0]): Promise<unknown> {
@@ -83,11 +89,19 @@ export class IndexerHip3Service {
   }
 
   public getSnapshots(p: Parameters<HypeDexerHip3Client['getSnapshots']>[0]): Promise<unknown> {
-    return this.client.getSnapshots(p);
+    return cacheService.getOrSet(
+      buildHypedexerCacheKey('hip3', 'snapshots', { ...p }),
+      () => this.client.getSnapshots(p),
+      HYPEDEXER_TTL.hip3Snapshots
+    );
   }
 
   public getStatsTraders(p: Parameters<HypeDexerHip3Client['getStatsTraders']>[0]): Promise<unknown> {
-    return this.client.getStatsTraders(p);
+    return cacheService.getOrSet(
+      buildHypedexerCacheKey('hip3', 'stats-traders', { ...p }),
+      () => this.client.getStatsTraders(p),
+      HYPEDEXER_TTL.hip3StatsTraders
+    );
   }
 
   public getTopMovers(p: Parameters<HypeDexerHip3Client['getTopMovers']>[0]): Promise<unknown> {

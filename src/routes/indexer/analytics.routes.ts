@@ -1,5 +1,5 @@
 import { Router, Request, Response, RequestHandler } from 'express';
-import { marketRateLimiter } from '../../middleware/apiRateLimiter';
+import { marketRateLimiter, passthroughRateLimiter } from '../../middleware/apiRateLimiter';
 import { validateGetRequest } from '../../middleware/validation';
 import {
   indexerAnalyticsFillsStatsQuerySchema,
@@ -14,6 +14,7 @@ const service = IndexerAnalyticsService.getInstance();
 router.get(
   '/fills/stats',
   marketRateLimiter,
+  passthroughRateLimiter,
   validateGetRequest(indexerAnalyticsFillsStatsQuerySchema),
   (async (req: Request, res: Response) => {
     try {
@@ -39,6 +40,7 @@ router.get(
 router.get(
   '/priority-fees/stats',
   marketRateLimiter,
+  passthroughRateLimiter,
   validateGetRequest(indexerAnalyticsPriorityFeesStatsQuerySchema),
   (async (req: Request, res: Response) => {
     try {

@@ -1,5 +1,5 @@
 import { Router, Request, Response, RequestHandler } from 'express';
-import { marketRateLimiter } from '../../middleware/apiRateLimiter';
+import { marketRateLimiter, passthroughRateLimiter } from '../../middleware/apiRateLimiter';
 import { validateGetRequest } from '../../middleware/validation';
 import {
   hip3AssetsQuerySchema,
@@ -77,6 +77,7 @@ router.get(
 router.get(
   '/priority-fees/gossip/history',
   marketRateLimiter,
+  passthroughRateLimiter,
   validateGetRequest(hip3PriorityFeesGossipHistoryQuerySchema),
   (async (req: Request, res: Response) => {
     try {
@@ -99,6 +100,7 @@ router.get(
 router.get(
   '/assets',
   marketRateLimiter,
+  passthroughRateLimiter,
   validateGetRequest(hip3AssetsQuerySchema),
   (async (req: Request, res: Response) => {
     try {
@@ -121,6 +123,7 @@ router.get(
 router.get(
   '/assets/:ticker',
   marketRateLimiter,
+  passthroughRateLimiter,
   validateGetRequest(hip3AssetTickerParamsSchema),
   (async (req: Request, res: Response) => {
     try {
@@ -134,6 +137,7 @@ router.get(
 router.get(
   '/dexs',
   marketRateLimiter,
+  passthroughRateLimiter,
   validateGetRequest(hip3DexsQuerySchema),
   (async (req: Request, res: Response) => {
     try {
@@ -148,6 +152,7 @@ router.get(
 router.get(
   '/dexs/:dex_id',
   marketRateLimiter,
+  passthroughRateLimiter,
   validateGetRequest(hip3DexIdParamsSchema),
   (async (req: Request, res: Response) => {
     try {
@@ -174,6 +179,7 @@ router.get(
 router.get(
   '/auctions/history',
   marketRateLimiter,
+  passthroughRateLimiter,
   validateGetRequest(hip3AuctionsHistoryQuerySchema),
   (async (req: Request, res: Response) => {
     try {
@@ -195,6 +201,7 @@ router.get(
 router.get(
   '/auctions',
   marketRateLimiter,
+  passthroughRateLimiter,
   validateGetRequest(hip3AuctionsQuerySchema),
   (async (req: Request, res: Response) => {
     try {
@@ -216,6 +223,7 @@ router.get(
 router.get(
   '/fills',
   marketRateLimiter,
+  passthroughRateLimiter,
   validateGetRequest(hip3FillsQuerySchema),
   (async (req: Request, res: Response) => {
     try {
@@ -243,6 +251,7 @@ router.get(
 router.get(
   '/leaderboard',
   marketRateLimiter,
+  passthroughRateLimiter,
   validateGetRequest(hip3LeaderboardQuerySchema),
   (async (req: Request, res: Response) => {
     try {
@@ -264,6 +273,7 @@ router.get(
 router.get(
   '/ohlcv',
   marketRateLimiter,
+  passthroughRateLimiter,
   validateGetRequest(hip3OhlcvQuerySchema),
   (async (req: Request, res: Response) => {
     try {
@@ -287,6 +297,7 @@ router.get(
 router.get(
   '/oracle/stats',
   marketRateLimiter,
+  passthroughRateLimiter,
   validateGetRequest(hip3OracleStatsQuerySchema),
   (async (req: Request, res: Response) => {
     try {
@@ -310,6 +321,7 @@ router.get(
 router.get(
   '/snapshots',
   marketRateLimiter,
+  passthroughRateLimiter,
   validateGetRequest(hip3SnapshotsQuerySchema),
   (async (req: Request, res: Response) => {
     try {
@@ -324,6 +336,7 @@ router.get(
 router.get(
   '/stats/traders',
   marketRateLimiter,
+  passthroughRateLimiter,
   validateGetRequest(hip3StatsTradersQuerySchema),
   (async (req: Request, res: Response) => {
     try {
@@ -346,6 +359,7 @@ router.get(
 router.get(
   '/top-movers',
   marketRateLimiter,
+  passthroughRateLimiter,
   validateGetRequest(hip3TopMoversQuerySchema),
   (async (req: Request, res: Response) => {
     try {
@@ -359,6 +373,7 @@ router.get(
 router.get(
   '/users/:address/coins',
   marketRateLimiter,
+  passthroughRateLimiter,
   validateGetRequest(hip3UserCoinsSchema),
   (async (req: Request, res: Response) => {
     try {
@@ -373,6 +388,7 @@ router.get(
 router.get(
   '/users/:address/fills',
   marketRateLimiter,
+  passthroughRateLimiter,
   validateGetRequest(hip3UserFillsSchema),
   (async (req: Request, res: Response) => {
     try {
@@ -398,6 +414,7 @@ router.get(
 router.get(
   '/users/:address/overview',
   marketRateLimiter,
+  passthroughRateLimiter,
   validateGetRequest(hip3UserOverviewSchema),
   (async (req: Request, res: Response) => {
     try {

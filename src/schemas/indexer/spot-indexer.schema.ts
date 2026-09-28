@@ -2,11 +2,13 @@ import { z } from 'zod';
 
 const optionalString = z.string().max(256).optional();
 const optionalNum = z.coerce.number().optional();
+/** Rows are billed upstream: bound every page. */
+const optionalLimit = z.coerce.number().int().min(1).max(1000).optional();
 
 export const spotAuctionsHistQuerySchema = z.object({
   query: z.object({
     lookback_hours: optionalNum,
-    limit: optionalNum,
+    limit: optionalLimit,
     offset: z.coerce.number().int().min(0).optional(),
   }),
   params: z.object({}),
@@ -21,7 +23,7 @@ export const spotAuctionsLiveQuerySchema = z.object({
 
 export const spotPairsQuerySchema = z.object({
   query: z.object({
-    limit: optionalNum,
+    limit: optionalLimit,
     offset: z.coerce.number().int().min(0).optional(),
   }),
   params: z.object({}),
@@ -30,7 +32,7 @@ export const spotPairsQuerySchema = z.object({
 export const spotTokensQuerySchema = z.object({
   query: z.object({
     search: optionalString,
-    limit: optionalNum,
+    limit: optionalLimit,
     offset: z.coerce.number().int().min(0).optional(),
   }),
   params: z.object({}),

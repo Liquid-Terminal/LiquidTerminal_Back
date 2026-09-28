@@ -1,5 +1,5 @@
 import { Router, Request, Response, RequestHandler } from 'express';
-import { marketRateLimiter } from '../../middleware/apiRateLimiter';
+import { marketRateLimiter, passthroughRateLimiter } from '../../middleware/apiRateLimiter';
 import { validateGetRequest } from '../../middleware/validation';
 import {
   spotAuctionsHistQuerySchema,
@@ -26,6 +26,7 @@ function str(q: unknown): string | undefined {
 router.get(
   '/auctions/hist',
   marketRateLimiter,
+  passthroughRateLimiter,
   validateGetRequest(spotAuctionsHistQuerySchema),
   (async (req: Request, res: Response) => {
     try {
@@ -52,6 +53,7 @@ router.get(
 router.get(
   '/auctions/live',
   marketRateLimiter,
+  passthroughRateLimiter,
   validateGetRequest(spotAuctionsLiveQuerySchema),
   (async (req: Request, res: Response) => {
     try {
@@ -73,6 +75,7 @@ router.get(
 router.get(
   '/pairs',
   marketRateLimiter,
+  passthroughRateLimiter,
   validateGetRequest(spotPairsQuerySchema),
   (async (req: Request, res: Response) => {
     try {
@@ -95,6 +98,7 @@ router.get(
 router.get(
   '/tokens',
   marketRateLimiter,
+  passthroughRateLimiter,
   validateGetRequest(spotTokensQuerySchema),
   (async (req: Request, res: Response) => {
     try {

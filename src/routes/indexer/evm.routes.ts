@@ -1,5 +1,5 @@
 import { Router, Request, Response, RequestHandler } from 'express';
-import { marketRateLimiter } from '../../middleware/apiRateLimiter';
+import { marketRateLimiter, passthroughRateLimiter } from '../../middleware/apiRateLimiter';
 import { validateGetRequest } from '../../middleware/validation';
 import {
   evmStatsQuerySchema,
@@ -41,6 +41,7 @@ router.get(
 router.get(
   '/stats/daily',
   marketRateLimiter,
+  passthroughRateLimiter,
   validateGetRequest(evmStatsDailyQuerySchema),
   (async (req: Request, res: Response) => {
     try {
@@ -63,6 +64,7 @@ router.get(
 router.get(
   '/blocks',
   marketRateLimiter,
+  passthroughRateLimiter,
   validateGetRequest(evmBlocksQuerySchema),
   (async (req: Request, res: Response) => {
     try {
@@ -90,6 +92,7 @@ router.get(
 router.get(
   '/transactions',
   marketRateLimiter,
+  passthroughRateLimiter,
   validateGetRequest(evmTransactionsQuerySchema),
   (async (req: Request, res: Response) => {
     try {
@@ -122,6 +125,7 @@ router.get(
 router.get(
   '/bridge/events',
   marketRateLimiter,
+  passthroughRateLimiter,
   validateGetRequest(evmBridgeEventsQuerySchema),
   (async (req: Request, res: Response) => {
     try {
@@ -149,6 +153,7 @@ router.get(
 router.get(
   '/ledger/transfers',
   marketRateLimiter,
+  passthroughRateLimiter,
   validateGetRequest(evmLedgerTransfersQuerySchema),
   (async (req: Request, res: Response) => {
     try {

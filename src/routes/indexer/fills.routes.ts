@@ -119,6 +119,7 @@ router.get(
 router.get(
   '/spot/user/:user_address',
   marketRateLimiter,
+  passthroughRateLimiter,
   validateGetRequest(indexerFillsSpotUserQuerySchema),
   (async (req: Request, res: Response) => {
     try {
@@ -161,6 +162,7 @@ router.get(
 router.get(
   '/user/:user_address',
   marketRateLimiter,
+  passthroughRateLimiter,
   validateGetRequest(indexerFillsUserAddressQuerySchema),
   (async (req: Request, res: Response) => {
     try {

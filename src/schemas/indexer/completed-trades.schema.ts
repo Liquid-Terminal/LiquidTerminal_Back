@@ -12,7 +12,9 @@ const listQueryShape = {
   min_pnl: optionalNum,
   max_pnl: optionalNum,
   offset: z.coerce.number().int().min(0).optional(),
-  limit: z.coerce.number().int().min(1).optional(),
+  // Every row returned is billed upstream: an unbounded limit let one request
+  // spend thousands of credits.
+  limit: z.coerce.number().int().min(1).max(1000).optional(),
   do_count: z.coerce.boolean().optional(),
   sort_by: z.string().max(64).optional(),
   sort_dir: z.enum(['ASC', 'DESC', 'asc', 'desc']).optional(),

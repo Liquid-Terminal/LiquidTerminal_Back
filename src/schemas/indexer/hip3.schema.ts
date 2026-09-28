@@ -2,6 +2,8 @@ import { z } from 'zod';
 
 const optionalString = z.string().max(256).optional();
 const optionalNum = z.coerce.number().optional();
+/** Rows are billed upstream: bound every page. */
+const optionalLimit = z.coerce.number().int().min(1).max(1000).optional();
 const ethAddress = z.string().regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid address');
 
 const empty = {
@@ -13,7 +15,7 @@ export const hip3AssetsQuerySchema = z.object({
   query: z.object({
     dex_id: optionalString,
     search: optionalString,
-    limit: optionalNum,
+    limit: optionalLimit,
     offset: z.coerce.number().int().min(0).optional(),
   }),
   params: z.object({}),
@@ -28,7 +30,7 @@ export const hip3AssetTickerParamsSchema = z.object({
 
 export const hip3DexsQuerySchema = z.object({
   query: z.object({
-    limit: optionalNum,
+    limit: optionalLimit,
     offset: z.coerce.number().int().min(0).optional(),
   }),
   params: z.object({}),
@@ -60,7 +62,7 @@ export const hip3PriorityFeesGossipHistoryQuerySchema = z.object({
 export const hip3AuctionsQuerySchema = z.object({
   query: z.object({
     status: optionalString,
-    limit: optionalNum,
+    limit: optionalLimit,
     offset: z.coerce.number().int().min(0).optional(),
   }),
   params: z.object({}),
@@ -71,7 +73,7 @@ export const hip3AuctionCurrentSchema = z.object(empty);
 export const hip3AuctionsHistoryQuerySchema = z.object({
   query: z.object({
     dex_id: optionalString,
-    limit: optionalNum,
+    limit: optionalLimit,
     offset: z.coerce.number().int().min(0).optional(),
   }),
   params: z.object({}),
@@ -86,7 +88,7 @@ export const hip3FillsQuerySchema = z.object({
     start: optionalString,
     end: optionalString,
     min_notional: optionalNum,
-    limit: optionalNum,
+    limit: optionalLimit,
     offset: z.coerce.number().int().min(0).optional(),
   }),
   params: z.object({}),
@@ -96,7 +98,7 @@ export const hip3LeaderboardQuerySchema = z.object({
   query: z.object({
     by: optionalString,
     dex_id: optionalString,
-    limit: optionalNum,
+    limit: optionalLimit,
   }),
   params: z.object({}),
 });
@@ -107,7 +109,7 @@ export const hip3OhlcvQuerySchema = z.object({
     dex_id: optionalString,
     start: optionalString,
     end: optionalString,
-    limit: optionalNum,
+    limit: optionalLimit,
   }),
   params: z.object({}),
 });
@@ -118,7 +120,7 @@ export const hip3OracleStatsQuerySchema = z.object({
     asset_id: optionalString,
     start: optionalString,
     end: optionalString,
-    limit: optionalNum,
+    limit: optionalLimit,
   }),
   params: z.object({}),
 });
@@ -135,7 +137,7 @@ export const hip3StatsTradersQuerySchema = z.object({
   query: z.object({
     dex_id: optionalString,
     coin: optionalString,
-    limit: optionalNum,
+    limit: optionalLimit,
     offset: z.coerce.number().int().min(0).optional(),
   }),
   params: z.object({}),
@@ -143,14 +145,14 @@ export const hip3StatsTradersQuerySchema = z.object({
 
 export const hip3TopMoversQuerySchema = z.object({
   query: z.object({
-    limit: optionalNum,
+    limit: optionalLimit,
   }),
   params: z.object({}),
 });
 
 export const hip3UserCoinsSchema = z.object({
   query: z.object({
-    limit: optionalNum,
+    limit: optionalLimit,
   }),
   params: z.object({
     address: ethAddress,
@@ -163,7 +165,7 @@ export const hip3UserFillsSchema = z.object({
     dex_id: optionalString,
     start: optionalString,
     end: optionalString,
-    limit: optionalNum,
+    limit: optionalLimit,
     offset: z.coerce.number().int().min(0).optional(),
   }),
   params: z.object({

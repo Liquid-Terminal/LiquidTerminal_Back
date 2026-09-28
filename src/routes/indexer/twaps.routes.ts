@@ -1,5 +1,5 @@
 import { Router, Request, Response, RequestHandler } from 'express';
-import { marketRateLimiter } from '../../middleware/apiRateLimiter';
+import { marketRateLimiter, passthroughRateLimiter } from '../../middleware/apiRateLimiter';
 import { validateGetRequest } from '../../middleware/validation';
 import {
   twapsListQuerySchema,
@@ -27,6 +27,7 @@ function str(q: unknown): string | undefined {
 router.get(
   '/stats',
   marketRateLimiter,
+  passthroughRateLimiter,
   validateGetRequest(twapsStatsQuerySchema),
   (async (req: Request, res: Response) => {
     try {
@@ -49,6 +50,7 @@ router.get(
 router.get(
   '/user/:user_address',
   marketRateLimiter,
+  passthroughRateLimiter,
   validateGetRequest(twapsUserQuerySchema),
   (async (req: Request, res: Response) => {
     try {
@@ -81,6 +83,7 @@ router.get(
 router.get(
   '/',
   marketRateLimiter,
+  passthroughRateLimiter,
   validateGetRequest(twapsListQuerySchema),
   (async (req: Request, res: Response) => {
     try {
@@ -111,6 +114,7 @@ router.get(
 router.get(
   '/:twap_id/fills',
   marketRateLimiter,
+  passthroughRateLimiter,
   validateGetRequest(twapsFillsQuerySchema),
   (async (req: Request, res: Response) => {
     try {
@@ -140,6 +144,7 @@ router.get(
 router.get(
   '/:twap_id',
   marketRateLimiter,
+  passthroughRateLimiter,
   validateGetRequest(twapsByIdParamsSchema),
   (async (req: Request, res: Response) => {
     try {

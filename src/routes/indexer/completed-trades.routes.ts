@@ -1,5 +1,5 @@
 import { Router, Request, Response, RequestHandler } from 'express';
-import { marketRateLimiter } from '../../middleware/apiRateLimiter';
+import { marketRateLimiter, passthroughRateLimiter } from '../../middleware/apiRateLimiter';
 import { validateGetRequest } from '../../middleware/validation';
 import {
   indexerCompletedTradesListQuerySchema,
@@ -52,6 +52,7 @@ function summaryQueryFromRequest(query: Request['query']): IndexerCompletedTrade
 router.get(
   '/summary',
   marketRateLimiter,
+  passthroughRateLimiter,
   validateGetRequest(indexerCompletedTradesSummaryQuerySchema),
   (async (req: Request, res: Response) => {
     try {
@@ -73,6 +74,7 @@ router.get(
 router.get(
   '/:trade_id/fills',
   marketRateLimiter,
+  passthroughRateLimiter,
   validateGetRequest(indexerCompletedTradesFillsParamsSchema),
   (async (req: Request, res: Response) => {
     try {
@@ -95,6 +97,7 @@ router.get(
 router.get(
   '/',
   marketRateLimiter,
+  passthroughRateLimiter,
   validateGetRequest(indexerCompletedTradesListQuerySchema),
   (async (req: Request, res: Response) => {
     try {

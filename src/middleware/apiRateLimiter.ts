@@ -164,14 +164,16 @@ function sendLimitExceededResponse(res: Response, message: string): void {
   });
 }
 
-// Tighter limits for uncached HypeDexer passthrough routes. Each such request
-// makes a paid upstream call and holds an outbound slot; the general limiter
-// (1200/min) is far too loose to bound that cost. These endpoints are polled by
-// the UI at most a few times per second, so 20/s burst + 300/min per IP leaves
-// ample headroom while capping the amplification an attacker can drive against
-// the HypeDexer key and the outbound pool.
+// Tighter limits for the /indexer/* routes a request can make reach HypeDexer
+// (uncached, or cached under a key the caller picks: address, coin, limit,
+// time range). Each miss is a paid upstream call and holds an outbound slot;
+// the general limiter (1200/min) is far too loose to bound that cost. The
+// minute cap is what bounds it: a heavy page stays under ~60 indexer requests
+// in its first minute (sweep of 22 pages, 2026-09-25). The burst matches the
+// general limiter's because page loads fan out: a settled HIP-4 question with
+// 29 outcomes fires ~45 indexer requests in its first second, /market/hip4 18.
 const PASSTHROUGH_LIMITS = {
-  BURST: { WINDOW: 1, MAX_REQUESTS: 20 },
+  BURST: { WINDOW: 1, MAX_REQUESTS: 60 },
   MINUTE: { WINDOW: 60, MAX_REQUESTS: 300 },
 };
 

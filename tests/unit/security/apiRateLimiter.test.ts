@@ -123,11 +123,21 @@ describe('rate limiters', () => {
     expect(statuses[60]).toBe(429);
   });
 
-  it('applies the tighter passthrough limits (20/s) with their own counters', async () => {
-    const statuses = await burst(passthroughRateLimiter, '5.5.5.5', 21);
-    expect(statuses.slice(0, 20).every((s) => s === 200)).toBe(true);
-    expect(statuses[20]).toBe(429);
+  it('lets a page-load fan-out through the passthrough burst, with its own counters', async () => {
+    const statuses = await burst(passthroughRateLimiter, '5.5.5.5', 61);
+    expect(statuses.slice(0, 60).every((s) => s === 200)).toBe(true);
+    expect(statuses[60]).toBe(429);
     // The general limiter's counters are separate.
     expect(await hit(marketRateLimiter, '5.5.5.5')).toBe(200);
+  });
+
+  it('caps passthrough traffic at 300 per minute per IP', async () => {
+    const statuses: number[] = [];
+    for (let second = 0; second < 7; second++) {
+      statuses.push(...(await burst(passthroughRateLimiter, '7.7.7.7', 50)));
+      now += 1000;
+    }
+    expect(statuses.filter((s) => s === 200).length).toBe(300);
+    expect(statuses[300]).toBe(429);
   });
 });

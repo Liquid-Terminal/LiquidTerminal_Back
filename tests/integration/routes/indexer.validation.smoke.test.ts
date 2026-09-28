@@ -162,3 +162,37 @@ describe('Indexer required query params (OpenAPI alignment)', () => {
     expect(res.body).toMatchObject({ success: true });
   });
 });
+
+/** Every row is billed upstream: a `limit` past the cap must never reach a service. */
+describe('Indexer limit caps', () => {
+  const app = express();
+  app.use('/indexer', indexerRoutes);
+
+  const vault = `vaultAddress=${VALID_ETH}`;
+  const capped: Array<[string, number]> = [
+    ['/indexer/completed-trades/?', 1000],
+    ['/indexer/hip3/fills?', 1000],
+    ['/indexer/hip3/leaderboard?', 1000],
+    ['/indexer/spot/pairs?', 1000],
+    ['/indexer/twaps/?', 1000],
+    ['/indexer/vaults/vaultSummaries?includeClosed=true&', 5000],
+    [`/indexer/vaults/equitySnapshots?${vault}&`, 5000],
+    [`/indexer/vaults/vaultLedger?${vault}&`, 10000],
+  ];
+
+  it.each(capped)('%s accepts limit=%i', async (path, max) => {
+    const res = await request(app).get(`${path}limit=${max}`);
+    expect(res.status).toBe(200);
+  });
+
+  it.each(capped)('%s rejects limit above %i', async (path, max) => {
+    const res = await request(app).get(`${path}limit=${max + 1}`);
+    expect(res.status).toBe(400);
+    expect(res.body).toMatchObject({ error: 'Validation Error' });
+  });
+
+  it('rejects a fractional limit', async () => {
+    const res = await request(app).get('/indexer/twaps/?limit=10.5');
+    expect(res.status).toBe(400);
+  });
+});

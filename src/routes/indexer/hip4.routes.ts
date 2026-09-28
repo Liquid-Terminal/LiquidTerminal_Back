@@ -1,5 +1,5 @@
 import { Router, Request, Response, RequestHandler } from 'express';
-import { marketRateLimiter } from '../../middleware/apiRateLimiter';
+import { marketRateLimiter, passthroughRateLimiter } from '../../middleware/apiRateLimiter';
 import { validateGetRequest } from '../../middleware/validation';
 import {
   hip4FillsQuerySchema,
@@ -36,6 +36,7 @@ function send502(res: Response, code: string, error: unknown): void {
 router.get(
   '/fills',
   marketRateLimiter,
+  passthroughRateLimiter,
   validateGetRequest(hip4FillsQuerySchema),
   (async (req: Request, res: Response) => {
     try {
@@ -61,6 +62,7 @@ router.get(
 router.get(
   '/settlements',
   marketRateLimiter,
+  passthroughRateLimiter,
   validateGetRequest(hip4SettlementsQuerySchema),
   (async (req: Request, res: Response) => {
     try {
@@ -84,6 +86,7 @@ router.get(
 router.get(
   '/markets-enriched',
   marketRateLimiter,
+  passthroughRateLimiter,
   validateGetRequest(hip4MarketsEnrichedQuerySchema),
   (async (req: Request, res: Response) => {
     try {
@@ -107,6 +110,7 @@ router.get(
 router.get(
   '/questions-with-outcomes',
   marketRateLimiter,
+  passthroughRateLimiter,
   validateGetRequest(hip4QuestionsWithOutcomesQuerySchema),
   (async (req: Request, res: Response) => {
     try {
@@ -128,6 +132,7 @@ router.get(
 router.get(
   '/analytics',
   marketRateLimiter,
+  passthroughRateLimiter,
   validateGetRequest(hip4AnalyticsQuerySchema),
   (async (req: Request, res: Response) => {
     try {

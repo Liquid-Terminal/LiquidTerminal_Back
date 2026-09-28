@@ -1,5 +1,5 @@
 import { Router, Request, Response, RequestHandler } from 'express';
-import { marketRateLimiter } from '../../middleware/apiRateLimiter';
+import { marketRateLimiter, passthroughRateLimiter } from '../../middleware/apiRateLimiter';
 import { validateGetRequest } from '../../middleware/validation';
 import {
   indexerOverviewCoinDistributionQuerySchema,
@@ -37,6 +37,7 @@ router.get(
 router.get(
   '/coin-distribution',
   marketRateLimiter,
+  passthroughRateLimiter,
   validateGetRequest(indexerOverviewCoinDistributionQuerySchema),
   (async (req: Request, res: Response) => {
     try {

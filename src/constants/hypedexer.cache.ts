@@ -139,21 +139,34 @@ export const HYPEDEXER_HIP4_CACHE_KEY = {
     `hypedexer:hip4:analytics:${interval}${limit !== undefined ? `:${limit}` : ''}`,
 } as const;
 
+/**
+ * A wallet's key plus every filter that changes the upstream answer. Keys
+ * without them served the first caller's limit / coin / window to every later
+ * caller for that wallet.
+ */
+function withFilters(base: string, filters?: object): string {
+  const parts = Object.entries(filters ?? {})
+    .filter(([, v]) => v !== undefined && v !== null && v !== '')
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([k, v]) => `${k}=${String(v)}`);
+  return parts.length > 0 ? `${base}:${parts.join('&')}` : base;
+}
+
 /** Clés de cache par adresse utilisateur — fonctions génératrices */
 export const HYPEDEXER_USER_CACHE_KEY = {
   overview:         (addr: string) => `hypedexer:user:${addr}:overview`,
-  coins:            (addr: string) => `hypedexer:user:${addr}:coins`,
+  coins:            (addr: string, filters?: object) => withFilters(`hypedexer:user:${addr}:coins`, filters),
   performance:      (addr: string) => `hypedexer:user:${addr}:performance`,
-  fills:            (addr: string) => `hypedexer:user:${addr}:fills`,
-  spotFills:        (addr: string) => `hypedexer:user:${addr}:spot-fills`,
-  userFunding:      (addr: string) => `hypedexer:user:${addr}:funding`,
+  fills:            (addr: string, filters?: object) => withFilters(`hypedexer:user:${addr}:fills`, filters),
+  spotFills:        (addr: string, filters?: object) => withFilters(`hypedexer:user:${addr}:spot-fills`, filters),
+  userFunding:      (addr: string, filters?: object) => withFilters(`hypedexer:user:${addr}:funding`, filters),
   userFundingSummary: (addr: string, limit: number) => `hypedexer:user:${addr}:funding-summary:${limit}`,
   coinDistribution: (addr: string) => `hypedexer:user:${addr}:coin-distribution`,
-  vaultEquities:    (addr: string) => `hypedexer:user:${addr}:vault-equities`,
-  twaps:            (addr: string) => `hypedexer:user:${addr}:twaps`,
+  vaultEquities:    (addr: string, filters?: object) => withFilters(`hypedexer:user:${addr}:vault-equities`, filters),
+  twaps:            (addr: string, filters?: object) => withFilters(`hypedexer:user:${addr}:twaps`, filters),
   hip3Overview:     (addr: string) => `hypedexer:hip3:user:${addr}:overview`,
-  hip3Coins:        (addr: string) => `hypedexer:hip3:user:${addr}:coins`,
-  hip3Fills:        (addr: string) => `hypedexer:hip3:user:${addr}:fills`,
+  hip3Coins:        (addr: string, filters?: object) => withFilters(`hypedexer:hip3:user:${addr}:coins`, filters),
+  hip3Fills:        (addr: string, filters?: object) => withFilters(`hypedexer:hip3:user:${addr}:fills`, filters),
   /** HIP-4 user fills cache key. Must include every filter that changes the
    * upstream result so coin/outcome filters don't poison the unfiltered key. */
   hip4Fills: (addr: string, filters: {

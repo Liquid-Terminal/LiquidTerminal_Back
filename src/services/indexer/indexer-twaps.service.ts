@@ -35,7 +35,7 @@ export class IndexerTwapsService {
   public getUserTwaps(userAddress: string, params: IndexerTwapsUserQuery): Promise<unknown> {
     // IndexerTwapsUserQuery has no date params — always cache
     return cacheService.getOrSet(
-      HYPEDEXER_USER_CACHE_KEY.twaps(userAddress),
+      HYPEDEXER_USER_CACHE_KEY.twaps(userAddress, params),
       () => this.client.getUserTwaps(userAddress, params),
       HYPEDEXER_TTL.userAddress
     );

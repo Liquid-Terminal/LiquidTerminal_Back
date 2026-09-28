@@ -25,7 +25,7 @@ export class IndexerUsersService {
       return this.client.getUserCoins(user, params);
     }
     return cacheService.getOrSet(
-      HYPEDEXER_USER_CACHE_KEY.coins(user),
+      HYPEDEXER_USER_CACHE_KEY.coins(user, { limit: params?.limit }),
       () => this.client.getUserCoins(user, params),
       HYPEDEXER_TTL.userAddress
     );

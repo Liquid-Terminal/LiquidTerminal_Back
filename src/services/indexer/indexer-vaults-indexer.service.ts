@@ -137,7 +137,7 @@ export class IndexerVaultsIndexerService {
       return this.client.getUserVaultEquities(p);
     }
     return cacheService.getOrSet(
-      HYPEDEXER_USER_CACHE_KEY.vaultEquities(p.user),
+      HYPEDEXER_USER_CACHE_KEY.vaultEquities(p.user, { limit: p.limit }),
       () => this.client.getUserVaultEquities(p),
       HYPEDEXER_TTL.userAddress
     );

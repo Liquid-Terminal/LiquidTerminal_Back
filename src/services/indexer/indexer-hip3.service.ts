@@ -111,7 +111,7 @@ export class IndexerHip3Service {
   public getUserCoins(address: string, p: Parameters<HypeDexerHip3Client['getUserCoins']>[1]): Promise<unknown> {
     // No date params in getUserCoins — always cache
     return cacheService.getOrSet(
-      HYPEDEXER_USER_CACHE_KEY.hip3Coins(address),
+      HYPEDEXER_USER_CACHE_KEY.hip3Coins(address, p),
       () => this.client.getUserCoins(address, p),
       HYPEDEXER_TTL.userAddress
     );
@@ -122,7 +122,7 @@ export class IndexerHip3Service {
       return this.client.getUserFills(address, p);
     }
     return cacheService.getOrSet(
-      HYPEDEXER_USER_CACHE_KEY.hip3Fills(address),
+      HYPEDEXER_USER_CACHE_KEY.hip3Fills(address, p),
       () => this.client.getUserFills(address, p),
       HYPEDEXER_TTL.userAddress
     );

@@ -64,7 +64,7 @@ export class IndexerFundingService {
       return this.client.getUserFunding(params);
     }
     return cacheService.getOrSet(
-      HYPEDEXER_USER_CACHE_KEY.userFunding(params.user),
+      HYPEDEXER_USER_CACHE_KEY.userFunding(params.user, { limit: params.limit }),
       () => this.client.getUserFunding(params),
       HYPEDEXER_TTL.userAddress
     );

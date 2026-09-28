@@ -16,7 +16,7 @@ import {
   type ExportParamSpec,
 } from '../../services/export/export.manifest';
 import { ExportService, type ExportQueryParams } from '../../services/export/export.service';
-import { EXPORT_MAX_ROWS, EXPORT_LIMITS } from '../../constants/export.constants';
+import { EXPORT_MAX_ROWS, EXPORT_LIMITS, EXPORT_FREE_ABORTED_PAGES } from '../../constants/export.constants';
 import {
   acquireExportSlot,
   releaseExportSlot,
@@ -276,9 +276,12 @@ router.get(
     let started = false;
     let aborted = false;
     let rowCount = 0;
+    let upstreamPages = 0;
 
     try {
-      const stream = service.streamCsv(dataset, params, columns);
+      const stream = service.streamCsv(dataset, params, columns, () => {
+        upstreamPages += 1;
+      });
 
       for await (const chunk of stream) {
         if (!started) {
@@ -313,13 +316,18 @@ router.get(
 
       if (aborted) {
         freeSlot();
-        await releaseExport(userId, req.exportReservation);
-        // Half a file is not an export: end the response without recording it,
-        // so the user keeps the one download they are allowed per day.
+        // Half a file is not an export: an early cancel gives the quota back,
+        // so the user keeps the one download they are allowed per day. Past
+        // EXPORT_FREE_ABORTED_PAGES upstream pages, those were paid for and
+        // the reservation stays (see the constant).
+        const quotaSpent = upstreamPages > EXPORT_FREE_ABORTED_PAGES;
+        if (!quotaSpent) await releaseExport(userId, req.exportReservation);
         logDeduplicator.warn('Export aborted by client', {
           userId,
           dataset: dataset.id,
           rows: Math.max(0, rowCount - 1),
+          upstreamPages,
+          quotaSpent,
         });
         res.end();
         return;

@@ -52,6 +52,14 @@ export const EXPORT_PREVIEW_LIMITS = {
 export const EXPORT_MAX_PAGES = Math.ceil(EXPORT_MAX_ROWS / EXPORT_PAGE_SIZE) + 5;
 
 /**
+ * Upstream pages a cancelled download may read and still give the quota back
+ * (4 × 500 rows ≈ 200 credits): enough for a mistake or a dropped connection.
+ * Past that the pages were paid for and the export counts — otherwise a script
+ * could walk ~100 pages (~5k credits), cancel, and start over all day long.
+ */
+export const EXPORT_FREE_ABORTED_PAGES = 4;
+
+/**
  * Exports running at once, across the whole process.
  *
  * Sized against the shared outbound pool: one export holds a slot of the

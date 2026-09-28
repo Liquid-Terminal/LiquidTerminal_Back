@@ -100,7 +100,9 @@ export class ExportService {
   public async *streamCsv(
     dataset: ExportDataset,
     params: ExportQueryParams,
-    requestedColumns?: string[]
+    requestedColumns?: string[],
+    /** Called after each page fetched from a paid upstream (not local sources). */
+    onUpstreamPage?: () => void
   ): AsyncGenerator<string, { rowCount: number }, void> {
     const frozenParams = freezeWindow(dataset, params);
 
@@ -138,6 +140,7 @@ export class ExportService {
       }
 
       pages += 1;
+      if (dataset.source !== 'local') onUpstreamPage?.();
       if (page.rows.length === 0) break;
 
       const flattened = page.rows.map((r) => redactRow(flattenRow(r)));

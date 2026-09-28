@@ -1,4 +1,11 @@
-import { HypeDexerVaultsIndexerClient, UserVaultEquitiesQuery } from '../../clients/hypedexer/rest/vaults/vaults-indexer.client';
+import {
+  HypeDexerVaultsIndexerClient,
+  UserVaultEquitiesQuery,
+  VaultDetailsQuery,
+  VaultLedgerQuery,
+  VaultSnapshotsQuery,
+} from '../../clients/hypedexer/rest/vaults/vaults-indexer.client';
+import { buildHypedexerCacheKey } from '../../clients/hypedexer/rest/shared/hypedexer-cache.helper';
 import { cacheService } from '../../core/cache.service';
 import {
   HYPEDEXER_USER_CACHE_KEY,
@@ -101,12 +108,28 @@ export class IndexerVaultsIndexerService {
     return IndexerVaultsIndexerService.instance;
   }
 
-  public getVaultDetails(p: Parameters<HypeDexerVaultsIndexerClient['getVaultDetails']>[0]): Promise<unknown> {
-    return this.client.getVaultDetails(p);
+  /*
+   * The vault reads below are shared by every visitor through Redis, keyed on
+   * every param sent upstream. HypeDexer matches vault addresses
+   * case-insensitively (checked 2026-09-28), so they are lowercased once, for
+   * the key and the call alike.
+   */
+
+  public getVaultDetails(p: VaultDetailsQuery): Promise<unknown> {
+    const q = { ...p, vaultAddress: p.vaultAddress.toLowerCase() };
+    return cacheService.getOrSet(
+      buildHypedexerCacheKey('vaults', 'vaultDetails', { ...q }),
+      () => this.client.getVaultDetails(q),
+      HYPEDEXER_TTL.vaultDetails
+    );
   }
 
-  public getVaultSummaries(p: Parameters<HypeDexerVaultsIndexerClient['getVaultSummaries']>[0]): Promise<unknown> {
-    return this.client.getVaultSummaries(p);
+  public getVaultSummaries(p: { includeClosed?: boolean; limit?: number } = {}): Promise<unknown> {
+    return cacheService.getOrSet(
+      buildHypedexerCacheKey('vaults', 'vaultSummaries', { ...p }),
+      () => this.client.getVaultSummaries(p),
+      HYPEDEXER_TTL.vaultSummaries
+    );
   }
 
   public getUserVaultEquities(p: UserVaultEquitiesQuery): Promise<unknown> {
@@ -120,16 +143,32 @@ export class IndexerVaultsIndexerService {
     );
   }
 
-  public getDailySnapshots(p: Parameters<HypeDexerVaultsIndexerClient['getDailySnapshots']>[0]): Promise<unknown> {
-    return this.client.getDailySnapshots(p);
+  public getDailySnapshots(p: VaultSnapshotsQuery): Promise<unknown> {
+    const q = { ...p, vaultAddress: p.vaultAddress.toLowerCase() };
+    return cacheService.getOrSet(
+      buildHypedexerCacheKey('vaults', 'dailySnapshots', { ...q }),
+      () => this.client.getDailySnapshots(q),
+      HYPEDEXER_TTL.vaultDailySnapshots
+    );
   }
 
-  public getEquitySnapshots(p: Parameters<HypeDexerVaultsIndexerClient['getEquitySnapshots']>[0]): Promise<unknown> {
-    return this.client.getEquitySnapshots(p);
+  public getEquitySnapshots(p: VaultSnapshotsQuery): Promise<unknown> {
+    const q = { ...p, vaultAddress: p.vaultAddress.toLowerCase() };
+    return cacheService.getOrSet(
+      buildHypedexerCacheKey('vaults', 'equitySnapshots', { ...q }),
+      () => this.client.getEquitySnapshots(q),
+      HYPEDEXER_TTL.vaultEquitySnapshots
+    );
   }
 
-  public getVaultLedger(p: Parameters<HypeDexerVaultsIndexerClient['getVaultLedger']>[0]): Promise<unknown> {
-    return this.client.getVaultLedger(p);
+  public getVaultLedger(p: VaultLedgerQuery): Promise<unknown> {
+    const q = { ...p, vaultAddress: p.vaultAddress.toLowerCase() };
+    return cacheService.getOrSet(
+      buildHypedexerCacheKey('vaults', 'vaultLedger', { ...q }),
+      () => this.client.getVaultLedger(q),
+      (rows) =>
+        Array.isArray(rows) && rows.length === 0 ? HYPEDEXER_TTL.vaultLedgerEmpty : HYPEDEXER_TTL.vaultLedger
+    );
   }
 
   /**
@@ -174,7 +213,10 @@ export class IndexerVaultsIndexerService {
     const now = Date.now();
     const cutoff = now - WINDOW_MS[window];
 
-    const summariesRaw = (await this.client.getVaultSummaries({ includeClosed: false })) as
+    // The per-vault reads go through the shared caches too: daily snapshots
+    // move once a day and the ledger has been empty for weeks, so a recompute
+    // mostly reads Redis instead of fanning out ~100 upstream calls.
+    const summariesRaw = (await this.getVaultSummaries({ includeClosed: false })) as
       | VaultSummaryItem[]
       | null;
     const summaries = Array.isArray(summariesRaw) ? summariesRaw : [];
@@ -194,8 +236,7 @@ export class IndexerVaultsIndexerService {
 
     const enriched = await batchedMap(candidates, FAN_OUT_CONCURRENCY, async (s) => {
       const [snapsRaw, ledgerRaw] = await Promise.all([
-        this.client
-          .getDailySnapshots({ vaultAddress: s.vaultAddress, limit: snapshotLimit })
+        this.getDailySnapshots({ vaultAddress: s.vaultAddress, limit: snapshotLimit })
           .catch((e) => {
             logDeduplicator.warn('leaderboards: dailySnapshots failed', {
               vaultAddress: s.vaultAddress,
@@ -203,8 +244,7 @@ export class IndexerVaultsIndexerService {
             });
             return null;
           }),
-        this.client
-          .getVaultLedger({ vaultAddress: s.vaultAddress, limit: ledgerLimit })
+        this.getVaultLedger({ vaultAddress: s.vaultAddress, limit: ledgerLimit })
           .catch((e) => {
             logDeduplicator.warn('leaderboards: vaultLedger failed', {
               vaultAddress: s.vaultAddress,

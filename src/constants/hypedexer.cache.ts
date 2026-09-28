@@ -50,6 +50,18 @@ export const HYPEDEXER_TTL = {
   /** Vault leaderboards — heavy fan-out aggregation across top-N candidates;
    * keep at 5 min to amortize the per-vault snapshot/ledger calls. */
   vaultLeaderboards:     300,
+  /** Vault list: `limit=5000` costs ~500 credits, and followers move slowly. */
+  vaultSummaries:        300,
+  /** Vault metadata + portfolio history. */
+  vaultDetails:          300,
+  /** ~hourly equity snapshots. */
+  vaultEquitySnapshots:  300,
+  /** One snapshot per vault per day. */
+  vaultDailySnapshots:  1800,
+  vaultLedger:            60,
+  /** `/vaults/vaultLedger` answers [] even for HLP (2026-09): keep an empty
+   * answer for an hour instead of asking again on every poll. */
+  vaultLedgerEmpty:     3600,
 } as const;
 
 /** Clés de cache pour les endpoints globaux (identiques pour tous les users) */

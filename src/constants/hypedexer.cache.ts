@@ -33,6 +33,9 @@ export const HYPEDEXER_TTL = {
   globalRolling:          55,   // fenêtres glissantes 24h
   staticList:            120,   // dexs, assets (quasi-statiques)
   userAddress:            30,   // données user-spécifiques
+  /** Funding is paid once an hour, and the summary reads up to 5 000 events
+   * (~500 credits): recomputing it every 30 s changed nothing but the bill. */
+  userFundingSummary:   1800,
   buildersAllTimeframes:  55,   // 55s — très lent chez HypeDexer
   buildersStats:          30,   // 30s — données actives
   buildersTop:            30,   // 30s — données actives
@@ -116,7 +119,7 @@ export const HYPEDEXER_USER_CACHE_KEY = {
   fills:            (addr: string) => `hypedexer:user:${addr}:fills`,
   spotFills:        (addr: string) => `hypedexer:user:${addr}:spot-fills`,
   userFunding:      (addr: string) => `hypedexer:user:${addr}:funding`,
-  userFundingSummary: (addr: string) => `hypedexer:user:${addr}:funding-summary`,
+  userFundingSummary: (addr: string, limit: number) => `hypedexer:user:${addr}:funding-summary:${limit}`,
   coinDistribution: (addr: string) => `hypedexer:user:${addr}:coin-distribution`,
   vaultEquities:    (addr: string) => `hypedexer:user:${addr}:vault-equities`,
   twaps:            (addr: string) => `hypedexer:user:${addr}:twaps`,

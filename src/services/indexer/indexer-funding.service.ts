@@ -77,8 +77,12 @@ export class IndexerFundingService {
    * the client — the front just displays the totals.
    */
   public async getUserFundingSummary(params: IndexerUserFundingQuery): Promise<UserFundingSummary> {
+    // HypeDexer matches the wallet case-insensitively (checked 2026-09-28):
+    // one key per wallet whatever the case the page was opened with.
+    const user = params.user.toLowerCase();
+    const limit = params.limit ?? 5000;
     const compute = async (): Promise<UserFundingSummary> => {
-      const raw = await this.client.getUserFunding({ ...params, limit: params.limit ?? 5000 });
+      const raw = await this.client.getUserFunding({ ...params, user, limit });
       const events: RawFundingEvent[] = Array.isArray(raw) ? (raw as RawFundingEvent[]) : [];
 
       let net = 0;
@@ -118,7 +122,7 @@ export class IndexerFundingService {
       );
 
       return {
-        user: params.user,
+        user,
         net_usdc: net,
         paid_usdc: paid,
         received_usdc: received,
@@ -132,9 +136,9 @@ export class IndexerFundingService {
       return compute();
     }
     return cacheService.getOrSet(
-      HYPEDEXER_USER_CACHE_KEY.userFundingSummary(params.user),
+      HYPEDEXER_USER_CACHE_KEY.userFundingSummary(user, limit),
       compute,
-      HYPEDEXER_TTL.userAddress
+      HYPEDEXER_TTL.userFundingSummary
     );
   }
 }

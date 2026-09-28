@@ -40,6 +40,21 @@ export const HYPEDEXER_TTL = {
   buildersStats:          30,   // 30s — données actives
   buildersTop:            30,   // 30s — données actives
   hip4Analytics:          60,   // analytics bucketed — 1h buckets change every hour
+  /** Coin-filtered analytics: the live-market volume fan-out asks ~11 chunks
+   * of daily buckets per visitor every 5 min, the same chunks for everyone. */
+  hip4AnalyticsFiltered: 300,
+  /** Market fills (a coin's tape, the global tape), by age of the newest fill:
+   * a market trading in the last hour, one quiet for hours, one dormant for a
+   * day or more (settled/expired: its history no longer moves). */
+  hip4ActiveFills:        15,
+  hip4QuietFills:         60,
+  hip4DormantFills:     3600,
+  /** HIP-4 metadata lists (markets, outcome tokens, questions) read by the
+   * enriched endpoints and settlements; an empty answer is retried sooner. */
+  hip4BaseList:          600,
+  hip4BaseListRetry:      60,
+  /** Enriched settlements (new rows only when a market settles). */
+  hip4Settlements:        60,
   /** Enriched markets/questions cache. Lower than `staticList` because the
    * payload includes live mid_price overlays from HL allMids — 2 min is too
    * stale for prediction-market probabilities. */
@@ -84,9 +99,7 @@ export const HYPEDEXER_CACHE_KEYS = {
   hip3Dexs:                 'hypedexer:hip3:dexs',
   hip3Assets:               'hypedexer:hip3:assets',
   hip3AuctionCurrent:       'hypedexer:hip3:auction-current',
-  // HIP4 — endpoints enrichis exposés au front
-  hip4MarketsEnriched:       'hypedexer:hip4:markets-enriched',
-  hip4QuestionsWithOutcomes: 'hypedexer:hip4:questions-with-outcomes',
+  // HIP4 — keyed per param set in indexer-hip4.service.ts (buildHypedexerCacheKey)
   // EVM
   evmStats:             'hypedexer:evm:stats',
   evmStatsDaily:        'hypedexer:evm:stats:daily',
@@ -107,8 +120,11 @@ export const HYPEDEXER_BUILDERS_CACHE_KEY = {
 
 /** Clés de cache HIP4 paramétrées — fonctions génératrices */
 export const HYPEDEXER_HIP4_CACHE_KEY = {
-  /** Analytics bucketed — one Redis entry per interval when no coin/date filter. */
-  analytics: (interval: string) => `hypedexer:hip4:analytics:${interval}`,
+  /** Analytics bucketed — one Redis entry per interval (and limit) when no
+   * coin/date filter. The limit used to be left out: the 1h chart (168 rows)
+   * and the tile (default) answered each other. */
+  analytics: (interval: string, limit?: number) =>
+    `hypedexer:hip4:analytics:${interval}${limit !== undefined ? `:${limit}` : ''}`,
 } as const;
 
 /** Clés de cache par adresse utilisateur — fonctions génératrices */

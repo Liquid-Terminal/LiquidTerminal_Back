@@ -1,7 +1,7 @@
 import { HypeDexerHip4Client } from '../../clients/hypedexer/rest/hip4/hip4.client';
+import { buildHypedexerCacheKey } from '../../clients/hypedexer/rest/shared/hypedexer-cache.helper';
 import { cacheService } from '../../core/cache.service';
 import {
-  HYPEDEXER_CACHE_KEYS,
   HYPEDEXER_HIP4_CACHE_KEY,
   HYPEDEXER_TTL,
   HYPEDEXER_USER_CACHE_KEY,
@@ -18,6 +18,29 @@ import {
   type RawHip4Question,
   type RawHip4Settlement,
 } from '../../utils/hip4-enrichment.util';
+
+type Hip4FillsQuery = NonNullable<Parameters<HypeDexerHip4Client['getFills']>[0]>;
+
+const HOUR_MS = 60 * 60 * 1000;
+
+/**
+ * How long a market's fills stay cached, from the age of its newest fill. An
+ * empty answer may be a market about to open, so it is only kept a minute.
+ */
+function marketFillsTtl(rows: unknown): number {
+  if (!Array.isArray(rows) || rows.length === 0) return HYPEDEXER_TTL.hip4QuietFills;
+  let newest = 0;
+  for (const row of rows) {
+    const t = Number((row as { time_ms?: unknown } | null)?.time_ms);
+    if (Number.isFinite(t) && t > newest) newest = t;
+  }
+  // No readable time (field renamed upstream?): don't mistake it for dormant.
+  if (newest === 0) return HYPEDEXER_TTL.hip4QuietFills;
+  const age = Date.now() - newest;
+  if (age >= 24 * HOUR_MS) return HYPEDEXER_TTL.hip4DormantFills;
+  if (age >= HOUR_MS) return HYPEDEXER_TTL.hip4QuietFills;
+  return HYPEDEXER_TTL.hip4ActiveFills;
+}
 
 /**
  * HIP-4 exposed endpoints — assembles raw HypeDexer responses into frontend-ready
@@ -41,18 +64,35 @@ export class IndexerHip4Service {
     return IndexerHip4Service.instance;
   }
 
-  /** Fills — transform raw API shape to frontend-ready shape, then cache if user-scoped. */
-  public async getFills(p: Parameters<HypeDexerHip4Client['getFills']>[0]): Promise<unknown> {
-    const raw = (p?.user && !p.start && !p.end)
-      ? await cacheService.getOrSet(
-          HYPEDEXER_USER_CACHE_KEY.hip4Fills(p.user),
-          () => this.client.getFills(p),
-          HYPEDEXER_TTL.userAddress
-        )
-      : await this.client.getFills(p);
-
+  /** Fills — transform raw API shape to frontend-ready shape. */
+  public async getFills(p: Hip4FillsQuery = {}): Promise<unknown> {
+    const raw = await this.fetchRawFills(p);
     if (!Array.isArray(raw)) return raw;
     return raw.map((fill) => this.transformFill(fill as Record<string, unknown>));
+  }
+
+  private fetchRawFills(p: Hip4FillsQuery): Promise<unknown> {
+    if (p.user) {
+      if (p.start || p.end) return this.client.getFills(p);
+      return cacheService.getOrSet(
+        HYPEDEXER_USER_CACHE_KEY.hip4Fills(p.user, {
+          coin: p.coin,
+          outcome_id: p.outcome_id,
+          limit: p.limit,
+          offset: p.offset,
+        }),
+        () => this.client.getFills(p),
+        HYPEDEXER_TTL.userAddress
+      );
+    }
+    // A market's tape is the same for every visitor: the coin page polls
+    // `limit=400` every 15 s and a settled question's chart reads N coins ×
+    // 1 000 fills, which used to go upstream once per visitor and per poll.
+    return cacheService.getOrSet(
+      buildHypedexerCacheKey('hip4', 'fills', { ...p }),
+      () => this.client.getFills(p),
+      marketFillsTtl
+    );
   }
 
   private transformFill(f: Record<string, unknown>): Record<string, unknown> {
@@ -69,8 +109,9 @@ export class IndexerHip4Service {
   }
 
   /**
-   * Flat enriched markets. Backed by a single Redis entry when no filter is applied;
-   * filtered calls re-join from fresh upstream data (rare path).
+   * Flat enriched markets, one Redis entry per param set. The key used to
+   * ignore limit/offset, so whichever of `limit=500` (list page) or the default
+   * 100 (detail page) filled it first answered both.
    */
   public async getMarketsEnriched(p: {
     class?: string;
@@ -79,13 +120,9 @@ export class IndexerHip4Service {
     limit?: number;
     offset?: number;
   } = {}): Promise<Hip4MarketEnriched[]> {
-    const hasFilter = p.class != null || p.underlying != null || p.question_id != null;
-    const compute = async (): Promise<Hip4MarketEnriched[]> => this.assembleEnrichedMarkets(p);
-
-    if (hasFilter) return compute();
     return cacheService.getOrSet(
-      HYPEDEXER_CACHE_KEYS.hip4MarketsEnriched,
-      compute,
+      buildHypedexerCacheKey('hip4', 'markets-enriched', { ...p }),
+      () => this.assembleEnrichedMarkets(p),
       HYPEDEXER_TTL.staticList
     );
   }
@@ -100,7 +137,6 @@ export class IndexerHip4Service {
     limit?: number;
     offset?: number;
   } = {}): Promise<Hip4QuestionWithOutcomes[]> {
-    const hasFilter = p.question_id != null;
     const compute = async (): Promise<Hip4QuestionWithOutcomes[]> => {
       const [markets, outcomeTokens, questions, midPrices] = await Promise.all([
         this.fetchRawMarkets(p.question_id != null ? { question_id: p.question_id, limit: p.limit, offset: p.offset } : { limit: p.limit, offset: p.offset }),
@@ -112,15 +148,19 @@ export class IndexerHip4Service {
       return buildQuestionsWithOutcomes(enriched, questions);
     };
 
-    if (hasFilter) return compute();
+    // Keyed on every param, like markets-enriched (limit 200 vs default 100).
     return cacheService.getOrSet(
-      HYPEDEXER_CACHE_KEYS.hip4QuestionsWithOutcomes,
+      buildHypedexerCacheKey('hip4', 'questions-with-outcomes', { ...p }),
       compute,
       HYPEDEXER_TTL.staticList
     );
   }
 
-  /** Settlements enriched with winner_name + question_name. No cache (time-sensitive). */
+  /**
+   * Settlements enriched with winner_name + question_name. Shared for a minute:
+   * the list page polls it every 30 s per visitor, and each read joined three
+   * upstream metadata lists fetched again every time.
+   */
   public async getSettlements(p: {
     outcome_id?: number;
     start?: string;
@@ -128,6 +168,20 @@ export class IndexerHip4Service {
     limit?: number;
     offset?: number;
   } = {}): Promise<Hip4SettlementEnriched[]> {
+    return cacheService.getOrSet(
+      buildHypedexerCacheKey('hip4', 'settlements', { ...p }),
+      () => this.assembleSettlements(p),
+      HYPEDEXER_TTL.hip4Settlements
+    );
+  }
+
+  private async assembleSettlements(p: {
+    outcome_id?: number;
+    start?: string;
+    end?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<Hip4SettlementEnriched[]> {
     const [raw, markets, outcomeTokens, questions, midPrices] = await Promise.all([
       this.client.getSettlements<RawHip4Settlement[]>(p),
       this.fetchRawMarkets(),
@@ -149,11 +203,13 @@ export class IndexerHip4Service {
   /**
    * Time-bucketed analytics — volume, fills, fees and unique traders.
    *
-   * Caching strategy:
-   *   - Unfiltered calls (no coin, no outcome_id, no date range) are cached per
-   *     interval bucket so the most common dashboard requests hit Redis.
-   *   - Filtered calls (coin comparison, outcome splits, custom date ranges) are
-   *     served fresh — the upstream materialized view is already constant-time.
+   * Caching strategy, one Redis entry per param set:
+   *   - Unfiltered calls (no coin, no outcome_id, no date range): the charts'
+   *     buckets, kept a minute.
+   *   - Filtered calls (coin lists, outcome splits, date ranges): kept 5 min.
+   *     The upstream view is constant-time, but each call is billed per row,
+   *     and the live-market volume fan-out sends the same coin chunks for
+   *     every visitor.
    */
   public async getAnalytics(p: {
     interval?: string;
@@ -163,17 +219,15 @@ export class IndexerHip4Service {
     end?: string;
     limit?: number;
   } = {}): Promise<unknown> {
-    const interval = p.interval ?? '1h';
+    const q = { ...p, interval: p.interval ?? '1h' };
     const hasFilter = p.coin != null || p.outcome_id != null || p.start != null || p.end != null;
 
-    if (hasFilter) {
-      return this.client.getAnalytics({ ...p, interval });
-    }
-
     return cacheService.getOrSet(
-      HYPEDEXER_HIP4_CACHE_KEY.analytics(interval),
-      () => this.client.getAnalytics({ ...p, interval }),
-      HYPEDEXER_TTL.hip4Analytics,
+      hasFilter
+        ? buildHypedexerCacheKey('hip4', 'analytics', { ...q })
+        : HYPEDEXER_HIP4_CACHE_KEY.analytics(q.interval, q.limit),
+      () => this.client.getAnalytics(q),
+      hasFilter ? HYPEDEXER_TTL.hip4AnalyticsFiltered : HYPEDEXER_TTL.hip4Analytics,
     );
   }
 
@@ -216,6 +270,12 @@ export class IndexerHip4Service {
     }
   }
 
+  /*
+   * Upstream metadata lists, one shared Redis entry per param set: every
+   * enriched endpoint and settlements read them, and they only change when a
+   * market is created or settles.
+   */
+
   private async fetchRawMarkets(p: {
     outcome_id?: number;
     class?: string;
@@ -224,21 +284,38 @@ export class IndexerHip4Service {
     limit?: number;
     offset?: number;
   } = {}): Promise<RawHip4Market[]> {
-    const raw = await this.client.getMarkets<RawHip4Market[]>(p);
+    const raw = await cacheService.getOrSet(
+      buildHypedexerCacheKey('hip4', 'markets', { ...p }),
+      () => this.client.getMarkets<RawHip4Market[]>(p),
+      baseListTtl
+    );
     return asArray(raw);
   }
 
   private async fetchRawOutcomeTokens(): Promise<RawHip4OutcomeToken[]> {
-    const raw = await this.client.getOutcomeTokens<RawHip4OutcomeToken[]>({});
+    const raw = await cacheService.getOrSet(
+      buildHypedexerCacheKey('hip4', 'outcome-tokens'),
+      () => this.client.getOutcomeTokens<RawHip4OutcomeToken[]>({}),
+      baseListTtl
+    );
     return asArray(raw);
   }
 
   private async fetchRawQuestions(p: { question_id?: number } = {}): Promise<RawHip4Question[]> {
-    const raw = await this.client.getQuestions<RawHip4Question[]>(p);
+    const raw = await cacheService.getOrSet(
+      buildHypedexerCacheKey('hip4', 'questions', { ...p }),
+      () => this.client.getQuestions<RawHip4Question[]>(p),
+      baseListTtl
+    );
     return asArray(raw);
   }
 }
 
 function asArray<T>(raw: unknown): T[] {
   return Array.isArray(raw) ? (raw as T[]) : [];
+}
+
+/** An empty list is more likely an upstream hiccup than the truth: retry it sooner. */
+function baseListTtl(rows: unknown): number {
+  return Array.isArray(rows) && rows.length > 0 ? HYPEDEXER_TTL.hip4BaseList : HYPEDEXER_TTL.hip4BaseListRetry;
 }

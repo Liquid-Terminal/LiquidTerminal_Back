@@ -9,6 +9,8 @@ import type {
   ElysiumStatsDailyQuery,
   ElysiumTokensQuery,
   ElysiumTransactionsQuery,
+  ElysiumUserActivityQuery,
+  ElysiumUserBridgeQuery,
 } from '../../clients/hypedexer/rest/elysium/elysium-indexer.client';
 import { buildHypedexerCacheKey } from '../../clients/hypedexer/rest/shared/hypedexer-cache.helper';
 import { cacheService } from '../../core/cache.service';
@@ -95,5 +97,27 @@ export class IndexerElysiumService {
 
   public getTokens(params?: ElysiumTokensQuery): Promise<unknown> {
     return this.cached('tokens', params, HYPEDEXER_TTL.elysiumTokens, () => this.client.getTokens(params));
+  }
+
+  /** Addresses are lower-cased so checksum variants share one cache entry. */
+  public getUserBalances(address: string): Promise<unknown> {
+    const a = address.toLowerCase();
+    return this.cached('user:balances', { address: a }, HYPEDEXER_TTL.elysiumUser, () =>
+      this.client.getUserBalances(a)
+    );
+  }
+
+  public getUserActivity(address: string, params?: ElysiumUserActivityQuery): Promise<unknown> {
+    const a = address.toLowerCase();
+    return this.cached('user:activity', { address: a, ...params }, HYPEDEXER_TTL.elysiumUser, () =>
+      this.client.getUserActivity(a, params)
+    );
+  }
+
+  public getUserBridge(address: string, params?: ElysiumUserBridgeQuery): Promise<unknown> {
+    const a = address.toLowerCase();
+    return this.cached('user:bridge', { address: a, ...params }, HYPEDEXER_TTL.elysiumUser, () =>
+      this.client.getUserBridge(a, params)
+    );
   }
 }

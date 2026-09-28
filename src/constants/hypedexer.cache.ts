@@ -58,6 +58,7 @@ export const HYPEDEXER_TTL = {
   elysiumBridgeReserves: 120,
   elysiumBridgeTokens:   300,
   elysiumTokens:         300,
+  elysiumUser:            15,
   /** Vault leaderboards — heavy fan-out aggregation across top-N candidates;
    * keep at 5 min to amortize the per-vault snapshot/ledger calls. */
   vaultLeaderboards:     300,

@@ -31,6 +31,10 @@ const mockService = {
   getUsers: jest.fn().mockResolvedValue({ daily: [] }),
   getBridge: jest.fn().mockResolvedValue({ daily: [] }),
   getEconomics: jest.fn().mockResolvedValue({ daily: [], totals: { feesHype: 0, txs: 0 } }),
+  getMethods: jest.fn().mockResolvedValue({ rows: [], names: {} }),
+  getDex: jest.fn().mockResolvedValue({ daily: [] }),
+  getTokens: jest.fn().mockResolvedValue({ daily: [] }),
+  getAddress: jest.fn().mockResolvedValue({ tags: [] }),
 };
 
 jest.mock('../../../src/services/elysium/elysium-analytics.service', () => ({
@@ -64,6 +68,11 @@ describe('Elysium analytics GET validation smoke', () => {
     '/elysium/analytics/users?days=1',
     '/elysium/analytics/bridge?days=14',
     '/elysium/analytics/economics?days=30',
+    '/elysium/analytics/methods',
+    '/elysium/analytics/methods?window=7d',
+    '/elysium/analytics/dex?days=14',
+    '/elysium/analytics/tokens',
+    '/elysium/analytics/address/0x1E4f06e89a0c4f0c47f42a78881c8ee357dd628e',
   ];
 
   it.each(paths)('%s — no Zod body validation failure', async (path) => {
@@ -84,6 +93,16 @@ describe('Elysium analytics GET validation smoke', () => {
     expect(mockService.getContracts).toHaveBeenLastCalledWith('24h');
     await request(app).get('/elysium/analytics/economics?days=7');
     expect(mockService.getEconomics).toHaveBeenLastCalledWith(7);
+    await request(app).get('/elysium/analytics/dex');
+    expect(mockService.getDex).toHaveBeenLastCalledWith(14);
+    await request(app).get('/elysium/analytics/methods');
+    expect(mockService.getMethods).toHaveBeenLastCalledWith('24h');
+  });
+
+  it('passes the address param through', async () => {
+    const a = '0x1e4f06e89a0c4f0c47f42a78881c8ee357dd628e';
+    await request(app).get(`/elysium/analytics/address/${a}`);
+    expect(mockService.getAddress).toHaveBeenLastCalledWith(a);
   });
 });
 
@@ -95,6 +114,10 @@ describe('Elysium analytics query validation', () => {
     '/elysium/analytics/bridge?days=1.5',
     '/elysium/analytics/economics?days=-1',
     '/elysium/analytics/contracts?window=30d',
+    '/elysium/analytics/methods?window=1h',
+    '/elysium/analytics/tokens?days=0',
+    '/elysium/analytics/address/0x123',
+    '/elysium/analytics/address/not-an-address',
   ];
 
   it.each(invalid)('%s — returns 400', async (path) => {

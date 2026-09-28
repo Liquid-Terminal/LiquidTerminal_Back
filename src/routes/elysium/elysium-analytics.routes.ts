@@ -3,7 +3,9 @@ import { z } from 'zod';
 import { marketRateLimiter } from '../../middleware/apiRateLimiter';
 import { validateGetRequest } from '../../middleware/validation';
 import {
+  elysiumAnalyticsAddressSchema,
   elysiumAnalyticsContractsSchema,
+  elysiumAnalyticsMethodsSchema,
   elysiumAnalyticsDaysSchema,
   elysiumAnalyticsStatusSchema,
 } from '../../schemas/elysium-analytics.schema';
@@ -30,9 +32,10 @@ function register<S extends QuerySchema>(
   path: string,
   schema: S,
   code: string,
-  handler: (query: z.infer<S['shape']['query']>) => Promise<unknown>
+  handler: (query: z.infer<S['shape']['query']>, params: z.infer<S['shape']['params']>) => Promise<unknown>
 ): void {
   const querySchema = schema.shape.query;
+  const paramsSchema = schema.shape.params;
   router.get(
     path,
     marketRateLimiter,
@@ -40,7 +43,8 @@ function register<S extends QuerySchema>(
     (async (req: Request, res: Response) => {
       try {
         const query = querySchema.parse(req.query) as z.infer<S['shape']['query']>;
-        const data = await handler(query);
+        const params = paramsSchema.parse(req.params) as z.infer<S['shape']['params']>;
+        const data = await handler(query, params);
         res.json({ success: true, data });
       } catch (error) {
         const db = isDatabaseError(error);
@@ -72,6 +76,18 @@ register('/bridge', elysiumAnalyticsDaysSchema, 'ELYSIUM_ANALYTICS_BRIDGE_ERROR'
 
 register('/economics', elysiumAnalyticsDaysSchema, 'ELYSIUM_ANALYTICS_ECONOMICS_ERROR', (q) =>
   service.getEconomics(q.days)
+);
+
+register('/methods', elysiumAnalyticsMethodsSchema, 'ELYSIUM_ANALYTICS_METHODS_ERROR', (q) =>
+  service.getMethods(q.window)
+);
+
+register('/dex', elysiumAnalyticsDaysSchema, 'ELYSIUM_ANALYTICS_DEX_ERROR', (q) => service.getDex(q.days));
+
+register('/tokens', elysiumAnalyticsDaysSchema, 'ELYSIUM_ANALYTICS_TOKENS_ERROR', (q) => service.getTokens(q.days));
+
+register('/address/:address', elysiumAnalyticsAddressSchema, 'ELYSIUM_ANALYTICS_ADDRESS_ERROR', (_q, p) =>
+  service.getAddress(p.address)
 );
 
 export default router;

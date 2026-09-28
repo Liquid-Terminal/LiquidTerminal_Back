@@ -29,7 +29,7 @@ export interface ElysiumIngestPageQuery {
 }
 
 /** Upstream list paths the ingestion service pages through. */
-export type ElysiumIngestPath = '/transactions' | '/bridge/transfers' | '/tokens';
+export type ElysiumIngestPath = '/transactions' | '/bridge/transfers' | '/tokens' | '/logs';
 
 export interface ElysiumStatsDailyQuery {
   days?: number;
@@ -76,6 +76,16 @@ export interface ElysiumTokensQuery {
   limit?: number;
   standard?: 'erc20' | 'erc721' | 'erc1155';
   origin?: 'native' | 'canonical';
+}
+
+export interface ElysiumUserActivityQuery {
+  limit?: number;
+  offset?: number;
+}
+
+export interface ElysiumUserBridgeQuery {
+  limit?: number;
+  direction?: 'deposit' | 'withdrawal';
 }
 
 /**
@@ -162,6 +172,30 @@ export class HypeDexerElysiumIndexerClient extends HypeDexerBaseClient {
 
   public getTokens(params?: ElysiumTokensQuery): Promise<unknown> {
     return this.fetchElysium('/tokens', params);
+  }
+
+  public getUserBalances(address: string): Promise<unknown> {
+    return this.fetchElysium(`/user/${address}/balances`);
+  }
+
+  public getUserActivity(address: string, params?: ElysiumUserActivityQuery): Promise<unknown> {
+    return this.fetchElysium(`/user/${address}/activity`, params);
+  }
+
+  public getUserBridge(address: string, params?: ElysiumUserBridgeQuery): Promise<unknown> {
+    return this.fetchElysium(`/user/${address}/bridge`, params);
+  }
+
+  /** Single token detail (holders, supply) for the ingestion service. */
+  public async fetchIngestToken(address: string): Promise<Record<string, unknown>> {
+    if (!/^0x[0-9a-f]{40}$/.test(address)) throw new Error('Elysium ingest: invalid token address');
+    const data = await this.ingestCircuitBreaker.execute(() =>
+      this.getUnwrapped<unknown>(`${ELYSIUM_PREFIX}/tokens/${address}`)
+    );
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+      throw new Error('Elysium ingest: expected a token object');
+    }
+    return data as Record<string, unknown>;
   }
 
   /**

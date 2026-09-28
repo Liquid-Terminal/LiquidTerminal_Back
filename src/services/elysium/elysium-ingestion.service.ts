@@ -20,7 +20,16 @@ import {
   BridgeRow,
   TokenRow,
   TxRow,
+  scaleRawAmount,
 } from './elysium-ingest.util';
+import {
+  decodePoolCreated,
+  decodeSwap,
+  DEX_TOPICS,
+  pickSignature,
+  DexPoolRow,
+  DexSwapRow,
+} from './elysium-dex.util';
 
 const PAGE_SIZE = 1000;
 /** Hard stop per window: 200k rows/hour is ~20x the measured peak. */
@@ -45,6 +54,27 @@ const BRIDGE_EXECUTED_SWEEP_MS = 8 * 24 * HOUR_MS;
 const BRIDGE_BACKFILL_STEP_MS = 6 * HOUR_MS;
 
 const TOKENS_INTERVAL_MS = 15 * MINUTE_MS;
+
+const DEX_LIVE_INTERVAL_MS = 60_000;
+/** DEX logs are sparse on testnet: one day per backfill window is plenty. */
+const DEX_STEP_MS = 24 * HOUR_MS;
+const DEX_OVERLAP_MS = 120_000;
+const DEX_SETTLE_MS = 15_000;
+
+const METHODS_INTERVAL_MS = 30 * MINUTE_MS;
+/** Only the most frequent selectors are resolved. */
+const METHODS_TOP_N = 200;
+/** A selector with no known signature is looked up again after a day. */
+const METHODS_RETRY_S = 24 * 3600;
+const METHODS_BATCH = 50;
+const SIGNATURE_DB_URL = 'https://api.openchain.xyz/signature-database/v1/lookup';
+/** Fallback when the primary database is down (one selector per call). */
+const FOURBYTE_URL = 'https://www.4byte.directory/api/v1/signatures/';
+
+const TOKEN_STATS_INTERVAL_MS = 15 * MINUTE_MS;
+/** Holder snapshots for the top N tokens of each ranked list only. */
+const TOKEN_STATS_TOP_N = 25;
+const TOKEN_STATS_MAX_AGE_S = 14 * 60;
 
 /** Serialises upstream calls with a minimum gap (shared by all streams). */
 class CallThrottle {
@@ -78,6 +108,11 @@ class IngestStoppedError extends Error {
  * - bridge: one-time backfill from genesis, then last 15 min every 60s plus a
  *   26h window (status changes) and an executed-withdrawals sweep every 15 min.
  * - tokens: full ERC-20 listing every 15 min.
+ * - dex: Uniswap V2/V3 pool-creation and swap logs (/logs by topic0), walked
+ *   from genesis in 1-day windows, then every 60s like the tx stream.
+ * - methods: resolves the top 200 called selectors via a public signature
+ *   database every 30 min (cached permanently, misses retried daily).
+ * - tokenstats: holder counts (/tokens/{address}) for the top tokens only.
  *
  * Each stream is a self-rescheduling loop (single flight by construction),
  * guarded by a Redis lock, and never throws: failures are recorded in
@@ -117,6 +152,9 @@ export class ElysiumIngestionService {
     this.schedule('tx', 0, () => this.txTick());
     this.schedule('bridge', 5_000, () => this.bridgeTick());
     this.schedule('tokens', 10_000, () => this.tokensTick());
+    this.schedule('dex', 15_000, () => this.dexTick());
+    this.schedule('methods', 20_000, () => this.methodsTick());
+    this.schedule('tokenstats', 90_000, () => this.tokenStatsTick());
     logDeduplicator.info('Elysium ingestion started');
   }
 
@@ -170,6 +208,9 @@ export class ElysiumIngestionService {
   private baseInterval(stream: ElysiumStream): number {
     if (stream === 'tx') return TX_LIVE_INTERVAL_MS;
     if (stream === 'bridge') return BRIDGE_LIVE_INTERVAL_MS;
+    if (stream === 'dex') return DEX_LIVE_INTERVAL_MS;
+    if (stream === 'methods') return METHODS_INTERVAL_MS;
+    if (stream === 'tokenstats') return TOKEN_STATS_INTERVAL_MS;
     return TOKENS_INTERVAL_MS;
   }
 
@@ -349,5 +390,162 @@ export class ElysiumIngestionService {
     // rows = size of the latest listing (a snapshot), not a running total.
     await this.repo.advance('tokens', { cursor: new Date(), setRows: upserted, backfillDone: true });
     return TOKENS_INTERVAL_MS;
+  }
+
+  // ---------------------------------------------------------------------------
+  // dex stream
+  // ---------------------------------------------------------------------------
+
+  private async ingestDexWindow(start: Date, end: Date): Promise<number> {
+    const time = { start_time: toUpstreamTime(start), end_time: toUpstreamTime(end) };
+    let inserted = 0;
+    for (const topic0 of [DEX_TOPICS.v2PairCreated, DEX_TOPICS.v3PoolCreated]) {
+      await this.pageAll('/logs', { ...time, topic0 }, async (raw) => {
+        const rows = dedupeBy(
+          raw.map(decodePoolCreated).filter((r): r is DexPoolRow => r !== null),
+          (r) => r.pool
+        );
+        inserted += await this.repo.insertDexPools(rows);
+      });
+    }
+    for (const topic0 of [DEX_TOPICS.v2Swap, DEX_TOPICS.v3Swap]) {
+      await this.pageAll('/logs', { ...time, topic0 }, async (raw) => {
+        const rows = dedupeBy(
+          raw.map(decodeSwap).filter((r): r is DexSwapRow => r !== null),
+          (r) => `${r.tx_hash}:${r.log_index}`
+        );
+        inserted += await this.repo.insertDexSwaps(rows);
+      });
+    }
+    return inserted;
+  }
+
+  private async dexTick(): Promise<number> {
+    const deadline = Date.now() + TICK_BUDGET_MS;
+    const state = await this.repo.getState('dex');
+    let cursor = state?.cursor ?? null;
+    let backfillDone = state?.backfillDone ?? false;
+
+    while (Date.now() < deadline) {
+      this.ensureRunning();
+      const w = planWindow({
+        cursor,
+        backfillDone,
+        now: new Date(),
+        genesis: ELYSIUM_GENESIS,
+        stepMs: DEX_STEP_MS,
+        overlapMs: DEX_OVERLAP_MS,
+        settleMs: DEX_SETTLE_MS,
+      });
+      if (!w) return DEX_LIVE_INTERVAL_MS;
+      const inserted = await this.ingestDexWindow(w.start, w.end);
+      const finishesBackfill = !backfillDone && w.caughtUp;
+      await this.repo.advance('dex', {
+        cursor: w.end,
+        addRows: inserted,
+        ...(finishesBackfill ? { backfillDone: true } : {}),
+      });
+      cursor = w.end;
+      if (finishesBackfill) {
+        backfillDone = true;
+        void rawLogger.info('Elysium ingest: dex backfill complete');
+      }
+      if (w.caughtUp) return DEX_LIVE_INTERVAL_MS;
+    }
+    return 0;
+  }
+
+  // ---------------------------------------------------------------------------
+  // methods stream (selector -> signature, public signature database)
+  // ---------------------------------------------------------------------------
+
+  private async lookupSignatures(ids: string[]): Promise<Record<string, unknown>> {
+    const url = `${SIGNATURE_DB_URL}?function=${ids.join(',')}&filter=true`;
+    const res = await fetch(url, {
+      headers: { Accept: 'application/json', 'User-Agent': 'liquidterminal-back' },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!res.ok) throw new Error(`Signature database HTTP ${res.status}`);
+    const body = (await res.json()) as { ok?: boolean; result?: { function?: Record<string, unknown> } };
+    if (!body.ok || !body.result?.function) throw new Error('Signature database: unexpected payload');
+    return body.result.function;
+  }
+
+  /** 4byte.directory: the earliest registered signature wins (collisions are later spam). */
+  private async lookupFourByte(id: string): Promise<{ signature: string | null; candidates: number }> {
+    const res = await fetch(`${FOURBYTE_URL}?hex_signature=${id}&ordering=created_at`, {
+      headers: { Accept: 'application/json', 'User-Agent': 'liquidterminal-back' },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!res.ok) throw new Error(`4byte HTTP ${res.status}`);
+    const body = (await res.json()) as { results?: Array<{ id?: unknown; text_signature?: unknown }> };
+    const list = (body.results ?? []).filter(
+      (r): r is { id: number; text_signature: string } =>
+        typeof r.id === 'number' && typeof r.text_signature === 'string'
+    );
+    list.sort((a, b) => a.id - b.id);
+    return { signature: list[0]?.text_signature ?? null, candidates: list.length };
+  }
+
+  private async methodsTick(): Promise<number> {
+    const deadline = Date.now() + TICK_BUDGET_MS;
+    const ids = await this.repo.listUnresolvedMethods(METHODS_TOP_N, METHODS_RETRY_S);
+    let written = 0;
+    let primaryDown = false;
+    for (let i = 0; i < ids.length && Date.now() < deadline; i += METHODS_BATCH) {
+      this.ensureRunning();
+      const chunk = ids.slice(i, i + METHODS_BATCH);
+      let rows: Array<{ method_id: string; signature: string | null; candidates: number; source: string }> = [];
+      if (!primaryDown) {
+        try {
+          await this.throttle.wait();
+          const found = await this.lookupSignatures(chunk);
+          rows = chunk.map((id) => {
+            const list = Array.isArray(found[id]) ? (found[id] as Array<Record<string, unknown>>) : [];
+            return { method_id: id, signature: pickSignature(list), candidates: list.length, source: 'openchain' };
+          });
+        } catch {
+          primaryDown = true;
+        }
+      }
+      if (primaryDown) {
+        for (const id of chunk) {
+          if (Date.now() >= deadline) break;
+          await this.throttle.wait();
+          const r = await this.lookupFourByte(id);
+          rows.push({ method_id: id, ...r, source: '4byte' });
+        }
+      }
+      written += await this.repo.upsertMethodSigs(rows);
+    }
+    await this.repo.advance('methods', { cursor: new Date(), addRows: written, backfillDone: true });
+    // Budget spent before every selector was looked up: continue soon.
+    return written < ids.length ? 5_000 : METHODS_INTERVAL_MS;
+  }
+
+  // ---------------------------------------------------------------------------
+  // tokenstats stream (holder counts for the top tokens only)
+  // ---------------------------------------------------------------------------
+
+  private async tokenStatsTick(): Promise<number> {
+    const deadline = Date.now() + TICK_BUDGET_MS;
+    const addresses = await this.repo.listTokensForStats(TOKEN_STATS_TOP_N, TOKEN_STATS_MAX_AGE_S);
+    let done = 0;
+    let processed = 0;
+    for (const address of addresses) {
+      this.ensureRunning();
+      if (Date.now() >= deadline) break;
+      processed++;
+      await this.throttle.wait();
+      const t = await this.client.fetchIngestToken(address);
+      const holders = Number(t.holders);
+      if (!Number.isInteger(holders) || holders < 0) continue;
+      const decimals = typeof t.decimals === 'number' ? t.decimals : null;
+      await this.repo.upsertTokenStat(address, holders, scaleRawAmount(t.total_supply_raw, decimals));
+      done++;
+    }
+    await this.repo.advance('tokenstats', { cursor: new Date(), addRows: done, backfillDone: true });
+    // Leftovers (budget spent) are picked up on the next, sooner run.
+    return processed < addresses.length ? 5_000 : TOKEN_STATS_INTERVAL_MS;
   }
 }

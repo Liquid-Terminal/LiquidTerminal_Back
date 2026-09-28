@@ -13,6 +13,9 @@ import {
   elysiumBridgeReservesQuerySchema,
   elysiumBridgeTokensQuerySchema,
   elysiumTokensQuerySchema,
+  elysiumUserActivitySchema,
+  elysiumUserBalancesSchema,
+  elysiumUserBridgeSchema,
 } from '../../schemas/indexer/elysium-indexer.schema';
 import { IndexerElysiumService } from '../../services/indexer/indexer-elysium.service';
 import { logDeduplicator } from '../../utils/logDeduplicator';
@@ -33,9 +36,10 @@ function register<S extends QuerySchema>(
   path: string,
   schema: S,
   code: string,
-  handler: (query: z.infer<S['shape']['query']>) => Promise<unknown>
+  handler: (query: z.infer<S['shape']['query']>, params: z.infer<S['shape']['params']>) => Promise<unknown>
 ): void {
   const querySchema = schema.shape.query;
+  const paramsSchema = schema.shape.params;
   router.get(
     path,
     marketRateLimiter,
@@ -43,7 +47,8 @@ function register<S extends QuerySchema>(
     (async (req: Request, res: Response) => {
       try {
         const query = querySchema.parse(req.query) as z.infer<S['shape']['query']>;
-        const data = await handler(query);
+        const params = paramsSchema.parse(req.params) as z.infer<S['shape']['params']>;
+        const data = await handler(query, params);
         res.json({ success: true, data });
       } catch (error) {
         logDeduplicator.error('GET /indexer/elysium upstream failure', {
@@ -96,5 +101,17 @@ register('/bridge/tokens', elysiumBridgeTokensQuerySchema, 'INDEXER_ELYSIUM_BRID
 );
 
 register('/tokens', elysiumTokensQuerySchema, 'INDEXER_ELYSIUM_TOKENS_ERROR', (q) => service.getTokens(q));
+
+register('/user/:address/balances', elysiumUserBalancesSchema, 'INDEXER_ELYSIUM_USER_BALANCES_ERROR', (_q, p) =>
+  service.getUserBalances(p.address)
+);
+
+register('/user/:address/activity', elysiumUserActivitySchema, 'INDEXER_ELYSIUM_USER_ACTIVITY_ERROR', (q, p) =>
+  service.getUserActivity(p.address, q)
+);
+
+register('/user/:address/bridge', elysiumUserBridgeSchema, 'INDEXER_ELYSIUM_USER_BRIDGE_ERROR', (q, p) =>
+  service.getUserBridge(p.address, q)
+);
 
 export default router;

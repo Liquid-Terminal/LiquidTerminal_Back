@@ -10,6 +10,7 @@ import {
   share,
   toDayKey,
 } from './elysium-analytics.util';
+import { methodName } from './elysium-dex.util';
 
 const CACHE_TTL_S = 60;
 const CACHE_PREFIX = 'elysium:analytics';
@@ -23,6 +24,16 @@ const iso = (v: number | null): string | null => (v === null || v === undefined 
 const ts = (d: Date): string => d.toISOString();
 
 export type ContractsWindow = '24h' | '7d';
+
+/** Address tag rule for "bot-like": this many user txs in the last 24h, or this share of all of them. */
+export const BOT_TXS_24H = 500;
+export const BOT_SHARE_24H = 0.01;
+
+export interface MethodRef {
+  methodId: string;
+  signature: string | null;
+  name: string | null;
+}
 
 /**
  * Elysium analytics computed in SQL over the ingested tables (historical DB).
@@ -201,6 +212,29 @@ export class ElysiumAnalyticsService {
         LEFT JOIN elysium_token tk ON tk.address = cur.address
         ORDER BY cur.txs DESC, cur.address`;
 
+      const addrs = rows.map((r) => r.address);
+      const [methodRows, names] = await Promise.all([
+        addrs.length
+          ? prismaHistorical.$queryRaw<Array<{ address: string; method_id: string | null; txs: number }>>`
+              SELECT address, method_id, txs FROM (
+                SELECT t.to_addr AS address, t.method_id, count(*)::int AS txs,
+                       row_number() OVER (PARTITION BY t.to_addr ORDER BY count(*) DESC, t.method_id) AS rk
+                FROM elysium_tx t
+                WHERE t.to_addr = ANY(${addrs}::text[])
+                  AND t.block_time >= ${ts(curStart)}::timestamptz AND t.block_time < ${ts(now)}::timestamptz
+                  AND NOT t.is_spam
+                GROUP BY t.to_addr, t.method_id
+              ) x WHERE rk <= 3 ORDER BY address, txs DESC`
+          : Promise.resolve([]),
+        this.methodNames(),
+      ]);
+      const methodsBy = new Map<string, Array<MethodRef & { txs: number }>>();
+      for (const m of methodRows) {
+        const list = methodsBy.get(m.address) ?? [];
+        list.push({ ...this.methodRef(m.method_id, names), txs: m.txs });
+        methodsBy.set(m.address, list);
+      }
+
       return {
         window,
         rows: rows.map((r) => {
@@ -218,6 +252,7 @@ export class ElysiumAnalyticsService {
             gasUsed: num(r.gas_used),
             txsPrev: r.txs_prev ?? 0,
             callersPrev: r.callers_prev ?? 0,
+            topMethods: methodsBy.get(r.address) ?? [],
           };
         }),
       };
@@ -477,5 +512,376 @@ export class ElysiumAnalyticsService {
       };
     });
   }
-}
 
+  // ---------------------------------------------------------------------------
+  // 7. method names (selector -> signature)
+  // ---------------------------------------------------------------------------
+
+  /** Every resolved selector (top ~200 by frequency), cached 5 min. */
+  private methodNames(): Promise<Record<string, string>> {
+    return cacheService.getOrSet<Record<string, string>>(
+      `${CACHE_PREFIX}:method-names:v1`,
+      async () => {
+        const rows = await prismaHistorical.$queryRaw<Array<{ method_id: string; signature: string }>>`
+          SELECT method_id, signature FROM elysium_method_sig WHERE signature IS NOT NULL`;
+        return Object.fromEntries(rows.map((r) => [r.method_id, r.signature]));
+      },
+      300
+    );
+  }
+
+  /** `methodId` null = plain value transfer (no calldata). */
+  private methodRef(methodId: string | null, names: Record<string, string>): MethodRef {
+    const id = methodId ?? '';
+    const signature = id ? names[id] ?? null : null;
+    return { methodId: id, signature, name: methodName(signature) };
+  }
+
+  /**
+   * Top 25 called selectors in the window (non-spam calls to an address;
+   * contract creations and plain transfers are counted apart), plus the full
+   * selector -> signature map so clients can label any tx.
+   */
+  public getMethods(window: ContractsWindow): Promise<unknown> {
+    return this.cached('methods', window, async () => {
+      const spanMs = window === '7d' ? 7 * DAY_MS : DAY_MS;
+      const now = new Date();
+      const start = new Date(now.getTime() - spanMs);
+      const [rows, totals, names, resolved] = await Promise.all([
+        prismaHistorical.$queryRaw<Array<{ method_id: string; txs: number; senders: number; contracts: number }>>`
+          SELECT method_id, count(*)::int AS txs, count(DISTINCT from_addr)::int AS senders,
+                 count(DISTINCT to_addr)::int AS contracts
+          FROM elysium_tx
+          WHERE block_time >= ${ts(start)}::timestamptz AND block_time < ${ts(now)}::timestamptz
+            AND NOT is_spam AND to_addr IS NOT NULL AND method_id IS NOT NULL
+          GROUP BY method_id ORDER BY txs DESC, method_id LIMIT 25`,
+        prismaHistorical.$queryRaw<Array<{ calls: number; transfers: number; creations: number }>>`
+          SELECT count(*) FILTER (WHERE to_addr IS NOT NULL AND method_id IS NOT NULL)::int AS calls,
+                 count(*) FILTER (WHERE to_addr IS NOT NULL AND method_id IS NULL)::int AS transfers,
+                 count(*) FILTER (WHERE to_addr IS NULL)::int AS creations
+          FROM elysium_tx
+          WHERE block_time >= ${ts(start)}::timestamptz AND block_time < ${ts(now)}::timestamptz AND NOT is_spam`,
+        this.methodNames(),
+        prismaHistorical.$queryRaw<Array<{ looked_up: number; found: number }>>`
+          SELECT count(*)::int AS looked_up, count(signature)::int AS found FROM elysium_method_sig`,
+      ]);
+      const t = totals[0] ?? { calls: 0, transfers: 0, creations: 0 };
+      return {
+        window,
+        totals: { calls: t.calls, plainTransfers: t.transfers, contractCreations: t.creations },
+        resolver: { lookedUp: resolved[0]?.looked_up ?? 0, found: resolved[0]?.found ?? 0 },
+        rows: rows.map((r) => ({
+          ...this.methodRef(r.method_id, names),
+          txs: r.txs,
+          share: share(r.txs, t.calls),
+          senders: r.senders,
+          contracts: r.contracts,
+        })),
+        names,
+      };
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // 8. DEX (Uniswap V2/V3 logs)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Pools come from PairCreated / PoolCreated logs (factory = emitting
+   * contract), swaps from V2/V3 Swap logs. Traders = distinct tx senders of
+   * the swap txs (the log's own `sender` is usually a router), falling back to
+   * the log sender when the tx is not indexed.
+   */
+  public getDex(days: number): Promise<unknown> {
+    return this.cached('dex', `d${days}`, async () => {
+      const now = new Date();
+      const { keys, start } = this.rangeStart(now, days);
+      const since24h = new Date(now.getTime() - DAY_MS);
+
+      const [pools, swaps, factories, top, fresh, totals] = await Promise.all([
+        prismaHistorical.$queryRaw<Array<{ day: string; n: number }>>`
+          SELECT (created_at AT TIME ZONE 'UTC')::date::text AS day, count(*)::int AS n
+          FROM elysium_dex_pool WHERE created_at >= ${ts(start)}::timestamptz GROUP BY 1`,
+        prismaHistorical.$queryRaw<Array<{ day: string; swaps: number; active: number }>>`
+          SELECT (block_time AT TIME ZONE 'UTC')::date::text AS day, count(*)::int AS swaps,
+                 count(DISTINCT pool)::int AS active
+          FROM elysium_dex_swap WHERE block_time >= ${ts(start)}::timestamptz GROUP BY 1`,
+        prismaHistorical.$queryRaw<
+          Array<{ address: string; versions: string; pools: number; swaps24h: number; last_pool: number }>
+        >`
+          SELECT p.factory AS address, string_agg(DISTINCT p.version, ',') AS versions,
+                 count(DISTINCT p.pool)::int AS pools,
+                 (SELECT count(*) FROM elysium_dex_swap s JOIN elysium_dex_pool q ON q.pool = s.pool
+                   WHERE q.factory = p.factory AND s.block_time >= ${ts(since24h)}::timestamptz)::int AS swaps24h,
+                 (extract(epoch FROM max(p.created_at)) * 1000)::float8 AS last_pool
+          FROM elysium_dex_pool p GROUP BY p.factory ORDER BY pools DESC, address LIMIT 15`,
+        prismaHistorical.$queryRaw<
+          Array<{
+            pool: string;
+            version: string;
+            fee: number | null;
+            token0: string | null;
+            token1: string | null;
+            sym0: string | null;
+            sym1: string | null;
+            swaps: number;
+            traders: number;
+          }>
+        >`
+          SELECT s.pool, s.version, p.fee, p.token0, p.token1, k0.symbol AS sym0, k1.symbol AS sym1,
+                 count(*)::int AS swaps, count(DISTINCT COALESCE(t.from_addr, s.sender))::int AS traders
+          FROM elysium_dex_swap s
+          LEFT JOIN elysium_tx t ON t.tx_hash = s.tx_hash
+          LEFT JOIN elysium_dex_pool p ON p.pool = s.pool
+          LEFT JOIN elysium_token k0 ON k0.address = p.token0
+          LEFT JOIN elysium_token k1 ON k1.address = p.token1
+          WHERE s.block_time >= ${ts(since24h)}::timestamptz
+          GROUP BY s.pool, s.version, p.fee, p.token0, p.token1, k0.symbol, k1.symbol
+          ORDER BY swaps DESC, s.pool LIMIT 15`,
+        prismaHistorical.$queryRaw<
+          Array<{
+            pool: string;
+            factory: string;
+            version: string;
+            fee: number | null;
+            token0: string;
+            token1: string;
+            sym0: string | null;
+            sym1: string | null;
+            created_at: number;
+            swaps: number;
+          }>
+        >`
+          SELECT p.pool, p.factory, p.version, p.fee, p.token0, p.token1, k0.symbol AS sym0, k1.symbol AS sym1,
+                 (extract(epoch FROM p.created_at) * 1000)::float8 AS created_at,
+                 (SELECT count(*) FROM elysium_dex_swap s
+                   WHERE s.pool = p.pool AND s.block_time >= ${ts(since24h)}::timestamptz)::int AS swaps
+          FROM elysium_dex_pool p
+          LEFT JOIN elysium_token k0 ON k0.address = p.token0
+          LEFT JOIN elysium_token k1 ON k1.address = p.token1
+          ORDER BY p.created_at DESC, p.pool LIMIT 15`,
+        prismaHistorical.$queryRaw<
+          Array<{ pools: number; swaps: number; swaps24h: number; traders24h: number; pools24h: number }>
+        >`
+          SELECT (SELECT count(*) FROM elysium_dex_pool)::int AS pools,
+                 (SELECT count(*) FROM elysium_dex_swap)::int AS swaps,
+                 (SELECT count(*) FROM elysium_dex_pool WHERE created_at >= ${ts(since24h)}::timestamptz)::int AS pools24h,
+                 (SELECT count(*) FROM elysium_dex_swap WHERE block_time >= ${ts(since24h)}::timestamptz)::int AS swaps24h,
+                 (SELECT count(DISTINCT COALESCE(t.from_addr, s.sender)) FROM elysium_dex_swap s
+                   LEFT JOIN elysium_tx t ON t.tx_hash = s.tx_hash
+                   WHERE s.block_time >= ${ts(since24h)}::timestamptz)::int AS traders24h`,
+      ]);
+
+      const poolsBy = new Map(pools.map((r) => [toDayKey(r.day), r.n]));
+      const swapsBy = new Map(swaps.map((r) => [toDayKey(r.day), r]));
+      const merged = new Map(
+        keys.map((k) => [
+          k,
+          { poolsCreated: poolsBy.get(k) ?? 0, swaps: swapsBy.get(k)?.swaps ?? 0, activePools: swapsBy.get(k)?.active ?? 0 },
+        ])
+      );
+      const t = totals[0];
+      return {
+        totals: {
+          pools: t?.pools ?? 0,
+          swaps: t?.swaps ?? 0,
+          pools24h: t?.pools24h ?? 0,
+          swaps24h: t?.swaps24h ?? 0,
+          traders24h: t?.traders24h ?? 0,
+        },
+        daily: fillDays(keys, merged, () => ({ poolsCreated: 0, swaps: 0, activePools: 0 }), now),
+        factories: factories.map((r) => ({
+          address: r.address,
+          versions: r.versions.split(','),
+          pools: r.pools,
+          swaps24h: r.swaps24h,
+          lastPoolAt: iso(r.last_pool),
+        })),
+        topPools24h: top.map((r) => ({
+          pool: r.pool,
+          version: r.version,
+          fee: r.fee,
+          token0: r.token0,
+          token1: r.token1,
+          token0Symbol: r.sym0,
+          token1Symbol: r.sym1,
+          swaps24h: r.swaps,
+          traders24h: r.traders,
+        })),
+        newPools: fresh.map((r) => ({
+          pool: r.pool,
+          factory: r.factory,
+          version: r.version,
+          fee: r.fee,
+          token0: r.token0,
+          token1: r.token1,
+          token0Symbol: r.sym0,
+          token1Symbol: r.sym1,
+          pair: r.sym0 && r.sym1 ? `${r.sym0}/${r.sym1}` : null,
+          createdAt: iso(r.created_at),
+          swaps24h: r.swaps,
+        })),
+      };
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // 9. token launches (provider token registry + holder snapshots)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Launches = ERC-20 registry rows by first_seen day (`launched` all, `named`
+   * with a symbol). Ranked lists only show tokens with a symbol; `holders` is
+   * the latest /tokens/{address} snapshot (top tokens only, null otherwise).
+   */
+  public getTokens(days: number): Promise<unknown> {
+    return this.cached('tokens', `d${days}`, async () => {
+      const now = new Date();
+      const { keys, start } = this.rangeStart(now, days);
+      const since24h = new Date(now.getTime() - DAY_MS);
+
+      type TokenOut = {
+        address: string;
+        name: string | null;
+        symbol: string;
+        decimals: number | null;
+        origin: string | null;
+        first_seen: number | null;
+        transfers: string;
+        holders: number | null;
+        holders_at: number | null;
+      };
+
+      const [daily, fresh, top, totals] = await Promise.all([
+        prismaHistorical.$queryRaw<Array<{ day: string; launched: number; named: number }>>`
+          SELECT (first_seen AT TIME ZONE 'UTC')::date::text AS day, count(*)::int AS launched,
+                 count(*) FILTER (WHERE symbol IS NOT NULL)::int AS named
+          FROM elysium_token WHERE standard = 'erc20' AND first_seen >= ${ts(start)}::timestamptz GROUP BY 1`,
+        prismaHistorical.$queryRaw<TokenOut[]>`
+          SELECT k.address, k.name, k.symbol, k.decimals, k.origin,
+                 (extract(epoch FROM k.first_seen) * 1000)::float8 AS first_seen, k.transfer_count::text AS transfers,
+                 s.holders, (extract(epoch FROM s.fetched_at) * 1000)::float8 AS holders_at
+          FROM elysium_token k LEFT JOIN elysium_token_stat s ON s.address = k.address
+          WHERE k.standard = 'erc20' AND k.symbol IS NOT NULL AND k.first_seen >= ${ts(since24h)}::timestamptz
+          ORDER BY k.transfer_count DESC, k.address LIMIT 25`,
+        prismaHistorical.$queryRaw<TokenOut[]>`
+          SELECT k.address, k.name, k.symbol, k.decimals, k.origin,
+                 (extract(epoch FROM k.first_seen) * 1000)::float8 AS first_seen, k.transfer_count::text AS transfers,
+                 s.holders, (extract(epoch FROM s.fetched_at) * 1000)::float8 AS holders_at
+          FROM elysium_token k LEFT JOIN elysium_token_stat s ON s.address = k.address
+          WHERE k.standard = 'erc20' AND k.symbol IS NOT NULL
+          ORDER BY k.transfer_count DESC, k.address LIMIT 25`,
+        prismaHistorical.$queryRaw<Array<{ tokens: number; named: number; launched24h: number; named24h: number }>>`
+          SELECT count(*)::int AS tokens, count(*) FILTER (WHERE symbol IS NOT NULL)::int AS named,
+                 count(*) FILTER (WHERE first_seen >= ${ts(since24h)}::timestamptz)::int AS launched24h,
+                 count(*) FILTER (WHERE first_seen >= ${ts(since24h)}::timestamptz AND symbol IS NOT NULL)::int AS named24h
+          FROM elysium_token WHERE standard = 'erc20'`,
+      ]);
+
+      const map = (r: TokenOut) => ({
+        address: r.address,
+        name: r.name,
+        symbol: r.symbol,
+        decimals: r.decimals,
+        origin: r.origin,
+        firstSeen: iso(r.first_seen),
+        transfers: num(r.transfers),
+        holders: r.holders ?? null,
+        holdersAt: iso(r.holders_at),
+      });
+      const byDay = new Map(daily.map((r) => [toDayKey(r.day), { launched: r.launched, named: r.named }]));
+      const t = totals[0];
+      return {
+        totals: {
+          tokens: t?.tokens ?? 0,
+          named: t?.named ?? 0,
+          launched24h: t?.launched24h ?? 0,
+          named24h: t?.named24h ?? 0,
+        },
+        daily: fillDays(keys, byDay, () => ({ launched: 0, named: 0 }), now),
+        newTokens24h: fresh.map(map),
+        topTokens: top.map(map),
+      };
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // 10. address profile (tags from our tables)
+  // ---------------------------------------------------------------------------
+
+  /** Tags and counts for one address, computed from the ingested tables. */
+  public getAddress(address: string): Promise<unknown> {
+    const a = address.toLowerCase();
+    return this.cached('address', a, async () => {
+      const now = new Date();
+      const since24h = new Date(now.getTime() - DAY_MS);
+      const [seen, act, net, deploys, dex, bridge, methods, names] = await Promise.all([
+        prismaHistorical.$queryRaw<Array<{ first_seen: number }>>`
+          SELECT (extract(epoch FROM first_seen) * 1000)::float8 AS first_seen FROM elysium_address WHERE address = ${a}`,
+        prismaHistorical.$queryRaw<Array<{ txs: number; days: number; txs24h: number }>>`
+          SELECT COALESCE(sum(tx_count), 0)::int AS txs, count(*)::int AS days,
+                 (SELECT count(*) FROM elysium_tx WHERE from_addr = ${a} AND block_time >= ${ts(since24h)}::timestamptz
+                   AND NOT is_spam AND COALESCE(tx_type, '') NOT IN ('0x64', '0x68', '0x69'))::int AS txs24h
+          FROM elysium_address_day WHERE address = ${a}`,
+        prismaHistorical.$queryRaw<Array<{ total: number }>>`
+          SELECT count(*)::int AS total FROM elysium_tx WHERE block_time >= ${ts(since24h)}::timestamptz
+            AND NOT is_spam AND COALESCE(tx_type, '') NOT IN ('0x64', '0x68', '0x69')`,
+        prismaHistorical.$queryRaw<Array<{ n: number; last: number | null }>>`
+          SELECT count(*)::int AS n, (extract(epoch FROM max(deployed_at)) * 1000)::float8 AS last
+          FROM elysium_contract WHERE deployer = ${a}`,
+        prismaHistorical.$queryRaw<Array<{ swaps: number; pools: number; swaps24h: number }>>`
+          SELECT count(*)::int AS swaps, count(DISTINCT s.pool)::int AS pools,
+                 count(*) FILTER (WHERE s.block_time >= ${ts(since24h)}::timestamptz)::int AS swaps24h
+          FROM elysium_dex_swap s JOIN elysium_tx t ON t.tx_hash = s.tx_hash WHERE t.from_addr = ${a}`,
+        prismaHistorical.$queryRaw<
+          Array<{ deposits: number; withdrawals: number; hype_in: number; hype_out: number }>
+        >`
+          SELECT count(*) FILTER (WHERE direction = 'deposit')::int AS deposits,
+                 count(*) FILTER (WHERE direction = 'withdrawal')::int AS withdrawals,
+                 COALESCE(sum(amount) FILTER (WHERE direction = 'deposit' AND symbol = 'HYPE' AND route = 'native'), 0)::float8 AS hype_in,
+                 COALESCE(sum(amount) FILTER (WHERE direction = 'withdrawal' AND symbol = 'HYPE' AND route = 'native'), 0)::float8 AS hype_out
+          FROM elysium_bridge_transfer WHERE from_addr = ${a} OR to_addr = ${a}`,
+        prismaHistorical.$queryRaw<Array<{ method_id: string | null; to_null: boolean; txs: number }>>`
+          SELECT CASE WHEN to_addr IS NULL THEN NULL ELSE method_id END AS method_id,
+                 (to_addr IS NULL) AS to_null, count(*)::int AS txs
+          FROM elysium_tx WHERE from_addr = ${a} AND NOT is_spam
+          GROUP BY 1, 2 ORDER BY txs DESC LIMIT 6`,
+        this.methodNames(),
+      ]);
+
+      const txs24h = act[0]?.txs24h ?? 0;
+      const total24h = net[0]?.total ?? 0;
+      const share24h = share(txs24h, total24h);
+      const contracts = deploys[0]?.n ?? 0;
+      const swaps = dex[0]?.swaps ?? 0;
+      const b = bridge[0] ?? { deposits: 0, withdrawals: 0, hype_in: 0, hype_out: 0 };
+      const botLike = txs24h >= BOT_TXS_24H || (txs24h > 0 && share24h >= BOT_SHARE_24H);
+
+      const tags: Array<{ id: string; label: string; detail: string }> = [];
+      if (contracts > 0) tags.push({ id: 'deployer', label: 'Deployer', detail: `${contracts} contracts` });
+      if (swaps > 0) tags.push({ id: 'dex-trader', label: 'DEX trader', detail: `${swaps} swaps` });
+      if (b.deposits + b.withdrawals > 0) {
+        tags.push({ id: 'bridger', label: 'Bridger', detail: `${b.deposits} in / ${b.withdrawals} out` });
+      }
+      if (botLike) {
+        tags.push({ id: 'bot-like', label: 'Bot-like', detail: `${txs24h} txs in 24h (${(share24h * 100).toFixed(2)}% of all)` });
+      }
+
+      return {
+        address: a,
+        firstSeen: iso(seen[0]?.first_seen ?? null),
+        activity: { userTxs: act[0]?.txs ?? 0, activeDays: act[0]?.days ?? 0, txs24h, share24h, networkTxs24h: total24h },
+        deployer: { contracts, lastDeploy: iso(deploys[0]?.last ?? null) },
+        dex: { swaps, pools: dex[0]?.pools ?? 0, swaps24h: dex[0]?.swaps24h ?? 0 },
+        bridge: { deposits: b.deposits, withdrawals: b.withdrawals, hypeIn: num(b.hype_in), hypeOut: num(b.hype_out) },
+        topMethods: methods.map((m) =>
+          m.to_null
+            ? { methodId: '', signature: null, name: 'contract creation', txs: m.txs }
+            : { ...this.methodRef(m.method_id, names), txs: m.txs }
+        ),
+        botRule: { txs24h: BOT_TXS_24H, share24h: BOT_SHARE_24H },
+        tags,
+      };
+    });
+  }
+}

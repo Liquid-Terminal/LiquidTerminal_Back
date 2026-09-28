@@ -91,3 +91,26 @@ export const elysiumTokensQuerySchema = z.object({
   }),
   params: noParams,
 });
+
+const addressParams = z.object({ address: z.string().regex(/^0x[0-9a-fA-F]{40}$/) });
+
+export const elysiumUserBalancesSchema = z.object({
+  query: z.object({}),
+  params: addressParams,
+});
+
+export const elysiumUserActivitySchema = z.object({
+  query: z.object({
+    limit: limit(100),
+    offset: z.coerce.number().int().min(0).max(10_000).optional(),
+  }),
+  params: addressParams,
+});
+
+export const elysiumUserBridgeSchema = z.object({
+  query: z.object({
+    limit: limit(100),
+    direction: z.enum(['deposit', 'withdrawal']).optional(),
+  }),
+  params: addressParams,
+});

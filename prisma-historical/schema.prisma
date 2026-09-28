@@ -198,6 +198,72 @@ model ElysiumToken {
   @@map("elysium_token")
 }
 
+/// DEX pool created on Elysium: Uniswap V2 PairCreated / V3 PoolCreated logs.
+/// `factory` is the emitting contract (log address).
+model ElysiumDexPool {
+  pool        String   @id @db.VarChar(42)
+  factory     String   @db.VarChar(42)
+  /// 'v2' (PairCreated) or 'v3' (PoolCreated).
+  version     String   @db.VarChar(4)
+  token0      String   @db.VarChar(42)
+  token1      String   @db.VarChar(42)
+  /// V3 fee tier in hundredths of a bip (e.g. 3000 = 0.3%); null for V2.
+  fee         Int?
+  createdAt   DateTime @map("created_at") @db.Timestamptz(3)
+  blockNumber BigInt   @map("block_number")
+  txHash      String   @map("tx_hash") @db.VarChar(66)
+
+  @@index([createdAt])
+  @@index([factory])
+  @@map("elysium_dex_pool")
+}
+
+/// One Uniswap V2 / V3 Swap log. Amounts are raw integers (token base units),
+/// signed from the pool's point of view: positive = paid into the pool.
+model ElysiumDexSwap {
+  txHash      String   @map("tx_hash") @db.VarChar(66)
+  logIndex    Int      @map("log_index")
+  pool        String   @db.VarChar(42)
+  version     String   @db.VarChar(4)
+  blockTime   DateTime @map("block_time") @db.Timestamptz(3)
+  blockNumber BigInt   @map("block_number")
+  /// topic1 (usually a router), not necessarily the end user.
+  sender      String   @db.VarChar(42)
+  /// topic2 (V2 `to` / V3 `recipient`).
+  recipient   String   @db.VarChar(42)
+  amount0     Decimal  @db.Decimal(80, 0)
+  amount1     Decimal  @db.Decimal(80, 0)
+
+  @@id([txHash, logIndex])
+  @@index([blockTime])
+  @@index([pool, blockTime])
+  @@map("elysium_dex_swap")
+}
+
+/// 4-byte method selector resolved via a public signature database. A null
+/// signature means it was looked up and nothing was found (retried later).
+model ElysiumMethodSig {
+  methodId   String   @id @map("method_id") @db.VarChar(10)
+  signature  String?  @db.Text
+  /// Number of candidate signatures returned (collisions exist).
+  candidates Int      @default(0)
+  source     String   @db.VarChar(32)
+  resolvedAt DateTime @default(now()) @map("resolved_at") @db.Timestamptz(3)
+
+  @@map("elysium_method_sig")
+}
+
+/// Holder count / supply snapshot for the most active tokens only
+/// (upstream /tokens/{address}), refreshed by the tokens stream.
+model ElysiumTokenStat {
+  address     String   @id @db.VarChar(42)
+  holders     Int
+  totalSupply Decimal? @map("total_supply") @db.Decimal(96, 18)
+  fetchedAt   DateTime @default(now()) @map("fetched_at") @db.Timestamptz(3)
+
+  @@map("elysium_token_stat")
+}
+
 /// Watermark per ingestion stream (tx, bridge, tokens) for resume + monitoring.
 model ElysiumIngestState {
   stream       String    @id @db.VarChar(32)

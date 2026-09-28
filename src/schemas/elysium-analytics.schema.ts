@@ -24,3 +24,12 @@ export const elysiumAnalyticsContractsSchema = z.object({
 
 export type ElysiumAnalyticsDaysQuery = z.infer<typeof elysiumAnalyticsDaysSchema>['query'];
 export type ElysiumAnalyticsContractsQuery = z.infer<typeof elysiumAnalyticsContractsSchema>['query'];
+
+/** GET /elysium/analytics/methods?window=24h|7d (default 24h) */
+export const elysiumAnalyticsMethodsSchema = elysiumAnalyticsContractsSchema;
+
+/** GET /elysium/analytics/address/:address */
+export const elysiumAnalyticsAddressSchema = z.object({
+  query: z.object({}),
+  params: z.object({ address: z.string().regex(/^0x[0-9a-fA-F]{40}$/) }),
+});

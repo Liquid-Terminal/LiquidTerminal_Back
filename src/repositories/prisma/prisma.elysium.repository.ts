@@ -1,11 +1,12 @@
 import { prismaHistorical } from '../../core/prisma.historical.service';
 import { BRIDGE_TX_TYPES } from '../../services/elysium/elysium-ingest.util';
 import type { BridgeRow, TokenRow, TxRow } from '../../services/elysium/elysium-ingest.util';
+import type { DexPoolRow, DexSwapRow } from '../../services/elysium/elysium-dex.util';
 
 /** Constant SQL list of the bridge tx types (no user input involved). */
 const BRIDGE_TYPES_SQL = BRIDGE_TX_TYPES.map((t) => `'${t}'`).join(', ');
 
-export type ElysiumStream = 'tx' | 'bridge' | 'tokens';
+export type ElysiumStream = 'tx' | 'bridge' | 'tokens' | 'dex' | 'methods' | 'tokenstats';
 
 export interface ElysiumIngestStateRow {
   stream: string;
@@ -162,6 +163,131 @@ export class ElysiumIngestRepository {
       JSON.stringify(rows)
     );
     return result[0]?.n ?? 0;
+  }
+
+  /** Inserts DEX pools (a pool address is created once, so conflicts are ignored). */
+  public async insertDexPools(rows: DexPoolRow[]): Promise<number> {
+    if (rows.length === 0) return 0;
+    const result = await prismaHistorical.$queryRawUnsafe<Array<{ n: number }>>(
+      `
+      WITH ins AS (
+        INSERT INTO elysium_dex_pool (pool, factory, version, token0, token1, fee, created_at,
+          block_number, tx_hash)
+        SELECT pool, factory, version, token0, token1, fee, created_at, block_number, tx_hash
+        FROM jsonb_to_recordset($1::jsonb) AS r(
+          pool text, factory text, version text, token0 text, token1 text, fee int,
+          created_at timestamptz, block_number bigint, tx_hash text)
+        ON CONFLICT (pool) DO NOTHING
+        RETURNING 1
+      )
+      SELECT count(*)::int AS n FROM ins
+      `,
+      JSON.stringify(rows)
+    );
+    return result[0]?.n ?? 0;
+  }
+
+  /** Inserts swap logs, keyed by (tx_hash, log_index). */
+  public async insertDexSwaps(rows: DexSwapRow[]): Promise<number> {
+    if (rows.length === 0) return 0;
+    const result = await prismaHistorical.$queryRawUnsafe<Array<{ n: number }>>(
+      `
+      WITH ins AS (
+        INSERT INTO elysium_dex_swap (tx_hash, log_index, pool, version, block_time, block_number,
+          sender, recipient, amount0, amount1)
+        SELECT tx_hash, log_index, pool, version, block_time, block_number, sender, recipient,
+          amount0, amount1
+        FROM jsonb_to_recordset($1::jsonb) AS r(
+          tx_hash text, log_index int, pool text, version text, block_time timestamptz,
+          block_number bigint, sender text, recipient text, amount0 numeric, amount1 numeric)
+        ON CONFLICT (tx_hash, log_index) DO NOTHING
+        RETURNING 1
+      )
+      SELECT count(*)::int AS n FROM ins
+      `,
+      JSON.stringify(rows)
+    );
+    return result[0]?.n ?? 0;
+  }
+
+  /**
+   * The `limit` most frequent called selectors (contract creations and plain
+   * transfers excluded) that were never looked up, or whose last lookup found
+   * nothing and is older than `retryAfterS`.
+   */
+  public async listUnresolvedMethods(limit: number, retryAfterS: number): Promise<string[]> {
+    const rows = await prismaHistorical.$queryRawUnsafe<Array<{ method_id: string }>>(
+      `
+      WITH top AS (
+        SELECT method_id, count(*) AS n FROM elysium_tx
+        WHERE method_id ~ '^0x[0-9a-f]{8}$' AND to_addr IS NOT NULL
+        GROUP BY method_id ORDER BY n DESC, method_id LIMIT $1::int
+      )
+      SELECT top.method_id FROM top
+      LEFT JOIN elysium_method_sig s ON s.method_id = top.method_id
+      WHERE s.method_id IS NULL
+         OR (s.signature IS NULL AND s.resolved_at < now() - make_interval(secs => $2::int))
+      ORDER BY top.n DESC
+      `,
+      limit,
+      retryAfterS
+    );
+    return rows.map((r) => r.method_id);
+  }
+
+  public async upsertMethodSigs(
+    rows: Array<{ method_id: string; signature: string | null; candidates: number; source: string }>
+  ): Promise<number> {
+    if (rows.length === 0) return 0;
+    return prismaHistorical.$executeRawUnsafe(
+      `
+      INSERT INTO elysium_method_sig (method_id, signature, candidates, source, resolved_at)
+      SELECT method_id, signature, candidates, source, now()
+      FROM jsonb_to_recordset($1::jsonb) AS r(method_id text, signature text, candidates int, source text)
+      ON CONFLICT (method_id) DO UPDATE SET
+        signature = EXCLUDED.signature, candidates = EXCLUDED.candidates,
+        source = EXCLUDED.source, resolved_at = now()
+      `,
+      JSON.stringify(rows)
+    );
+  }
+
+  /**
+   * Tokens whose holder snapshot should be refreshed: the `perList` most
+   * transferred named ERC-20s overall and among those first seen in the last
+   * 24h, when their snapshot is missing or older than `maxAgeS`.
+   */
+  public async listTokensForStats(perList: number, maxAgeS: number): Promise<string[]> {
+    const rows = await prismaHistorical.$queryRawUnsafe<Array<{ address: string }>>(
+      `
+      WITH pick AS (
+        (SELECT address FROM elysium_token WHERE symbol IS NOT NULL AND standard = 'erc20'
+         ORDER BY transfer_count DESC, address LIMIT $1::int)
+        UNION
+        (SELECT address FROM elysium_token WHERE symbol IS NOT NULL AND standard = 'erc20'
+           AND first_seen >= now() - interval '24 hours'
+         ORDER BY transfer_count DESC, address LIMIT $1::int)
+      )
+      SELECT pick.address FROM pick
+      LEFT JOIN elysium_token_stat s ON s.address = pick.address
+      WHERE s.address IS NULL OR s.fetched_at < now() - make_interval(secs => $2::int)
+      `,
+      perList,
+      maxAgeS
+    );
+    return rows.map((r) => r.address);
+  }
+
+  public async upsertTokenStat(address: string, holders: number, totalSupply: string | null): Promise<void> {
+    await prismaHistorical.$executeRawUnsafe(
+      `INSERT INTO elysium_token_stat (address, holders, total_supply, fetched_at)
+       VALUES ($1::text, $2::int, $3::numeric, now())
+       ON CONFLICT (address) DO UPDATE SET holders = EXCLUDED.holders,
+         total_supply = EXCLUDED.total_supply, fetched_at = now()`,
+      address,
+      holders,
+      totalSupply
+    );
   }
 
   /**

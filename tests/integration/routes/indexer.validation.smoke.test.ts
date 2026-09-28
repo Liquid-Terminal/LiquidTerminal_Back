@@ -126,6 +126,9 @@ describe('Indexer GET validation smoke', () => {
     '/indexer/elysium/bridge/reserves?route=native&only_unbacked=false',
     '/indexer/elysium/bridge/tokens?limit=5&route=mirror',
     '/indexer/elysium/tokens?limit=5&standard=erc20&origin=native',
+    '/indexer/elysium/user/0x1e4f06e89a0c4f0c47f42a78881c8ee357dd628e/balances',
+    '/indexer/elysium/user/0x1e4f06e89a0c4f0c47f42a78881c8ee357dd628e/activity?limit=5&offset=10',
+    '/indexer/elysium/user/0x1e4f06e89a0c4f0c47f42a78881c8ee357dd628e/bridge?limit=5&direction=deposit',
   ];
 
   it.each(paths)('%s — no Zod body validation failure', async (path) => {
@@ -192,6 +195,9 @@ describe('Indexer Elysium query validation', () => {
     '/indexer/elysium/bridge/retryables?status=done',
     '/indexer/elysium/bridge/tokens?route=native',
     '/indexer/elysium/tokens?standard=erc777',
+    '/indexer/elysium/user/0x123/balances',
+    '/indexer/elysium/user/0x1e4f06e89a0c4f0c47f42a78881c8ee357dd628e/activity?limit=101',
+    '/indexer/elysium/user/0x1e4f06e89a0c4f0c47f42a78881c8ee357dd628e/bridge?direction=up',
   ];
 
   it.each(invalid)('%s — returns 400', async (path) => {

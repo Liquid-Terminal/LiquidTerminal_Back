@@ -1,5 +1,6 @@
 import { logDeduplicator } from '../utils/logDeduplicator';
 import { maskSensitiveUrl } from '../utils/url-masking';
+import { hypedexerCreditMeter } from '../utils/hypedexer-credit-meter';
 
 /**
  * HTTP API error with status code for granular error handling.
@@ -190,6 +191,13 @@ export abstract class BaseApiService {
           url: safeUrl,
           status: response.status
         });
+
+        // HypeDexer bills each successful call; nothing else sends this header.
+        hypedexerCreditMeter.record(
+          fullUrl,
+          response.headers.get('x-credit-cost'),
+          response.headers.get('x-credit-balance')
+        );
 
         return response.json();
       } catch (error) {

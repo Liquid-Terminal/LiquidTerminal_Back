@@ -548,13 +548,26 @@ export class ElysiumAnalyticsService {
       const now = new Date();
       const start = new Date(now.getTime() - spanMs);
       const [rows, totals, names, resolved] = await Promise.all([
+        // Top selectors first, then distinct senders / contracts via two-level
+        // hash aggregates (count(DISTINCT) per group sorts and takes ~40s here).
         prismaHistorical.$queryRaw<Array<{ method_id: string; txs: number; senders: number; contracts: number }>>`
-          SELECT method_id, count(*)::int AS txs, count(DISTINCT from_addr)::int AS senders,
-                 count(DISTINCT to_addr)::int AS contracts
-          FROM elysium_tx
-          WHERE block_time >= ${ts(start)}::timestamptz AND block_time < ${ts(now)}::timestamptz
-            AND NOT is_spam AND to_addr IS NOT NULL AND method_id IS NOT NULL
-          GROUP BY method_id ORDER BY txs DESC, method_id LIMIT 25`,
+          WITH base AS (
+            SELECT method_id, from_addr, to_addr FROM elysium_tx
+            WHERE block_time >= ${ts(start)}::timestamptz AND block_time < ${ts(now)}::timestamptz
+              AND NOT is_spam AND to_addr IS NOT NULL AND method_id IS NOT NULL
+          ),
+          top AS (SELECT method_id, count(*)::int AS txs FROM base GROUP BY 1 ORDER BY txs DESC, method_id LIMIT 25),
+          s AS (
+            SELECT method_id, count(*)::int AS n
+            FROM (SELECT DISTINCT b.method_id, b.from_addr FROM base b JOIN top USING (method_id)) x GROUP BY 1
+          ),
+          c AS (
+            SELECT method_id, count(*)::int AS n
+            FROM (SELECT DISTINCT b.method_id, b.to_addr FROM base b JOIN top USING (method_id)) x GROUP BY 1
+          )
+          SELECT top.method_id, top.txs, COALESCE(s.n, 0) AS senders, COALESCE(c.n, 0) AS contracts
+          FROM top LEFT JOIN s USING (method_id) LEFT JOIN c USING (method_id)
+          ORDER BY top.txs DESC, top.method_id`,
         prismaHistorical.$queryRaw<Array<{ calls: number; transfers: number; creations: number }>>`
           SELECT count(*) FILTER (WHERE to_addr IS NOT NULL AND method_id IS NOT NULL)::int AS calls,
                  count(*) FILTER (WHERE to_addr IS NOT NULL AND method_id IS NULL)::int AS transfers,

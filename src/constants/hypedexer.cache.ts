@@ -47,6 +47,17 @@ export const HYPEDEXER_TTL = {
   evmTransactions:         5,   // EVM transactions (fast-changing)
   evmBridgeEvents:        30,   // EVM bridge events
   evmLedgerTransfers:     30,   // EVM ledger transfers
+  /** Elysium testnet pass-through (keys built with buildHypedexerCacheKey, params included). */
+  elysiumStats:           15,
+  elysiumStatsDaily:     300,
+  elysiumBlocks:           5,
+  elysiumTransactions:     5,
+  elysiumBatches:         60,
+  elysiumBridgeTransfers: 10,
+  elysiumBridgeRetryables: 60,
+  elysiumBridgeReserves: 120,
+  elysiumBridgeTokens:   300,
+  elysiumTokens:         300,
   /** Vault leaderboards — heavy fan-out aggregation across top-N candidates;
    * keep at 5 min to amortize the per-vault snapshot/ledger calls. */
   vaultLeaderboards:     300,

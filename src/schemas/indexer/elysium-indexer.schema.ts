@@ -1,0 +1,93 @@
+import { z } from 'zod';
+
+/** Query-string boolean: only the literals "true" / "false" are accepted. */
+const queryBoolean = z.enum(['true', 'false']).transform((v) => v === 'true');
+
+const limit = (max: number) => z.coerce.number().int().min(1).max(max).optional();
+
+const noParams = z.object({});
+
+export const elysiumStatsQuerySchema = z.object({
+  query: z.object({}),
+  params: noParams,
+});
+
+export const elysiumStatsDailyQuerySchema = z.object({
+  query: z.object({
+    days: z.coerce.number().int().min(1).max(365).optional(),
+  }),
+  params: noParams,
+});
+
+export const elysiumBlocksQuerySchema = z.object({
+  query: z.object({
+    limit: limit(100),
+  }),
+  params: noParams,
+});
+
+export const elysiumTransactionsQuerySchema = z.object({
+  query: z.object({
+    limit: limit(100),
+    include_spam: queryBoolean.optional(),
+    include_system: queryBoolean.optional(),
+  }),
+  params: noParams,
+});
+
+/** Upstream default is 100; default to our cap so the omitted case stays bounded. */
+export const elysiumBatchesQuerySchema = z.object({
+  query: z.object({
+    limit: z.coerce.number().int().min(1).max(50).default(50),
+  }),
+  params: noParams,
+});
+
+export const elysiumBridgeTransfersQuerySchema = z.object({
+  query: z.object({
+    limit: limit(100),
+    direction: z.enum(['deposit', 'withdrawal']).optional(),
+    status: z
+      .enum(['initiated', 'ticket_created', 'redeem_failed', 'expired', 'completed', 'executed'])
+      .optional(),
+    route: z.enum(['native', 'canonical', 'mirror']).optional(),
+    asset: z.enum(['native', 'token', 'message']).optional(),
+  }),
+  params: noParams,
+});
+
+export const elysiumBridgeRetryablesQuerySchema = z.object({
+  query: z.object({
+    limit: limit(100),
+    status: z.enum(['pending', 'failed', 'expired', 'redeemed']).optional(),
+  }),
+  params: noParams,
+});
+
+/**
+ * `route` is required: the unfiltered upstream response is truncated at 1000 rows.
+ */
+export const elysiumBridgeReservesQuerySchema = z.object({
+  query: z.object({
+    route: z.enum(['native', 'canonical', 'mirror']),
+    only_unbacked: queryBoolean.optional(),
+  }),
+  params: noParams,
+});
+
+export const elysiumBridgeTokensQuerySchema = z.object({
+  query: z.object({
+    limit: limit(100),
+    route: z.enum(['canonical', 'mirror']).optional(),
+  }),
+  params: noParams,
+});
+
+export const elysiumTokensQuerySchema = z.object({
+  query: z.object({
+    limit: limit(100),
+    standard: z.enum(['erc20', 'erc721', 'erc1155']).optional(),
+    origin: z.enum(['native', 'canonical']).optional(),
+  }),
+  params: noParams,
+});

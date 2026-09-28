@@ -20,6 +20,7 @@ import { LiquidationsWebSocketService } from '../services/liquidations/liquidati
 import { HLIndexerTopTradersClient } from '../clients/hypedexer/rest/toptraders/toptraders.client';
 import { AggregatePositioningClient } from '../clients/hyperliquid/positioning/aggregate-positioning.client';
 import { MetricsSnapshotClient } from '../clients/metrics/metrics-snapshot.client';
+import { ElysiumIngestionService } from '../services/elysium/elysium-ingestion.service';
 import { HLIndexerActiveUsersClient } from '../clients/hypedexer/rest/activeusers/activeusers.client';
 import { HLIndexerBuildersClient } from '../clients/hypedexer/rest/builders/builders-list-poller.client';
 import { LiquidationsIngestionService } from '../services/liquidations/liquidations.ingestion.service';
@@ -194,6 +195,12 @@ export class ClientInitializerService {
       const metricsSnapshotClient = MetricsSnapshotClient.getInstance();
       this.clients.set('metricsSnapshot', metricsSnapshotClient);
       logDeduplicator.info('Metrics snapshot client initialized successfully');
+
+      // Elysium ingestion (REST → historical DB: txs, bridge transfers, tokens).
+      // startPolling() is a no-op when ELYSIUM_INGEST_ENABLED=false.
+      const elysiumIngestion = ElysiumIngestionService.getInstance();
+      this.clients.set('elysiumIngestion', elysiumIngestion);
+      logDeduplicator.info('Elysium ingestion service initialized successfully');
 
       // Initialiser le service d'ingestion des liquidations (WebSocket → DB historique)
       const ingestionService = LiquidationsIngestionService.getInstance();

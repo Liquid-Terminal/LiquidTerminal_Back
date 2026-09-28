@@ -65,6 +65,7 @@ import topTradersRoutes from './routes/toptraders/toptraders.routes';
 import activeUsersRoutes from './routes/activeusers/activeusers.routes';
 import buildersRoutes from './routes/builders/builders.routes';
 import indexerRoutes from './routes/indexer';
+import elysiumAnalyticsRoutes from './routes/elysium/elysium-analytics.routes';
 import defillamaRoutes from './routes/defillama/defillama.routes';
 import exportRoutes from './routes/export/export.routes';
 
@@ -167,6 +168,7 @@ app.use('/top-traders', topTradersRoutes);
 app.use('/active-users', activeUsersRoutes);
 app.use('/builders', buildersRoutes);
 app.use('/indexer', indexerRoutes);
+app.use('/elysium/analytics', elysiumAnalyticsRoutes);
 app.use('/defillama', defillamaRoutes);
 app.use('/export', exportRoutes);
 app.use(notFoundHandler);

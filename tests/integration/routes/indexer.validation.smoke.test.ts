@@ -56,6 +56,9 @@ jest.mock('../../../src/services/indexer/indexer-builders-indexer.service', () =
 jest.mock('../../../src/services/indexer/indexer-completed-trades.service', () => ({
   IndexerCompletedTradesService: { getInstance: mockGetInstance },
 }));
+jest.mock('../../../src/services/indexer/indexer-elysium.service', () => ({
+  IndexerElysiumService: { getInstance: mockGetInstance },
+}));
 jest.mock('../../../src/services/indexer/indexer-funding.service', () => ({
   IndexerFundingService: { getInstance: mockGetInstance },
 }));
@@ -113,6 +116,16 @@ describe('Indexer GET validation smoke', () => {
     '/indexer/vaults/leaderboards/followers-gained',
     '/indexer/vaults/leaderboards/outflows',
     '/indexer/users/leaderboard',
+    '/indexer/elysium/stats',
+    '/indexer/elysium/stats/daily?days=30',
+    '/indexer/elysium/blocks?limit=5',
+    '/indexer/elysium/transactions?limit=5&include_spam=false&include_system=true',
+    '/indexer/elysium/batches?limit=5',
+    '/indexer/elysium/bridge/transfers?limit=5&direction=deposit&status=completed&route=canonical&asset=token',
+    '/indexer/elysium/bridge/retryables?limit=5&status=redeemed',
+    '/indexer/elysium/bridge/reserves?route=native&only_unbacked=false',
+    '/indexer/elysium/bridge/tokens?limit=5&route=mirror',
+    '/indexer/elysium/tokens?limit=5&standard=erc20&origin=native',
   ];
 
   it.each(paths)('%s — no Zod body validation failure', async (path) => {
@@ -160,5 +173,30 @@ describe('Indexer required query params (OpenAPI alignment)', () => {
     );
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ success: true });
+  });
+});
+
+describe('Indexer Elysium query validation', () => {
+  const app = express();
+  app.use('/indexer', indexerRoutes);
+
+  const invalid: string[] = [
+    '/indexer/elysium/bridge/reserves',
+    '/indexer/elysium/bridge/reserves?route=bogus',
+    '/indexer/elysium/stats/daily?days=0',
+    '/indexer/elysium/stats/daily?days=366',
+    '/indexer/elysium/blocks?limit=101',
+    '/indexer/elysium/transactions?include_spam=yes',
+    '/indexer/elysium/batches?limit=51',
+    '/indexer/elysium/bridge/transfers?direction=sideways',
+    '/indexer/elysium/bridge/retryables?status=done',
+    '/indexer/elysium/bridge/tokens?route=native',
+    '/indexer/elysium/tokens?standard=erc777',
+  ];
+
+  it.each(invalid)('%s — returns 400', async (path) => {
+    const res = await request(app).get(path);
+    expect(res.status).toBe(400);
+    expect(res.body).toMatchObject({ error: 'Validation Error' });
   });
 });

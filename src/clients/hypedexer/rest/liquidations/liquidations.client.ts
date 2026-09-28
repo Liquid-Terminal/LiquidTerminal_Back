@@ -9,16 +9,16 @@ import { reliableLiquidationTimeMs } from '../../../../utils/liquidation-time';
 import { HYPEDEXER_API_URL, hypedexerJsonHeaders } from '../shared/hypedexer-api.config';
 import { HypeDexerBaseClient } from '../shared/hypedexer-base.client';
 
-/** Cache config for getRecentLiquidations (default params only) */
+/**
+ * Cache for getRecentLiquidations (default params only), filled on demand. A
+ * 15 s poller used to keep it warm (~68k credits a day) for its only reader,
+ * the dashboard's live-feed seed, fetched once per page load.
+ */
 const CACHE_KEY = 'liquidations:recent';
-// TTL slightly above the poll cycle so the scheduled poll rewrites the key before it
-// expires, avoiding a brief cold window that forces on-demand refreshes.
 const CACHE_TTL = 20;
-const UPDATE_INTERVAL = 15000; // 15s
-const UPDATE_CHANNEL = 'liquidations:recent:updated';
 
 /**
- * Client for HypeDexer Liquidations API (Redis polling + on-demand).
+ * Client for HypeDexer Liquidations API (on-demand, Redis-cached).
  * Circuit breaker / rate limiter IDs: `liquidations`.
  */
 export class HLIndexerLiquidationsClient extends HypeDexerBaseClient {
@@ -28,9 +28,6 @@ export class HLIndexerLiquidationsClient extends HypeDexerBaseClient {
 
   private circuitBreaker: CircuitBreakerService;
   private rateLimiter: RateLimiterService;
-  private pollingTimeout: NodeJS.Timeout | null = null;
-  private pollingStopped = true;
-  private consecutiveFailures = 0;
 
   private constructor() {
     super(HYPEDEXER_API_URL, hypedexerJsonHeaders);
@@ -142,7 +139,7 @@ export class HLIndexerLiquidationsClient extends HypeDexerBaseClient {
   }
 
   /**
-   * Internal fetch: call API for recent liquidations (no cache). Used by polling.
+   * Internal fetch: call API for recent liquidations (no cache).
    * NOTE: returns the raw envelope so Redis stores the full response shape.
    */
   private async fetchRecentLiquidationsFromApi(params: LiquidationQueryParams): Promise<LiquidationResponse> {
@@ -152,7 +149,7 @@ export class HLIndexerLiquidationsClient extends HypeDexerBaseClient {
   }
 
   /**
-   * Polling: fetch recent liquidations, cache in Redis, publish.
+   * Fetch the default recent liquidations and cache them in Redis.
    */
   private async updateRecentLiquidations(): Promise<void> {
     try {
@@ -160,7 +157,6 @@ export class HLIndexerLiquidationsClient extends HypeDexerBaseClient {
         this.fetchRecentLiquidationsFromApi({ limit: 100 })
       );
       await redisService.set(CACHE_KEY, JSON.stringify(response), CACHE_TTL);
-      await redisService.publish(UPDATE_CHANNEL, JSON.stringify({ type: 'DATA_UPDATED', timestamp: Date.now() }));
       logDeduplicator.info('Recent liquidations cache updated', {
         count: response.data?.length || 0,
         hasMore: response.has_more,
@@ -171,45 +167,6 @@ export class HLIndexerLiquidationsClient extends HypeDexerBaseClient {
       });
       throw error;
     }
-  }
-
-  public startPolling(): void {
-    if (!this.pollingStopped) {
-      logDeduplicator.warn('HLIndexer liquidations polling already started');
-      return;
-    }
-    this.pollingStopped = false;
-    logDeduplicator.info('Starting HLIndexer liquidations polling');
-    void this.tickLiquidationsPolling();
-  }
-
-  public stopPolling(): void {
-    this.pollingStopped = true;
-    if (this.pollingTimeout) {
-      clearTimeout(this.pollingTimeout);
-      this.pollingTimeout = null;
-      logDeduplicator.info('HLIndexer liquidations polling stopped');
-    }
-  }
-
-  private async tickLiquidationsPolling(): Promise<void> {
-    if (this.pollingStopped) return;
-    try {
-      await this.updateRecentLiquidations();
-      this.consecutiveFailures = 0;
-    } catch (err) {
-      this.consecutiveFailures += 1;
-      logDeduplicator.warn('Liquidations polling tick failed; applying backoff', {
-        error: err instanceof Error ? err.message : String(err),
-        consecutiveFailures: this.consecutiveFailures,
-      });
-    }
-    if (this.pollingStopped) return;
-    const multiplier = Math.min(Math.pow(2, this.consecutiveFailures), 10);
-    const delay = UPDATE_INTERVAL * multiplier;
-    this.pollingTimeout = setTimeout(() => {
-      void this.tickLiquidationsPolling();
-    }, delay);
   }
 
   /**

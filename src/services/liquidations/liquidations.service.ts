@@ -10,7 +10,9 @@ import {
   ChartPeriod,
   LiquidationChartDataResponse,
   LiquidationsDataResponse,
-  PeriodData
+  PeriodData,
+  TopLiquidationsPeriod,
+  TopLiquidationsResponse
 } from '../../types/liquidations.types';
 import { AnalyticsLiquidationStatsResponse } from '../../types/analytics-liquidations.types';
 import { logDeduplicator } from '../../utils/logDeduplicator';
@@ -40,6 +42,14 @@ export class LiquidationsService implements LiquidationDataProvider {
   private static readonly DATA_CACHE_TTL = 15;
   private static readonly STATS_CACHE_TTL = 15;
   private static readonly RECENT_CACHE_TTL = 15;
+  private static readonly USER_HISTORY_CACHE_TTL = 300;
+  private static readonly TOP_CACHE_TTL = 30;
+
+  private static readonly TOP_PERIOD_HOURS: Record<TopLiquidationsPeriod, number> = {
+    '1h': 1,
+    '24h': 24,
+    '7d': 7 * 24,
+  };
 
   private static readonly PERIOD_CONFIG: Record<ChartPeriod, PeriodConfig> = {
     '2h':  { hours: 2,  interval: '5m',  bucketSizeMinutes: 5 },
@@ -235,6 +245,59 @@ export class LiquidationsService implements LiquidationDataProvider {
   }
 
   // ============================================================================
+  // TOP — /historical/top endpoint (largest liquidations of a window, from DB)
+  // ============================================================================
+
+  /**
+   * The dashboard's "notable liquidations" used to be picked out of a
+   * 1 000-row HypeDexer page (~100 credits every 30 s); the DB already holds
+   * every liquidation, deduplicated the same way as the stats beside it.
+   */
+  public async getTopLiquidations(
+    period: TopLiquidationsPeriod,
+    minAmountDollars: number,
+    limit: number
+  ): Promise<TopLiquidationsResponse> {
+    const cacheKey = `liquidations:top:${period}:${minAmountDollars}:${limit}`;
+
+    try {
+      const cached = await redisService.get(cacheKey);
+      if (cached) return JSON.parse(cached);
+    } catch (cacheError) {
+      logDeduplicator.warn('Redis cache error for top liquidations', { error: String(cacheError) });
+    }
+
+    return this.inflight.run(cacheKey, async () => {
+      try {
+        const since = new Date(Date.now() - LiquidationsService.TOP_PERIOD_HOURS[period] * 60 * 60 * 1000);
+        const data = await historicalLiquidationRepository.getTopEvents(since, minAmountDollars, limit);
+        const result: TopLiquidationsResponse = {
+          success: true,
+          data,
+          filters: { period, minAmountDollars, limit },
+          metadata: { computedAt: new Date().toISOString() },
+        };
+        try {
+          await redisService.set(cacheKey, JSON.stringify(result), LiquidationsService.TOP_CACHE_TTL);
+        } catch (cacheError) {
+          logDeduplicator.warn('Failed to cache top liquidations', { error: String(cacheError) });
+        }
+        return result;
+      } catch (error) {
+        logDeduplicator.error('LiquidationsService.getTopLiquidations failed', {
+          error: error instanceof Error ? error.message : String(error),
+          period,
+        });
+        throw new LiquidationsError(
+          error instanceof Error ? error.message : 'Failed to fetch top liquidations',
+          500,
+          'TOP_LIQUIDATIONS_ERROR'
+        );
+      }
+    });
+  }
+
+  // ============================================================================
   // CHART DATA — /chart-data endpoint
   // ============================================================================
 
@@ -317,7 +380,29 @@ export class LiquidationsService implements LiquidationDataProvider {
   public async getLiquidations(params: LiquidationQueryParams = {}): Promise<LiquidationResponse> {
     try {
       const limit = params.limit ?? LiquidationsService.DEFAULT_LIMIT;
+      const { hours, coin, user, start_time, end_time, amount_dollars, cursor, order } = params;
+      const cacheKey = `liquidations:list:${JSON.stringify({
+        hours, limit, coin, user, start_time, end_time, amount_dollars, cursor, order,
+      })}`;
+
+      try {
+        const cached = await redisService.get(cacheKey);
+        if (cached) return JSON.parse(cached);
+      } catch (cacheError) {
+        logDeduplicator.warn('Redis cache error, proceeding without cache', { error: String(cacheError) });
+      }
+
       const response = await this.client.getLiquidations({ ...params, limit });
+
+      // A wallet's liquidation history (the address pages poll it every
+      // minute) only changes when that wallet gets liquidated.
+      const ttl = user ? LiquidationsService.USER_HISTORY_CACHE_TTL : LiquidationsService.RECENT_CACHE_TTL;
+      try {
+        await redisService.set(cacheKey, JSON.stringify(response), ttl);
+      } catch (cacheError) {
+        logDeduplicator.warn('Failed to cache liquidations', { error: String(cacheError) });
+      }
+
       return response;
     } catch (error) {
       logDeduplicator.error('LiquidationsService.getLiquidations failed', {

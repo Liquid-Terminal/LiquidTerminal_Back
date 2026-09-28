@@ -8,7 +8,7 @@ import { InternalWebSocketServer } from '../../websocket';
 import { HistoricalStatsService, HistoricalStatsPeriod } from '../../services/liquidations/liquidations.historical-stats.service';
 import { HistoricalChartService } from '../../services/liquidations/liquidations.historical-chart.service';
 import { HistoricalChartPeriod } from '../../types/historical.types';
-import { LiquidationQueryParams, LiquidationsError, ChartPeriod } from '../../types/liquidations.types';
+import { LiquidationQueryParams, LiquidationsError, ChartPeriod, TopLiquidationsPeriod } from '../../types/liquidations.types';
 import { marketRateLimiter } from '../../middleware/apiRateLimiter';
 import { validateRequest } from '../../middleware/validation/validation.middleware';
 import { liquidationsQuerySchema, recentLiquidationsQuerySchema } from '../../schemas/liquidations.schema';
@@ -515,6 +515,48 @@ router.get('/historical/chart',
     } catch (error) {
       logDeduplicator.error('Error fetching historical chart:', { error: error instanceof Error ? error.message : String(error) });
       res.status(500).json({
+        success: false,
+        error: 'Internal server error'
+      });
+    }
+  }) as RequestHandler
+);
+
+/**
+ * GET /liquidations/historical/top
+ * Largest liquidations of a window, from the historical database.
+ *
+ * Query params:
+ * - period: '1h' | '24h' | '7d' (default: '24h')
+ * - min_amount_dollars: minimum notional in USD (default: 0)
+ * - limit: 1-20 (default: 3)
+ */
+router.get('/historical/top',
+  marketRateLimiter,
+  (async (req: Request, res: Response) => {
+    const validPeriods: TopLiquidationsPeriod[] = ['1h', '24h', '7d'];
+    const periodParam = req.query.period ?? '24h';
+    if (typeof periodParam !== 'string' || !validPeriods.includes(periodParam as TopLiquidationsPeriod)) {
+      return res.status(400).json({
+        success: false,
+        error: `Invalid period. Valid values: ${validPeriods.join(', ')}`
+      });
+    }
+    const minAmount = req.query.min_amount_dollars === undefined ? 0 : Number(req.query.min_amount_dollars);
+    if (!Number.isFinite(minAmount) || minAmount < 0) {
+      return res.status(400).json({ success: false, error: 'min_amount_dollars must be a number >= 0' });
+    }
+    const limit = req.query.limit === undefined ? 3 : Number(req.query.limit);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 20) {
+      return res.status(400).json({ success: false, error: 'limit must be an integer between 1 and 20' });
+    }
+
+    try {
+      const response = await liquidationsService.getTopLiquidations(periodParam as TopLiquidationsPeriod, minAmount, limit);
+      res.json(response);
+    } catch (error) {
+      logDeduplicator.error('Error fetching top liquidations:', { error: error instanceof Error ? error.message : String(error) });
+      res.status(error instanceof LiquidationsError ? error.statusCode : 500).json({
         success: false,
         error: 'Internal server error'
       });

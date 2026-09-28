@@ -173,6 +173,20 @@ export interface LiquidationsDataResponse {
   };
 }
 
+/** Windows of /liquidations/historical/top. */
+export type TopLiquidationsPeriod = '1h' | '24h' | '7d';
+
+/**
+ * Largest liquidations of a window, read from the historical DB
+ * (/liquidations/historical/top).
+ */
+export interface TopLiquidationsResponse {
+  success: boolean;
+  data: Liquidation[];
+  filters: { period: TopLiquidationsPeriod; minAmountDollars: number; limit: number };
+  metadata: { computedAt: string };
+}
+
 /**
  * Chart data response (for standalone /chart-data endpoint)
  */

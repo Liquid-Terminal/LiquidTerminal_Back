@@ -7,6 +7,47 @@ import {
   HistoricalStatsWindow,
 } from '../interfaces/historical.repository.interface';
 import { RawLiquidationCreateInput, IngestionStateResponse, HistoricalStats, RawChartBucket } from '../../types/historical.types';
+import { Liquidation } from '../../types/liquidations.types';
+
+/** A raw_liquidations row as read back for the API (bigint columns as bigint). */
+interface EventRow {
+  tid: bigint;
+  time_ms: bigint;
+  coin: string;
+  hash: string;
+  liquidated_user: string;
+  size_total: number;
+  notional_total: number;
+  fill_px_vwap: number | null;
+  mark_px: number;
+  method: string;
+  fee_total_liquidated: number;
+  liquidators: string[] | null;
+  liquidator_count: number;
+  liq_dir: string | null;
+}
+
+/** Same shape as HypeDexer's liquidation rows; `time` in ISO UTC. */
+function toLiquidation(row: EventRow): Liquidation {
+  const timeMs = Number(row.time_ms);
+  return {
+    time: new Date(timeMs).toISOString(),
+    time_ms: timeMs,
+    coin: row.coin,
+    hash: row.hash,
+    liquidated_user: row.liquidated_user,
+    size_total: row.size_total,
+    notional_total: row.notional_total,
+    fill_px_vwap: row.fill_px_vwap,
+    mark_px: row.mark_px,
+    method: row.method,
+    fee_total_liquidated: row.fee_total_liquidated,
+    liquidators: row.liquidators ?? [],
+    liquidator_count: row.liquidator_count,
+    liq_dir: row.liq_dir === 'Long' || row.liq_dir === 'Short' ? row.liq_dir : null,
+    tid: Number(row.tid),
+  };
+}
 
 /** One row of the stats queries: plain numbers (SUM/MAX of numerics cast to float8, NULL on no rows). */
 interface StatsRow {
@@ -77,10 +118,10 @@ function earliestSince(windows: { since: Date }[]): Date {
  */
 function liquidationEvents(since: Date, coinFilter: Prisma.Sql = Prisma.empty): Prisma.Sql {
   return Prisma.sql`
-    SELECT time, coin, liq_dir, notional_total
+    SELECT time, coin, liq_dir, notional_total, tid
     FROM (
       SELECT
-        time, coin, liq_dir, notional_total,
+        time, coin, liq_dir, notional_total, tid,
         row_number() OVER (
           PARTITION BY hash COLLATE "C", liquidated_user COLLATE "C", coin COLLATE "C"
           ORDER BY
@@ -380,6 +421,37 @@ export class PrismaHistoricalLiquidationRepository
       },
       'computing chart buckets for periods',
       { periods: windows.map((w) => w.key).join(',') },
+      { verboseSuccess: false }
+    );
+  }
+
+  /**
+   * The largest liquidations since `since` (at least `minNotional` USD), one
+   * row per liquidation like the stats (see liquidationEvents()), largest
+   * first.
+   */
+  async getTopEvents(since: Date, minNotional: number, limit: number): Promise<Liquidation[]> {
+    return this.executeWithErrorHandling(
+      async () => {
+        const rows: EventRow[] = await this.prismaClient.$queryRaw`
+          SELECT
+            r.tid, r.time_ms, r.coin, r.hash, r.liquidated_user, r.size_total,
+            r.notional_total, r.fill_px_vwap, r.mark_px, r.method,
+            r.fee_total_liquidated, r.liquidators, r.liquidator_count, r.liq_dir
+          FROM (
+            SELECT tid, notional_total
+            FROM (${liquidationEvents(since)}) liq
+            WHERE notional_total >= ${minNotional}
+            ORDER BY notional_total DESC, tid DESC
+            LIMIT ${limit}
+          ) top
+          JOIN raw_liquidations r ON r.tid = top.tid
+          ORDER BY top.notional_total DESC, top.tid DESC
+        `;
+        return rows.map(toLiquidation);
+      },
+      'reading top liquidations',
+      { since: since.toISOString(), minNotional, limit },
       { verboseSuccess: false }
     );
   }

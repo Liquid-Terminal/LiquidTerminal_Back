@@ -1,5 +1,6 @@
 import { BaseRepository } from './base.repository.interface';
 import { RawLiquidationCreateInput, IngestionStateResponse, HistoricalStats, RawChartBucket } from '../../types/historical.types';
+import { Liquidation } from '../../types/liquidations.types';
 
 /** A named time window for the multi-period queries. */
 export interface HistoricalStatsWindow {
@@ -62,4 +63,10 @@ export interface HistoricalLiquidationRepository extends BaseRepository {
    * bucket size, keyed by window.
    */
   getChartForPeriods(windows: HistoricalChartWindow[]): Promise<Map<string, RawChartBucket[]>>;
+
+  /**
+   * The largest liquidations since `since`, at least `minNotional` USD, one
+   * row per liquidation (same dedup as the stats), largest first.
+   */
+  getTopEvents(since: Date, minNotional: number, limit: number): Promise<Liquidation[]>;
 }

@@ -428,6 +428,42 @@ export function enrichMarkets(
 }
 
 /**
+ * A row with nothing of its own: HypeDexer lists each traded side coin
+ * `#(10N + side)` as a placeholder row (name = coin, no description, no
+ * sides, never settled) and keeps the market on outcome N's row.
+ */
+export function isBareMarketRow(m: RawHip4Market): boolean {
+  const name = (m.name ?? '').trim();
+  return (
+    !(m.description ?? '').trim() &&
+    (!name || name === (m.coin ?? '').trim()) &&
+    parseSideSpecs(m.side_specs) == null &&
+    !(m.class ?? '').trim()
+  );
+}
+
+/**
+ * Outcome N's enriched market seen from one of its traded coins,
+ * `#(10N + side)`: the coin Hyperliquid prices and HypeDexer files fills under.
+ */
+export function toSideCoinMarket(
+  market: Hip4MarketEnriched,
+  side: number,
+  midPrices?: Map<string, number>
+): Hip4MarketEnriched {
+  const outcomeId = market.outcome_id * 10 + side;
+  const coin = `#${outcomeId}`;
+  return {
+    ...market,
+    outcome_id: outcomeId,
+    coin,
+    side,
+    side_name: market.parsed_sides?.[side]?.name ?? null,
+    mid_price: midPrices?.get(coin) ?? null,
+  };
+}
+
+/**
  * Group enriched markets by question_id; markets with a null question_id are
  * returned as singleton synthetic questions so the frontend treats everything
  * uniformly as a question-with-outcomes card.

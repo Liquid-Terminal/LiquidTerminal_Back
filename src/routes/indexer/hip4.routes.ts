@@ -97,6 +97,7 @@ router.get(
           class: str(q.class),
           underlying: str(q.underlying),
           question_id: num(q.question_id),
+          outcome_id: num(q.outcome_id),
           limit: num(q.limit),
           offset: num(q.offset),
         }),

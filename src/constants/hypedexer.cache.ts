@@ -57,6 +57,11 @@ export const HYPEDEXER_TTL = {
   hip4BaseListRetry:      60,
   /** Enriched settlements (new rows only when a market settles). */
   hip4Settlements:        60,
+  /** One market's row, read for a deep link or a settlement outside the
+   * lists: a settled market no longer changes; an open one is re-read for
+   * its volume and settlement. */
+  hip4SettledMarket:   86400,
+  hip4OpenMarket:        300,
   /** Hyperliquid's HIP-4 template registry (not HypeDexer, free): a template
    * added upstream titles its markets within the hour. */
   hip4OutcomeTemplates: 3600,

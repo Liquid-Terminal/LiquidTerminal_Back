@@ -36,12 +36,13 @@ export const hip4SettlementsQuerySchema = z.object({
   params: z.object({}),
 });
 
-/** GET /hip4/markets-enriched */
+/** GET /hip4/markets-enriched (`outcome_id`: that one market, other filters ignored) */
 export const hip4MarketsEnrichedQuerySchema = z.object({
   query: z.object({
     class: optionalString,
     underlying: optionalString,
     question_id: optionalOutcomeId,
+    outcome_id: optionalOutcomeId,
     ...paginationShape,
   }),
   params: z.object({}),

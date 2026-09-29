@@ -10,6 +10,8 @@ import {
   enrichMarkets,
   enrichSettlements,
   buildQuestionsWithOutcomes,
+  isBareMarketRow,
+  toSideCoinMarket,
   type Hip4MarketEnriched,
   type Hip4QuestionWithOutcomes,
   type Hip4SettlementEnriched,
@@ -114,14 +116,27 @@ export class IndexerHip4Service {
    * Flat enriched markets, one Redis entry per param set. The key used to
    * ignore limit/offset, so whichever of `limit=500` (list page) or the default
    * 100 (detail page) filled it first answered both.
+   *
+   * `outcome_id` looks up that one market instead (other params ignored): the
+   * lists hold the oldest markets only (upstream order, no sort), so a deep
+   * link to any recent market needs it.
    */
   public async getMarketsEnriched(p: {
     class?: string;
     underlying?: string;
     question_id?: number;
+    outcome_id?: number;
     limit?: number;
     offset?: number;
   } = {}): Promise<Hip4MarketEnriched[]> {
+    if (p.outcome_id != null) {
+      const outcomeId = p.outcome_id;
+      return cacheService.getOrSet(
+        buildHypedexerCacheKey('hip4', 'markets-enriched', { outcome_id: outcomeId }),
+        () => this.assembleMarketByOutcomeId(outcomeId),
+        HYPEDEXER_TTL.staticList
+      );
+    }
     return cacheService.getOrSet(
       buildHypedexerCacheKey('hip4', 'markets-enriched', { ...p }),
       () => this.assembleEnrichedMarkets(p),
@@ -233,6 +248,46 @@ export class IndexerHip4Service {
       () => this.client.getAnalytics(q),
       hasFilter ? HYPEDEXER_TTL.hip4AnalyticsFiltered : HYPEDEXER_TTL.hip4Analytics,
     );
+  }
+
+  /**
+   * One market by id. `#X` is what Hyperliquid trades: side X % 10 of outcome
+   * floor(X / 10), whose row holds the market (X's own row is a bare
+   * placeholder). So a side-coin id reads its outcome's row (3 credits) and
+   * answers from side X. Any other id, or one without such an outcome, is
+   * read as an outcome itself.
+   */
+  private async assembleMarketByOutcomeId(outcomeId: number): Promise<Hip4MarketEnriched[]> {
+    const isSideCoin = outcomeId >= 10 && outcomeId % 10 <= 1;
+    const [parentRows, templates, midPrices] = await Promise.all([
+      isSideCoin ? this.fetchMarketRow(Math.floor(outcomeId / 10)) : Promise.resolve([]),
+      this.fetchOutcomeTemplates(),
+      this.fetchHlMidPrices(),
+    ]);
+    const parent = parentRows.find((m) => !isBareMarketRow(m));
+    if (parent) {
+      const [market] = enrichMarkets([parent], [], [], undefined, templates);
+      return [toSideCoinMarket(market, outcomeId % 10, midPrices)];
+    }
+    const own = (await this.fetchMarketRow(outcomeId)).filter((m) => !isBareMarketRow(m));
+    return enrichMarkets(own, [], [], midPrices, templates);
+  }
+
+  /**
+   * One outcome's raw row (repeats dropped), shared by deep links and
+   * settlements. Rows for other ids are dropped too, in case the filter is
+   * ever ignored upstream.
+   */
+  private async fetchMarketRow(outcomeId: number): Promise<RawHip4Market[]> {
+    const rows = await cacheService.getOrSet(
+      buildHypedexerCacheKey('hip4', 'market', { outcome_id: outcomeId }),
+      async () => {
+        const raw = await this.client.getMarkets<RawHip4Market[]>({ outcome_id: outcomeId });
+        return asArray<RawHip4Market>(raw).filter((m) => m.outcome_id === outcomeId).slice(0, 1);
+      },
+      marketRowTtl
+    );
+    return asArray<RawHip4Market>(rows);
   }
 
   /** Shared assembly pipeline used by both enriched endpoints. */
@@ -354,4 +409,12 @@ function asArray<T>(raw: unknown): T[] {
 /** An empty list is more likely an upstream hiccup than the truth: retry it sooner. */
 function baseListTtl(rows: unknown): number {
   return Array.isArray(rows) && rows.length > 0 ? HYPEDEXER_TTL.hip4BaseList : HYPEDEXER_TTL.hip4BaseListRetry;
+}
+
+/** A settled market's row is final; an open one changes; an unknown id may be a market about to be listed. */
+function marketRowTtl(rows: RawHip4Market[]): number {
+  if (rows.length === 0) return HYPEDEXER_TTL.hip4BaseListRetry;
+  return rows.some((m) => Boolean(m.settled ?? m.is_settled))
+    ? HYPEDEXER_TTL.hip4SettledMarket
+    : HYPEDEXER_TTL.hip4OpenMarket;
 }

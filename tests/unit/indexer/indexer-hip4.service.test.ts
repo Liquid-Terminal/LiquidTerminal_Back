@@ -37,6 +37,7 @@ jest.mock('../../../src/clients/hypedexer/rest/hip4/hip4.client', () => ({
 
 import { IndexerHip4Service } from '../../../src/services/indexer/indexer-hip4.service';
 import { HYPEDEXER_TTL } from '../../../src/constants/hypedexer.cache';
+import { OUTCOME_TEMPLATES } from '../utils/hip4-templates.fixture';
 
 const HOUR = 60 * 60 * 1000;
 const fill = (coin: string, ageMs: number) => ({ coin, px: 0.5, sz: 2, time_ms: Date.now() - ageMs, fee_usdc: 0 });
@@ -145,6 +146,112 @@ describe('IndexerHip4Service caching', () => {
 
     expect(big).toHaveLength(500);
     expect(small).toHaveLength(100);
+  });
+
+  describe('one market by outcome_id (deep links)', () => {
+    // Raw outcome 6024 on 2026-09-29: HL trades it as #60240 (Yes) / #60241 (No).
+    const hype6024 = {
+      outcome_id: 6024,
+      coin: '#6024',
+      name: 'Recurring',
+      description: 'class:priceBinary|underlying:HYPE|expiry:20260928-0600|targetPrice:93.017|period:1d',
+      class: 'priceBinary',
+      underlying: 'HYPE',
+      expiry: '20260928-0600',
+      target_price: 93.017,
+      period: '1d',
+      side_specs: '[{"name":"Yes"},{"name":"No"}]',
+      question_id: null,
+      settled: 1,
+      block_time: '2026-09-28T06:00:12.035000',
+      total_volume: 22068.45,
+    };
+    const bare60240 = { ...hype6024, outcome_id: 60240, coin: '#60240', name: '#60240', description: '', class: '', underlying: '', expiry: '', side_specs: '[]', settled: 0 };
+
+    it('answers a traded side coin from its outcome row, read once for both sides', async () => {
+      mockClient.getMarkets.mockImplementation(async ({ outcome_id }: { outcome_id?: number }) =>
+        outcome_id === 6024 ? [hype6024, hype6024, hype6024] : []
+      );
+
+      const [yes] = await svc.getMarketsEnriched({ outcome_id: 60240 });
+      const [no] = await svc.getMarketsEnriched({ outcome_id: 60241 });
+
+      expect(mockClient.getMarkets).toHaveBeenCalledTimes(1);
+      expect(mockClient.getMarkets).toHaveBeenCalledWith({ outcome_id: 6024 });
+      expect(yes).toMatchObject({
+        outcome_id: 60240,
+        coin: '#60240',
+        side: 0,
+        side_name: 'Yes',
+        display_name: 'HYPE above 93.017 on Sep 28 at 6:00 AM UTC?',
+        underlying: 'HYPE',
+        target_price: 93.017,
+        is_settled: true,
+        settled_at: '2026-09-28T06:00:12.035000Z',
+        total_volume: 22068.45,
+      });
+      expect(no).toMatchObject({ outcome_id: 60241, coin: '#60241', side: 1, side_name: 'No' });
+      expect(storedTtl('hypedexer:hip4:market:{"outcome_id":6024}')).toBe(HYPEDEXER_TTL.hip4SettledMarket);
+    });
+
+    it('keeps an open market for minutes, not a day', async () => {
+      mockClient.getMarkets.mockResolvedValue([{ ...hype6024, settled: 0 }]);
+      await svc.getMarketsEnriched({ outcome_id: 60240 });
+      expect(storedTtl('hypedexer:hip4:market:{"outcome_id":6024}')).toBe(HYPEDEXER_TTL.hip4OpenMarket);
+    });
+
+    it('reads an id that is not a side coin as an outcome', async () => {
+      mockClient.getMarkets.mockImplementation(async ({ outcome_id }: { outcome_id?: number }) =>
+        outcome_id === 6024 ? [hype6024] : []
+      );
+      const rows = await svc.getMarketsEnriched({ outcome_id: 6024 });
+      expect(mockClient.getMarkets).toHaveBeenCalledTimes(1);
+      expect(mockClient.getMarkets).toHaveBeenCalledWith({ outcome_id: 6024 });
+      expect(rows).toEqual([expect.objectContaining({ outcome_id: 6024, side: null })]);
+    });
+
+    it('answers nothing for an unknown id or a lone placeholder, and asks again soon', async () => {
+      mockClient.getMarkets.mockImplementation(async ({ outcome_id }: { outcome_id?: number }) =>
+        outcome_id === 60240 ? [bare60240] : []
+      );
+      expect(await svc.getMarketsEnriched({ outcome_id: 60240 })).toEqual([]);
+      expect(storedTtl('hypedexer:hip4:market:{"outcome_id":6024}')).toBe(HYPEDEXER_TTL.hip4BaseListRetry);
+    });
+
+    it('drops rows for other ids if the filter is ignored upstream', async () => {
+      mockClient.getMarkets.mockResolvedValue([{ ...hype6024, outcome_id: 1 }, { ...hype6024, outcome_id: 2 }]);
+      expect(await svc.getMarketsEnriched({ outcome_id: 60240 })).toEqual([]);
+    });
+
+    it('titles a templated market from the registry', async () => {
+      fetchSpy.mockImplementation(async (_url: unknown, init?: { body?: string }) => ({
+        ok: true,
+        json: async () => (JSON.parse(init?.body ?? '{}').type === 'outcomeTemplates' ? OUTCOME_TEMPLATES : {}),
+      }) as Response);
+      mockClient.getMarkets.mockResolvedValue([{
+        ...hype6024,
+        outcome_id: 6537,
+        coin: '#6537',
+        name: 'template:binaryPrice',
+        description: 'perp:HYPE|priceDescription:HYPE-USDC perp mark|seconds:60|threshold:86.859|time:20260928-2245',
+        class: '',
+        underlying: '',
+        expiry: '',
+        target_price: 0,
+        side_specs: '[{"name":"template:Yes"},{"name":"template:No"}]',
+      }]);
+
+      const [m] = await svc.getMarketsEnriched({ outcome_id: 65371 });
+
+      expect(m).toMatchObject({
+        outcome_id: 65371,
+        side_name: 'No',
+        display_name: 'HYPE above 86.859 at Sep 28, 10:45 PM UTC?',
+        class: 'priceBinary',
+        target_price: 86.859,
+      });
+      expect(storedTtl('hyperliquid:hip4:outcome-templates')).toBe(HYPEDEXER_TTL.hip4OutcomeTemplates);
+    });
   });
 
   it('retries an empty metadata list sooner than a populated one', async () => {

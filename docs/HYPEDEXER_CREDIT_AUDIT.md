@@ -111,7 +111,11 @@ Status 2026-09-28: every item below is done unless marked otherwise. Results in 
   - Kept on HypeDexer: `/liquidations?user=`, because the DB only holds liquidations since its ingestion started (a wallet's older ones would vanish from the address digest). It is cached 5 min now (was uncached, polled every 60 s).
   - Not changed: `/explorer/liquidations`'s initial `limit=1000&hours=2`, once per visit, shared 15 s.
 - [x] **P1.2 `daily-pnl-10d`.** 1 h.
-- [~] **P1.3 HIP-4 base lists.** Shared 10 min cache for markets / outcome-tokens / questions, keyed on every param (60 s when upstream answers empty); `markets-enriched` and `questions-with-outcomes` keyed on `limit`/`offset` too. **Truncation not fixed**, see §8 "Decisions left".
+- [x] **P1.3 HIP-4 base lists.** Shared 10 min cache for markets / outcome-tokens / questions, keyed on every param (60 s when upstream answers empty); `markets-enriched` and `questions-with-outcomes` keyed on `limit`/`offset` too. Truncation (option B, 2026-09-29): the lists stay the oldest markets, and what needs a recent one reads it by id instead of walking the list.
+  - Deep links: `markets-enriched?outcome_id=X` answers one market. `#X` is side `X % 10` of outcome `floor(X / 10)`, whose row holds the market (the side coin's own row is a bare placeholder), so it reads that row: 3 credits, kept 24 h once settled, 5 min while open, shared by both sides. The detail page looks a coin up when it is not in the live list (and a question-bound market's question through `questions-with-outcomes?question_id=`) instead of redirecting to `/market/hip4`.
+  - Settlements: each market missing from the metadata list is read the same way (≤ 50 per page, 4 at a time); the list page's 50 rows are ~17 markets.
+  - Names: markets deployed from a Hyperliquid template (`template:binaryPrice`, `perp:HYPE|…|threshold:…|time:…`, sides `template:Yes` / `template:{shortNameA}`) are titled from Hyperliquid's free `outcomeTemplates` registry (back 1 h, front 1 h), price templates get class / underlying / strike / expiry, recurring price buckets their ranges; the live grid groups outcomeMeta's questions into one card each.
+  - Cost: ~3 credits per market opened or settled, once (settled rows are kept a day).
 - [x] **P1.4 HIP-4 volumes.** Done without a new endpoint: coin-filtered `/hip4/analytics` is cached 5 min, and the volume fan-out sends the same coin chunks for every visitor. Coin-filtered fills: P0.7. The unfiltered analytics key now includes `limit`.
 - [x] **P1.5 Other short shared caches.** hip3 fills 15 s, snapshots 60 s, stats/traders 120 s; completed-trades list + summary 60 s; analytics stats 60 s; evm blocks with params 15 s; twaps list 60 s; builders/top for every limit (60 s, was 30 s and limit 25 only).
 - [x] **P1.6 Front cache-friendly keys.** Biggest-trade `start_time` floored to the minute (was millisecond-unique); HubLanes asks `limit=200` like the other HIP-4 callers; the `BridgeTransfers` window moves with each poll (was frozen at mount). Top-traders callers already all ask ≤ 50 (served by the poller). Vault ledger limits left alone (cached 1 h while empty).
@@ -135,7 +139,7 @@ Status 2026-09-28: every item below is done unless marked otherwise. Results in 
 ## 6. Correctness bugs found during the audit (not credit issues)
 
 - `/vaults/vaultLedger` always returns `[]`, even for HLP. The outflows leaderboard and the vault ledger table/charts are empty. *(Upstream; still true 2026-09-28.)*
-- HIP-4 lists are truncated at 100 rows, the upstream default (max 1000): there are 342 questions, ≥1000 outcome tokens and 13 642 markets (16 206 on 2026-09-28). *(Open, see §8.)*
+- HIP-4 lists are truncated at 100 rows, the upstream default (max 1000): there are 342 questions, ≥1000 outcome tokens and 13 642 markets (16 206 on 2026-09-28). *(Worked around 2026-09-29: targeted reads, P1.3.)*
   - `markets-enriched` caches without `limit` in the key. Depending on who filled the cache (100 or 500 rows), a deep link to a non-live market redirects to `/market/hip4`. This was observed during the audit. *(Fixed 2026-09-28: every enriched key carries every param.)*
 - Liquidations backfill fetches **1 page per run** (observed): `has_more`/`next_cursor` are lost by the envelope unwrap (`utils/hypedexer-api-response.util.ts`), so `GET /liquidations` also always answers `has_more:false`. *(Open.)*
 - Several backend cache keys ignore filters, so the wrong data can be served. This comes from static analysis and was not verified one by one. *(Fixed 2026-09-28 for every item below: the user-scoped keys take the filters, `withFilters()` in `constants/hypedexer.cache.ts`.)* Affected:
@@ -149,6 +153,12 @@ Status 2026-09-28: every item below is done unless marked otherwise. Results in 
   - vault user equities
   - mixed-case addresses create duplicate keys *(only normalised where HypeDexer was checked case-insensitive: vault reads, funding summary)*
 - `cacheService.getOrSet` re-runs `fetchFn` on failure for the leader and every waiter. Errors are free, but fan-outs rerun in full. *(Open.)*
+- HIP-4 enrichment, found while doing P1.3 *(fixed 2026-09-29)*:
+  - HypeDexer sends `settled` (0/1), not `is_settled`: every market read as open, so most questions stayed "live" (29 of the oldest 69 are settled). Its times are UTC without a zone, now sent with `Z`.
+  - Rows 10–99 inherited empty fields from outcome `floor(id / 10)`, titling a bucket question's outcomes "BTC above 0 on May 4". Each row is its own market now; a row's side is never read from its id's last digit.
+  - A question's outcomes were all named after the question ("2026 World Cup Champion" × 49): they carry their own names ("Algeria", "Draw", "Below 4.3%").
+  - Filtered reads (`?outcome_id=`, `?question_id=`) return each row up to three times: one row per outcome now.
+  - Front: a non-live market's card linked to the indexer's raw label `#<raw>`, which is another market's coin (`#20` is outcome 2's Yes side, with its fills). Cards link to `#<10*raw>`.
 
 ## 7. How to re-measure (do it after each fix batch)
 
@@ -212,6 +222,6 @@ This re-measure cost 9.9k credits (677 calls).
 
 ### Decisions left
 
-- **HIP-4 truncation (P1.3).** HypeDexer ignores every sort/filter param on `/hip4/markets` (checked: `order`, `sort_dir`, `sort`, `settled`, `is_settled`) and orders by `outcome_id` ascending, so the enriched lists hold the *oldest* 100–500 markets (May 2026); live markets come from Hyperliquid's `outcomeMeta`. A full walk is 17 pages ≈ 1.7k credits per refresh (16 206 markets, growing). Cheaper options: the most recent N via `offset = total − N` (`total` costs a 3-credit `limit=1` call), and a targeted `/hip4/markets?outcome_id=` for deep links.
+- ~~**HIP-4 truncation (P1.3).**~~ Decided 2026-09-29: targeted `/hip4/markets?outcome_id=` reads (option B, see P1.3). HypeDexer ignores every sort param on `/hip4/markets` (checked: `order`, `sort_dir`, `sort`, `settled`, `is_settled`) and orders by `outcome_id` ascending, but honors the `outcome_id` and `question_id` filters (3 credits a market). A full walk would be 17 pages ≈ 1.7k credits per refresh (16 506 markets on 2026-09-29, +450–850 a day).
 - **P2.5 `allFills`** and **P2.4** (separate effort).
 

@@ -254,6 +254,73 @@ describe('IndexerHip4Service caching', () => {
     });
   });
 
+  describe('settlement names', () => {
+    const settlement = (outcome_id: number) => ({ outcome_id, settle_fraction: 0, details: 'price:89.0163', block_time: '2026-09-28T06:00:14.527538' });
+    const hype6024 = {
+      outcome_id: 6024,
+      coin: '#6024',
+      name: 'Recurring',
+      description: 'class:priceBinary|underlying:HYPE|expiry:20260928-0600|targetPrice:93.017|period:1d',
+      class: 'priceBinary',
+      underlying: 'HYPE',
+      expiry: '20260928-0600',
+      target_price: 93.017,
+      side_specs: '[{"name":"Yes"},{"name":"No"}]',
+      question_id: null,
+      settled: 1,
+    };
+
+    beforeEach(() => {
+      mockClient.getOutcomeTokens.mockResolvedValue([]);
+      mockClient.getQuestions.mockResolvedValue([]);
+    });
+
+    it('reads each market missing from the metadata list once, and names its settlement', async () => {
+      // The list holds outcome 10 only; the settlements page is about 6024 (three broadcasters).
+      mockClient.getMarkets.mockImplementation(async (p: { outcome_id?: number }) =>
+        p.outcome_id === 6024 ? [hype6024] : p.outcome_id == null ? [{ ...hype6024, outcome_id: 10, coin: '#10' }] : []
+      );
+      mockClient.getSettlements.mockResolvedValue([settlement(6024), settlement(6024), settlement(6024), settlement(10)]);
+
+      const rows = await svc.getSettlements({ limit: 50 });
+
+      expect(mockClient.getMarkets).toHaveBeenCalledWith({ outcome_id: 6024 });
+      expect(mockClient.getMarkets).toHaveBeenCalledTimes(2); // the list + 6024
+      expect(rows.find((s) => s.outcome_id === 6024)).toMatchObject({
+        question_name: 'HYPE above 93.017 on Sep 28 at 6:00 AM UTC?',
+        winner_name: 'No',
+        coin: '#6024',
+      });
+
+      // The next assembly (settlements expired) reuses the market's row.
+      mockRedis.store.delete([...mockRedis.store.keys()].find((k) => k.startsWith('hypedexer:hip4:settlements'))!);
+      await svc.getSettlements({ limit: 50 });
+      expect(mockClient.getMarkets).toHaveBeenCalledTimes(2);
+    });
+
+    it('leaves a settlement unnamed when its market cannot be read', async () => {
+      mockClient.getMarkets.mockImplementation(async (p: { outcome_id?: number }) => {
+        if (p.outcome_id != null) throw new Error('Circuit breaker is open');
+        return [];
+      });
+      mockClient.getSettlements.mockResolvedValue([settlement(6024)]);
+
+      const [row] = await svc.getSettlements({ limit: 50 });
+
+      expect(row).toMatchObject({ outcome_id: 6024, question_name: null, winner_name: 'No' });
+    });
+
+    it('reads at most 50 markets for one page', async () => {
+      mockClient.getMarkets.mockResolvedValue([]);
+      mockClient.getSettlements.mockResolvedValue(Array.from({ length: 80 }, (_, i) => settlement(7000 + i)));
+
+      await svc.getSettlements({ limit: 80 });
+
+      const lookups = mockClient.getMarkets.mock.calls.filter(([p]) => p?.outcome_id != null);
+      expect(lookups).toHaveLength(50);
+    });
+  });
+
   it('retries an empty metadata list sooner than a populated one', async () => {
     mockClient.getMarkets.mockResolvedValue([]);
     mockClient.getOutcomeTokens.mockResolvedValue([]);

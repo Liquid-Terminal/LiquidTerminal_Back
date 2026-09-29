@@ -26,6 +26,24 @@ type Hip4FillsQuery = NonNullable<Parameters<HypeDexerHip4Client['getFills']>[0]
 
 const HOUR_MS = 60 * 60 * 1000;
 const HL_INFO_URL = 'https://api.hyperliquid.xyz/info';
+/** Markets read one by one to name a settlements page (the list page asks 50 rows, ~17 markets). */
+const SETTLEMENT_LOOKUP_CAP = 50;
+const SETTLEMENT_LOOKUP_CONCURRENCY = 4;
+
+/** Run `fn` over `items`, at most `limit` in flight, preserving order. */
+async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    for (;;) {
+      const i = cursor++;
+      if (i >= items.length) return;
+      results[i] = await fn(items[i]);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
 
 /**
  * How long a market's fills stay cached, from the age of its newest fill. An
@@ -208,8 +226,18 @@ export class IndexerHip4Service {
       this.fetchHlMidPrices(),
       this.fetchOutcomeTemplates(),
     ]);
-    const enrichedMarkets = enrichMarkets(markets, outcomeTokens, questions, midPrices, templates);
-    const all = enrichSettlements(asArray(raw), enrichedMarkets, questions);
+    const settlements = asArray<RawHip4Settlement>(raw);
+    // The metadata list holds the oldest markets, the settlements are the
+    // newest: read each missing market's row (3 credits, kept a day once settled).
+    const listed = new Set(markets.map((m) => m.outcome_id));
+    const missing = [...new Set(settlements.map((s) => s.outcome_id))]
+      .filter((id) => !listed.has(id))
+      .slice(0, SETTLEMENT_LOOKUP_CAP);
+    const lookedUp = await mapWithConcurrency(missing, SETTLEMENT_LOOKUP_CONCURRENCY, (id) =>
+      this.fetchMarketRow(id).catch((): RawHip4Market[] => [])
+    );
+    const enrichedMarkets = enrichMarkets([...markets, ...lookedUp.flat()], outcomeTokens, questions, midPrices, templates);
+    const all = enrichSettlements(settlements, enrichedMarkets, questions);
     // Deduplicate: multiple broadcaster records per outcome → keep latest (highest block_time).
     const seen = new Map<number, Hip4SettlementEnriched>();
     for (const s of all) {

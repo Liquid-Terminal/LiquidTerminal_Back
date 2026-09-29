@@ -18,10 +18,12 @@ import {
   type RawHip4Question,
   type RawHip4Settlement,
 } from '../../utils/hip4-enrichment.util';
+import { indexOutcomeTemplates, type Hip4TemplateIndex } from '../../utils/hip4-market-names.util';
 
 type Hip4FillsQuery = NonNullable<Parameters<HypeDexerHip4Client['getFills']>[0]>;
 
 const HOUR_MS = 60 * 60 * 1000;
+const HL_INFO_URL = 'https://api.hyperliquid.xyz/info';
 
 /**
  * How long a market's fills stay cached, from the age of its newest fill. An
@@ -138,13 +140,14 @@ export class IndexerHip4Service {
     offset?: number;
   } = {}): Promise<Hip4QuestionWithOutcomes[]> {
     const compute = async (): Promise<Hip4QuestionWithOutcomes[]> => {
-      const [markets, outcomeTokens, questions, midPrices] = await Promise.all([
+      const [markets, outcomeTokens, questions, midPrices, templates] = await Promise.all([
         this.fetchRawMarkets(p.question_id != null ? { question_id: p.question_id, limit: p.limit, offset: p.offset } : { limit: p.limit, offset: p.offset }),
         this.fetchRawOutcomeTokens(),
         this.fetchRawQuestions(p.question_id != null ? { question_id: p.question_id } : {}),
         this.fetchHlMidPrices(),
+        this.fetchOutcomeTemplates(),
       ]);
-      const enriched = enrichMarkets(markets, outcomeTokens, questions, midPrices);
+      const enriched = enrichMarkets(markets, outcomeTokens, questions, midPrices, templates);
       return buildQuestionsWithOutcomes(enriched, questions);
     };
 
@@ -182,14 +185,15 @@ export class IndexerHip4Service {
     limit?: number;
     offset?: number;
   }): Promise<Hip4SettlementEnriched[]> {
-    const [raw, markets, outcomeTokens, questions, midPrices] = await Promise.all([
+    const [raw, markets, outcomeTokens, questions, midPrices, templates] = await Promise.all([
       this.client.getSettlements<RawHip4Settlement[]>(p),
       this.fetchRawMarkets(),
       this.fetchRawOutcomeTokens(),
       this.fetchRawQuestions(),
       this.fetchHlMidPrices(),
+      this.fetchOutcomeTemplates(),
     ]);
-    const enrichedMarkets = enrichMarkets(markets, outcomeTokens, questions, midPrices);
+    const enrichedMarkets = enrichMarkets(markets, outcomeTokens, questions, midPrices, templates);
     const all = enrichSettlements(asArray(raw), enrichedMarkets, questions);
     // Deduplicate: multiple broadcaster records per outcome → keep latest (highest block_time).
     const seen = new Map<number, Hip4SettlementEnriched>();
@@ -239,19 +243,51 @@ export class IndexerHip4Service {
     limit?: number;
     offset?: number;
   }): Promise<Hip4MarketEnriched[]> {
-    const [markets, outcomeTokens, questions, midPrices] = await Promise.all([
+    const [markets, outcomeTokens, questions, midPrices, templates] = await Promise.all([
       this.fetchRawMarkets(p),
       this.fetchRawOutcomeTokens(),
       this.fetchRawQuestions(),
       this.fetchHlMidPrices(),
+      this.fetchOutcomeTemplates(),
     ]);
-    return enrichMarkets(markets, outcomeTokens, questions, midPrices);
+    return enrichMarkets(markets, outcomeTokens, questions, midPrices, templates);
+  }
+
+  /**
+   * Hyperliquid's template registry, shared for an hour. Markets deployed
+   * from a template are named `template:binaryPrice` & co.: the registry holds
+   * their title and rules formats. A failed read titles them from their
+   * structured fields (or coin) and is retried after a minute.
+   */
+  private async fetchOutcomeTemplates(): Promise<Hip4TemplateIndex> {
+    const raw = await cacheService.getOrSet(
+      HYPEDEXER_HIP4_CACHE_KEY.outcomeTemplates,
+      () => this.fetchHlOutcomeTemplates(),
+      (rows) => (rows.length > 0 ? HYPEDEXER_TTL.hip4OutcomeTemplates : HYPEDEXER_TTL.hip4BaseListRetry)
+    );
+    return indexOutcomeTemplates(raw);
+  }
+
+  private async fetchHlOutcomeTemplates(): Promise<unknown[]> {
+    try {
+      const resp = await fetch(HL_INFO_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'outcomeTemplates' }),
+        signal: AbortSignal.timeout(5000),
+      });
+      if (!resp.ok) return [];
+      const data: unknown = await resp.json();
+      return Array.isArray(data) ? data : [];
+    } catch {
+      return [];
+    }
   }
 
   /** Fetch live mid prices for all HIP-4 coins (#N) from HL allMids. */
   private async fetchHlMidPrices(): Promise<Map<string, number>> {
     try {
-      const resp = await fetch('https://api.hyperliquid.xyz/info', {
+      const resp = await fetch(HL_INFO_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type: 'allMids' }),

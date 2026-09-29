@@ -1,8 +1,14 @@
 import {
+  buildQuestionsWithOutcomes,
   enrichMarkets,
   enrichSettlements,
   type RawHip4Market,
+  type RawHip4Question,
 } from '../../../src/utils/hip4-enrichment.util';
+import { indexOutcomeTemplates } from '../../../src/utils/hip4-market-names.util';
+import { OUTCOME_TEMPLATES } from './hip4-templates.fixture';
+
+const templates = indexOutcomeTemplates(OUTCOME_TEMPLATES);
 
 /** A raw `/hip4/markets` row as HypeDexer sends it today (2026-09). */
 function row(fields: Partial<RawHip4Market> & { outcome_id: number }): RawHip4Market {
@@ -79,6 +85,147 @@ describe('enrichMarkets — each row is its own market', () => {
     const [m] = enrichMarkets([{ ...btc1, outcome_id: 20, coin: '#20' }], [], []);
     expect(m.side).toBeNull();
     expect(m.short_name).toBe('BTC');
+  });
+});
+
+describe('enrichMarkets — names', () => {
+  // Real rows (2026-09-29), trimmed.
+  const hype6537 = row({
+    outcome_id: 6537,
+    name: 'template:binaryPrice',
+    description: 'perp:HYPE|priceDescription:HYPE-USDC perp mark|seconds:60|threshold:86.859|time:20260928-2245',
+    side_specs: '[{"name":"template:Yes"},{"name":"template:No"}]',
+    target_price: 0,
+  });
+  const nationsLeague =
+    'competition:UEFA Nations League|contestType:Match|participantA:Belgium|participantB:Turkiye|scheduledStart:20261002-1845|sport:Soccer|stage:League A, Matchday 3';
+  const belgium6520 = row({
+    outcome_id: 6520,
+    question_id: 357,
+    name: 'template:sportsContestParticipant2',
+    description: 'participant:Belgium',
+    target_price: 0,
+    question_name: 'template:sportsContestResult',
+    question_description: nationsLeague,
+  });
+  const draw6521 = { ...belgium6520, outcome_id: 6521, coin: '#6521', name: 'template:sportsContestDraw2', description: '' };
+  const fallback6519 = { ...belgium6520, outcome_id: 6519, coin: '#6519', name: 'template fallback', description: 'other' };
+  const eagles4667 = row({
+    outcome_id: 4667,
+    name: 'template:sportsContestWinner',
+    description:
+      'competition:NFL|contestType:game|participantA:Philadelphia Eagles|participantB:Chicago Bears|shortNameA:Eagles|shortNameB:Bears|sport:football|stage:Regular Season',
+    side_specs: '[{"name":"template:{shortNameA}"},{"name":"template:{shortNameB}"}]',
+  });
+
+  it('titles a templated price market and gives it the fields of a priceBinary', () => {
+    const [m] = enrichMarkets([hype6537], [], [], undefined, templates);
+    expect(m).toMatchObject({
+      display_name: 'HYPE above 86.859 at Sep 28, 10:45 PM UTC?',
+      class: 'priceBinary',
+      underlying: 'HYPE',
+      target_price: 86.859,
+      expiry: '20260928-2245',
+      parsed_sides: [{ name: 'Yes' }, { name: 'No' }],
+    });
+    expect(m.question_description).toMatch(/^The market resolves to Yes if the HYPE price is above 86.859/);
+  });
+
+  it('still titles a templated price market when the registry is unavailable', () => {
+    const [m] = enrichMarkets([hype6537], [], []);
+    expect(m.display_name).toBe('HYPE above 86.859 on Sep 28 at 10:45 PM UTC?');
+    expect(m.parsed_sides).toEqual([{ name: 'Yes' }, { name: 'No' }]);
+  });
+
+  it("names a question's outcomes after themselves and titles the question", () => {
+    const rows = enrichMarkets([fallback6519, belgium6520, draw6521], [], [], undefined, templates);
+    expect(rows.map((m) => m.display_name)).toEqual(['Other', 'Belgium', 'Draw']);
+    expect(rows.every((m) => m.question_name === 'UEFA Nations League League A, Matchday 3: Belgium v Turkiye')).toBe(true);
+    expect(rows[1].target_price).toBeNull();
+
+    const [q] = buildQuestionsWithOutcomes(rows, []);
+    expect(q.title).toBe('UEFA Nations League League A, Matchday 3: Belgium v Turkiye');
+    expect(q.outcomes.map((o) => o.display_name)).toEqual(['Other', 'Belgium', 'Draw']);
+  });
+
+  it('names templated sides after the teams', () => {
+    const [m] = enrichMarkets([eagles4667], [], [], undefined, templates);
+    expect(m.parsed_sides).toEqual([{ name: 'Eagles' }, { name: 'Bears' }]);
+    expect(m.display_name).toBe('NFL Regular Season: Philadelphia Eagles v Chicago Bears');
+  });
+
+  it('names legacy question outcomes after themselves, not after the question', () => {
+    const q32: RawHip4Question = {
+      question_id: 32,
+      name: '2026 World Cup Champion',
+      description: 'Each associated outcome…',
+      fallback_outcome: 170,
+      named_outcomes: [171, 172],
+      settled_named_outcomes: [],
+    };
+    const rows = enrichMarkets(
+      [
+        row({ outcome_id: 170, question_id: 32, name: 'Fallback' }),
+        row({ outcome_id: 171, question_id: 32, name: 'Algeria' }),
+        row({ outcome_id: 172, question_id: 32, name: 'Argentina' }),
+      ],
+      [],
+      [q32]
+    );
+    expect(rows.map((m) => m.display_name)).toEqual(['Fallback', 'Algeria', 'Argentina']);
+    expect(buildQuestionsWithOutcomes(rows, [q32])[0].title).toBe('2026 World Cup Champion');
+  });
+
+  it('names the ranges of a recurring price-bucket question', () => {
+    const q1: RawHip4Question = {
+      question_id: 1,
+      name: 'Recurring',
+      description: 'class:priceBucket|underlying:BTC|expiry:20260509-0600|priceThresholds:77991,81174|period:1d',
+      fallback_outcome: 11,
+      named_outcomes: [12, 13, 14],
+      settled_named_outcomes: [],
+    };
+    const rows = enrichMarkets(
+      [
+        row({ outcome_id: 11, question_id: 1, name: 'Recurring Fallback', description: 'other' }),
+        row({ outcome_id: 12, question_id: 1, name: 'Recurring Named Outcome', description: 'index:0' }),
+        row({ outcome_id: 13, question_id: 1, name: 'Recurring Named Outcome', description: 'index:1' }),
+        row({ outcome_id: 14, question_id: 1, name: 'Recurring Named Outcome', description: 'index:2' }),
+      ],
+      [],
+      [q1]
+    );
+    expect(rows.map((m) => m.display_name)).toEqual(['Recurring Fallback', 'BTC < 77,991', 'BTC 77,991–81,174', 'BTC ≥ 81,174']);
+    expect(rows[1]).toMatchObject({ class: 'priceBucket', underlying: 'BTC', expiry: '20260509-0600', target_price: null });
+    expect(buildQuestionsWithOutcomes(rows, [q1])[0].title).toBe('BTC price at May 9, 6:00 AM UTC');
+  });
+});
+
+describe('enrichSettlements — names', () => {
+  it('names a settlement after its market, rendered from the template', () => {
+    const market = row({
+      outcome_id: 6537,
+      name: 'template:binaryPrice',
+      description: 'perp:HYPE|priceDescription:HYPE-USDC perp mark|seconds:60|threshold:86.859|time:20260928-2245',
+      side_specs: '[{"name":"template:Yes"},{"name":"template:No"}]',
+      settled: 1,
+    });
+    const enriched = enrichMarkets([market], [], [], undefined, templates);
+    const [s] = enrichSettlements([{ outcome_id: 6537, settle_fraction: 1, block_time: '2026-09-28T22:45:10' }], enriched, []);
+    expect(s).toMatchObject({ question_name: 'HYPE above 86.859 at Sep 28, 10:45 PM UTC?', winner_name: 'Yes', coin: '#6537' });
+  });
+
+  it('never shows a raw template or placeholder as the question name', () => {
+    const enriched = enrichMarkets(
+      [row({ outcome_id: 6520, question_id: 357, name: 'template:sportsContestParticipant2', description: 'participant:Belgium', question_name: 'template:sportsContestResult', question_description: '' })],
+      [],
+      [{ question_id: 357, name: 'template:sportsContestResult', description: '', fallback_outcome: 6519, named_outcomes: [6520], settled_named_outcomes: [] }],
+      undefined,
+      templates
+    );
+    const [s] = enrichSettlements([{ outcome_id: 6520, settle_fraction: 1, block_time: '2026-10-02T21:00:00' }], enriched, []);
+    // The question's keywords are missing here: fall back to the outcome's own name.
+    expect(s.question_name).toBe('Belgium');
   });
 });
 

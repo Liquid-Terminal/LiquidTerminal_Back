@@ -5,6 +5,22 @@
  * No I/O, no caching — just shape transformations.
  */
 
+import {
+  EMPTY_TEMPLATE_INDEX,
+  isPlaceholderName,
+  isTemplateFallbackName,
+  priceBucketExpiry,
+  priceBucketOutcomeName,
+  priceBucketQuestionTitle,
+  priceBucketUnderlying,
+  renderSideName,
+  renderTemplateRules,
+  renderTemplateTitle,
+  templateIdOf,
+  templatePriceFields,
+  type Hip4TemplateIndex,
+} from './hip4-market-names.util';
+
 export interface RawHip4Market {
   outcome_id: number;
   question_id: number | null;
@@ -32,6 +48,9 @@ export interface RawHip4Market {
   period?: string | null;
   target_price?: number | null;
   description?: string | null;
+  /** The row's question, inlined by HypeDexer ("" when standalone). */
+  question_name?: string | null;
+  question_description?: string | null;
 }
 
 export interface RawHip4Question {
@@ -196,13 +215,16 @@ export function normalizeClass(raw: string | null | undefined): string {
 
 /**
  * Pick the best user-facing name from all available sources, in priority order:
- * 1. priceBinary fields → human-readable "BTC above 78,213 on May 3 at 6:00 AM UTC?"
+ * 1. Title rendered from the market's template → "HYPE above 90.416 at Sep 28, 12:00 PM UTC?", "Belgium"
+ * 2. priceBinary fields → human-readable "BTC above 78,213 on May 3 at 6:00 AM UTC?"
  *    (tokenName is intentionally skipped — spot_name = "USDC" is the quote token, not the market)
- * 2. Named side from parsed side_specs at the market's side index (multi-outcome custom markets)
- * 3. Question name (markets bound to a question)
- * 4. Outcome token spot_name (HIP-4 token registry, for non-priceBinary only)
- * 5. Market.name (HypeDexer's own label, often "Recurring")
- * 6. Market.coin as last-resort identifier (e.g. "#50790")
+ * 3. Price range of a price-bucket outcome → "BTC 77,991–81,174"
+ * 4. Named side from parsed side_specs at the market's side index (multi-outcome custom markets)
+ * 5. The market's own name when it is one (a question's outcomes: "Algeria", "Draw", "Fallback")
+ * 6. Question name (outcomes named after a deployer placeholder)
+ * 7. Outcome token spot_name (HIP-4 token registry, for non-priceBinary only)
+ * 8. Market.name (HypeDexer's own label), unless "Recurring" or a template reference
+ * 9. Market.coin as last-resort identifier (e.g. "#50790")
  */
 export function deriveDisplayName(params: {
   parsedSides: ParsedSide[] | null;
@@ -215,19 +237,51 @@ export function deriveDisplayName(params: {
   underlying?: string | null;
   targetPrice?: number | null;
   expiry?: string | null;
+  templateTitle?: string | null;
+  bucketName?: string | null;
 }): string {
   const { parsedSides, side, questionName, tokenName, marketName, coin, cls, underlying, targetPrice, expiry } = params;
 
+  if (params.templateTitle) return params.templateTitle;
   if (cls === 'priceBinary' && underlying && targetPrice != null) {
     return formatPriceBinaryTitle(underlying, targetPrice, expiry);
   }
+  if (params.bucketName) return params.bucketName;
   if (parsedSides && side != null && parsedSides[side]?.name) {
     return parsedSides[side].name;
   }
+  if (marketName && !isPlaceholderName(marketName, coin)) return marketName.trim();
   if (questionName && questionName.trim()) return questionName;
   if (tokenName && tokenName.trim()) return tokenName;
-  if (marketName && marketName.trim() && marketName.trim() !== 'Recurring') return marketName;
+  if (
+    marketName && marketName.trim() && marketName.trim() !== 'Recurring' &&
+    !templateIdOf(marketName) && !isTemplateFallbackName(marketName)
+  ) {
+    return marketName;
+  }
   return coin ?? '';
+}
+
+/**
+ * A question's title: rendered from its template, a price-bucket title, or
+ * its own name. Null for a template that cannot be rendered.
+ */
+function questionTitle(
+  name: string | null | undefined,
+  description: string | null | undefined,
+  templates: Hip4TemplateIndex
+): string | null {
+  const rendered = renderTemplateTitle(name, description, templates) ?? priceBucketQuestionTitle(description);
+  if (rendered) return rendered;
+  const n = (name ?? '').trim();
+  if (!n || templateIdOf(n) || isTemplateFallbackName(n)) return null;
+  return n;
+}
+
+/** Side names with templates rendered (`template:{shortNameA}` → "Eagles"). */
+function renderSides(sides: ParsedSide[] | null, description: string | null | undefined): ParsedSide[] | null {
+  if (!sides) return null;
+  return sides.map((s, i) => ({ name: renderSideName(s.name, description) ?? `Side ${i + 1}` }));
 }
 
 function indexOutcomeTokens(tokens: RawHip4OutcomeToken[]): Map<number, RawHip4OutcomeToken> {
@@ -268,31 +322,51 @@ function uniqueByOutcomeId(markets: RawHip4Market[]): RawHip4Market[] {
   });
 }
 
-/** Left-join markets with outcome_tokens + questions and derive display fields. */
+/**
+ * Left-join markets with outcome_tokens + questions and derive display fields.
+ * `templates` (Hyperliquid's registry) titles the markets deployed from a
+ * template; without it they fall back to their structured fields or coin.
+ */
 export function enrichMarkets(
   rawMarkets: RawHip4Market[],
   outcomeTokens: RawHip4OutcomeToken[],
   questions: RawHip4Question[],
-  midPrices?: Map<string, number>
+  midPrices?: Map<string, number>,
+  templates: Hip4TemplateIndex = EMPTY_TEMPLATE_INDEX
 ): Hip4MarketEnriched[] {
   const markets = uniqueByOutcomeId(rawMarkets);
   const tokenIdx = indexOutcomeTokens(outcomeTokens);
   const questionIdx = indexQuestions(questions);
 
   return markets.map((m) => {
-    const parsedSides = parseSideSpecs(m.side_specs);
+    const parsedSides = renderSides(parseSideSpecs(m.side_specs), m.description);
     const token = tokenIdx.get(m.outcome_id);
     const question = m.question_id != null ? questionIdx.get(m.question_id) : undefined;
     const tokenName = token?.spot_name && token.spot_name.trim() ? token.spot_name : null;
-    const questionName = question?.name && question.name.trim() ? question.name : null;
+    // HypeDexer inlines the question on each of its rows: questions outside
+    // the metadata list still get a title.
+    const rawQuestionName = question?.name || m.question_name || null;
+    const rawQuestionDescription = question?.description || m.question_description || null;
+    const questionName = m.question_id != null
+      ? questionTitle(rawQuestionName, rawQuestionDescription, templates)
+      : null;
+    const questionRules = m.question_id != null
+      ? renderTemplateRules(rawQuestionName, rawQuestionDescription, templates) ?? rawQuestionDescription
+      : renderTemplateRules(m.name, m.description, templates);
 
     // Every row is its own market. Rows 10–99 are not side coins of rows 0–9:
     // filling their empty fields from outcome floor(id / 10) titled a bucket
-    // question's outcomes "BTC above 0 on May 4".
-    const effectiveClass = m.class?.trim() ? m.class : null;
-    const effectiveUnderlying = m.underlying?.trim() ? m.underlying : null;
-    const effectiveTargetPrice = m.target_price ?? null;
-    const effectiveExpiry = m.expiry?.trim() ? m.expiry : null;
+    // question's outcomes "BTC above 0 on May 4". Price templates and bucket
+    // questions state the same fields in their descriptions.
+    const priceFields = templatePriceFields(m.name, m.description);
+    const bucketUnderlying = m.question_id != null ? priceBucketUnderlying(rawQuestionDescription) : null;
+    const effectiveClass = m.class?.trim() ? m.class : priceFields?.cls ?? (bucketUnderlying ? 'priceBucket' : null);
+    const effectiveUnderlying = m.underlying?.trim() ? m.underlying : priceFields?.underlying ?? bucketUnderlying;
+    // Non-price rows come with a 0 strike.
+    const effectiveTargetPrice = priceFields ? priceFields.targetPrice : m.target_price || null;
+    const effectiveExpiry = m.expiry?.trim()
+      ? m.expiry
+      : priceFields?.expiry ?? (bucketUnderlying ? priceBucketExpiry(rawQuestionDescription) : null);
     const effectivePeriod = m.period?.trim() ? m.period : null;
 
     // Inject live mid price from HL allMids if available.
@@ -309,6 +383,8 @@ export function enrichMarkets(
       underlying: effectiveUnderlying,
       targetPrice: effectiveTargetPrice,
       expiry: effectiveExpiry,
+      templateTitle: renderTemplateTitle(m.name, m.description, templates),
+      bucketName: bucketUnderlying ? priceBucketOutcomeName(rawQuestionDescription, m.description) : null,
     });
 
     const totalTrades = m.total_trades ?? m.total_fills ?? null;
@@ -319,7 +395,7 @@ export function enrichMarkets(
     const side = m.side ?? null;
     const shortName = effectiveUnderlying && side != null && side <= 1
       ? `${effectiveUnderlying} ${side === 0 ? 'YES' : 'NO'}`
-      : (effectiveUnderlying ?? m.name ?? m.coin ?? '');
+      : (effectiveUnderlying ?? (isPlaceholderName(m.name, m.coin) ? displayName : m.name) ?? m.coin ?? '');
 
     return {
       outcome_id: m.outcome_id,
@@ -334,7 +410,7 @@ export function enrichMarkets(
       parsed_sides: parsedSides,
       token_name: tokenName,
       question_name: questionName,
-      question_description: question?.description ?? null,
+      question_description: questionRules,
       display_name: displayName,
       short_name: shortName,
       mid_price: liveMidPrice ?? m.mid_price ?? null,
@@ -392,8 +468,9 @@ export function buildQuestionsWithOutcomes(
 
     grouped.push({
       question_id: questionId,
-      title: question?.name ?? first?.question_name ?? null,
-      description: question?.description ?? first?.question_description ?? null,
+      // Titled in enrichMarkets from the same question (template / bucket rendered).
+      title: first?.question_name ?? null,
+      description: first?.question_description ?? question?.description ?? null,
       class: first?.class ?? null,
       underlying: first?.underlying ?? null,
       outcome_count: outcomes.length,
@@ -557,10 +634,9 @@ export function enrichSettlements(
       winnerName = winnerSide === 0 ? 'Yes' : 'No';
     }
 
-    const questionName = question?.name?.trim()
-      || market?.question_name
-      || market?.display_name
-      || null;
+    // The market's question title is the question's name rendered (template,
+    // price bucket), so a raw "template:…" or "Recurring" never shows.
+    const questionName = market?.question_name || market?.display_name || null;
 
     return {
       outcome_id: s.outcome_id,

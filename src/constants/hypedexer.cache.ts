@@ -57,6 +57,9 @@ export const HYPEDEXER_TTL = {
   hip4BaseListRetry:      60,
   /** Enriched settlements (new rows only when a market settles). */
   hip4Settlements:        60,
+  /** Hyperliquid's HIP-4 template registry (not HypeDexer, free): a template
+   * added upstream titles its markets within the hour. */
+  hip4OutcomeTemplates: 3600,
   /** HIP-3 market pages: the tape (polled every 10 s), cumulative snapshots
    * (30 s) and per-market trader aggregates (60 s). */
   hip3Fills:              15,
@@ -137,6 +140,8 @@ export const HYPEDEXER_HIP4_CACHE_KEY = {
    * and the tile (default) answered each other. */
   analytics: (interval: string, limit?: number) =>
     `hypedexer:hip4:analytics:${interval}${limit !== undefined ? `:${limit}` : ''}`,
+  /** Hyperliquid `outcomeTemplates` (titles of templated markets). */
+  outcomeTemplates: 'hyperliquid:hip4:outcome-templates',
 } as const;
 
 /**

@@ -279,15 +279,6 @@ export function enrichMarkets(
   const tokenIdx = indexOutcomeTokens(outcomeTokens);
   const questionIdx = indexQuestions(questions);
 
-  // Build question-template index: small outcome_ids with metadata act as parent questions.
-  // outcome_id=N with class/description → parent of side coins at outcome_id=10*N, 10*N+1...
-  const questionTemplateIdx = new Map<number, RawHip4Market>();
-  for (const m of markets) {
-    if ((m.class?.trim() || m.description?.trim()) && m.outcome_id < 10) {
-      questionTemplateIdx.set(m.outcome_id, m);
-    }
-  }
-
   return markets.map((m) => {
     const parsedSides = parseSideSpecs(m.side_specs);
     const token = tokenIdx.get(m.outcome_id);
@@ -295,14 +286,14 @@ export function enrichMarkets(
     const tokenName = token?.spot_name && token.spot_name.trim() ? token.spot_name : null;
     const questionName = question?.name && question.name.trim() ? question.name : null;
 
-    // Inherit metadata from parent question template when own fields are empty (side coins).
-    const parentQId = m.outcome_id >= 10 ? Math.floor(m.outcome_id / 10) : null;
-    const parentQ = parentQId != null ? questionTemplateIdx.get(parentQId) : null;
-    const effectiveClass = m.class?.trim() ? m.class : (parentQ?.class ?? null);
-    const effectiveUnderlying = m.underlying?.trim() ? m.underlying : (parentQ?.underlying ?? null);
-    const effectiveTargetPrice = m.target_price ?? parentQ?.target_price ?? null;
-    const effectiveExpiry = m.expiry?.trim() ? m.expiry : (parentQ?.expiry ?? null);
-    const effectivePeriod = m.period?.trim() ? m.period : (parentQ?.period ?? null);
+    // Every row is its own market. Rows 10–99 are not side coins of rows 0–9:
+    // filling their empty fields from outcome floor(id / 10) titled a bucket
+    // question's outcomes "BTC above 0 on May 4".
+    const effectiveClass = m.class?.trim() ? m.class : null;
+    const effectiveUnderlying = m.underlying?.trim() ? m.underlying : null;
+    const effectiveTargetPrice = m.target_price ?? null;
+    const effectiveExpiry = m.expiry?.trim() ? m.expiry : null;
+    const effectivePeriod = m.period?.trim() ? m.period : null;
 
     // Inject live mid price from HL allMids if available.
     const liveMidPrice = m.coin ? (midPrices?.get(m.coin) ?? null) : null;
@@ -323,10 +314,11 @@ export function enrichMarkets(
     const totalTrades = m.total_trades ?? m.total_fills ?? null;
     const settled = Boolean(m.is_settled ?? m.settled);
 
-    // Derive side from encoding when raw `side` field is absent (outcome_id = 10*base + side_index)
-    const derivedSide = m.side ?? (m.outcome_id >= 10 ? m.outcome_id % 10 : null);
-    const shortName = effectiveUnderlying && derivedSide != null && derivedSide <= 1
-      ? `${effectiveUnderlying} ${derivedSide === 0 ? 'YES' : 'NO'}`
+    // A row's id is a raw outcome id, not `10 * outcome + side`: only a row
+    // that states its side is one side of a market.
+    const side = m.side ?? null;
+    const shortName = effectiveUnderlying && side != null && side <= 1
+      ? `${effectiveUnderlying} ${side === 0 ? 'YES' : 'NO'}`
       : (effectiveUnderlying ?? m.name ?? m.coin ?? '');
 
     return {

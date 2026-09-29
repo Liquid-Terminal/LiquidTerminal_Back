@@ -24,6 +24,10 @@ export interface RawHip4Market {
   unique_users?: number | null;
   is_settled?: boolean | null;
   settled_at?: string | null;
+  /** What HypeDexer sends today instead of `is_settled` (0 / 1). */
+  settled?: number | boolean | null;
+  /** Last on-chain update of the row: the settlement time once settled. */
+  block_time?: string | null;
   expiry?: string | null;
   period?: string | null;
   target_price?: number | null;
@@ -242,13 +246,36 @@ function indexQuestions(questions: RawHip4Question[]): Map<number, RawHip4Questi
   return map;
 }
 
+/**
+ * HypeDexer sends UTC times without a zone designator, which `new Date()`
+ * reads as local time.
+ */
+function asUtcIso(time: string | null | undefined): string | null {
+  if (!time) return null;
+  return /(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(time) ? time : `${time}Z`;
+}
+
+/**
+ * One row per outcome: filtered reads (`?outcome_id=`, `?question_id=`) can
+ * return the same market row several times.
+ */
+function uniqueByOutcomeId(markets: RawHip4Market[]): RawHip4Market[] {
+  const seen = new Set<number>();
+  return markets.filter((m) => {
+    if (seen.has(m.outcome_id)) return false;
+    seen.add(m.outcome_id);
+    return true;
+  });
+}
+
 /** Left-join markets with outcome_tokens + questions and derive display fields. */
 export function enrichMarkets(
-  markets: RawHip4Market[],
+  rawMarkets: RawHip4Market[],
   outcomeTokens: RawHip4OutcomeToken[],
   questions: RawHip4Question[],
   midPrices?: Map<string, number>
 ): Hip4MarketEnriched[] {
+  const markets = uniqueByOutcomeId(rawMarkets);
   const tokenIdx = indexOutcomeTokens(outcomeTokens);
   const questionIdx = indexQuestions(questions);
 
@@ -294,6 +321,7 @@ export function enrichMarkets(
     });
 
     const totalTrades = m.total_trades ?? m.total_fills ?? null;
+    const settled = Boolean(m.is_settled ?? m.settled);
 
     // Derive side from encoding when raw `side` field is absent (outcome_id = 10*base + side_index)
     const derivedSide = m.side ?? (m.outcome_id >= 10 ? m.outcome_id % 10 : null);
@@ -322,8 +350,8 @@ export function enrichMarkets(
       total_volume: m.total_volume ?? null,
       total_trades: totalTrades,
       open_interest: m.open_interest ?? null,
-      is_settled: Boolean(m.is_settled) || (!m.coin || m.coin.trim() === ''),
-      settled_at: m.settled_at ?? null,
+      is_settled: settled || (!m.coin || m.coin.trim() === ''),
+      settled_at: asUtcIso(m.settled_at ?? (settled ? m.block_time : null)),
       expiry: effectiveExpiry,
       period: effectivePeriod,
       target_price: effectiveTargetPrice,
@@ -516,7 +544,7 @@ export function enrichSettlements(
 
     // Mainnet: block_time replaces settled_at; settle_fraction replaces winner_side;
     // details ("price:78212.4") replaces settled_px.
-    const settledAt = s.settled_at ?? s.block_time ?? '';
+    const settledAt = asUtcIso(s.settled_at ?? s.block_time) ?? '';
     const settledPx = s.settled_px ?? parseSettlePrice(s.details);
     const winnerSide = s.winner_side ?? deriveWinnerSide(s.settle_fraction);
 

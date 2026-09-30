@@ -672,7 +672,7 @@ export class ElysiumAnalyticsService {
           FROM elysium_dex_pool p
           LEFT JOIN elysium_token k0 ON k0.address = p.token0
           LEFT JOIN elysium_token k1 ON k1.address = p.token1
-          ORDER BY p.created_at DESC, p.pool LIMIT 15`,
+          ORDER BY p.created_at DESC, p.pool LIMIT 30`,
         prismaHistorical.$queryRaw<
           Array<{ pools: number; swaps: number; swaps24h: number; traders24h: number; pools24h: number }>
         >`

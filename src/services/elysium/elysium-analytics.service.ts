@@ -404,7 +404,7 @@ export class ElysiumAnalyticsService {
                  COALESCE(sum(amount) FILTER (WHERE direction = 'withdrawal' AND symbol = 'HYPE' AND route = 'native'), 0)::float8 AS hype_out
           FROM elysium_bridge_transfer
           WHERE initiated_at >= ${ts(start)}::timestamptz AND from_addr IS NOT NULL
-          GROUP BY from_addr ORDER BY transfers DESC, address LIMIT 15`,
+          GROUP BY from_addr ORDER BY transfers DESC, address LIMIT 30`,
       ]);
 
       const byDay = new Map(

@@ -90,4 +90,8 @@ register('/address/:address', elysiumAnalyticsAddressSchema, 'ELYSIUM_ANALYTICS_
   service.getAddress(p.address)
 );
 
+register('/contract/:address', elysiumAnalyticsAddressSchema, 'ELYSIUM_ANALYTICS_CONTRACT_ERROR', (_q, p) =>
+  service.getContract(p.address)
+);
+
 export default router;

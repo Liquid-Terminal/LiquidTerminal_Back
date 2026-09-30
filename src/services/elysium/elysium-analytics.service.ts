@@ -897,4 +897,101 @@ export class ElysiumAnalyticsService {
       };
     });
   }
+
+  // ---------------------------------------------------------------------------
+  // 11. contract context (who deployed it, what else they deployed, how it is used)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * On-chain context for a contract from the ingested tables: deployment,
+   * the deployer's other contracts (with token metadata when known), calls
+   * over 7 days, token record and DEX role. Bytecode analysis happens client side.
+   */
+  public getContract(address: string): Promise<unknown> {
+    const a = address.toLowerCase();
+    return this.cached('contract', a, async () => {
+      const since7d = new Date(Date.now() - 7 * DAY_MS);
+      const [dep, token, usage, allTime, methods, asPool, asFactory, inPools, names] = await Promise.all([
+        prismaHistorical.$queryRaw<Array<{ deployer: string; deploy_tx: string; deployed_at: number; block_number: bigint }>>`
+          SELECT deployer, deploy_tx, (extract(epoch FROM deployed_at) * 1000)::float8 AS deployed_at, block_number
+          FROM elysium_contract WHERE address = ${a}`,
+        prismaHistorical.$queryRaw<Array<{ standard: string; name: string | null; symbol: string | null; decimals: number | null; origin: string | null; transfer_count: bigint }>>`
+          SELECT standard, name, symbol, decimals, origin, transfer_count FROM elysium_token WHERE address = ${a}`,
+        prismaHistorical.$queryRaw<Array<{ txs: number; callers: number; failed: number }>>`
+          SELECT count(*)::int AS txs, count(DISTINCT from_addr)::int AS callers,
+                 count(*) FILTER (WHERE NOT success)::int AS failed
+          FROM elysium_tx WHERE to_addr = ${a} AND block_time >= ${ts(since7d)}::timestamptz AND NOT is_spam`,
+        // First and last call through the (to_addr, block_time) index: an all-time count is too slow on busy contracts.
+        prismaHistorical.$queryRaw<Array<{ first: number | null; last: number | null }>>`
+          SELECT (SELECT (extract(epoch FROM block_time) * 1000)::float8 FROM elysium_tx WHERE to_addr = ${a} ORDER BY block_time ASC LIMIT 1) AS first,
+                 (SELECT (extract(epoch FROM block_time) * 1000)::float8 FROM elysium_tx WHERE to_addr = ${a} ORDER BY block_time DESC LIMIT 1) AS last`,
+        prismaHistorical.$queryRaw<Array<{ method_id: string | null; txs: number }>>`
+          SELECT method_id, count(*)::int AS txs FROM elysium_tx
+          WHERE to_addr = ${a} AND block_time >= ${ts(since7d)}::timestamptz AND NOT is_spam
+          GROUP BY 1 ORDER BY txs DESC LIMIT 8`,
+        prismaHistorical.$queryRaw<Array<{ factory: string; version: string; token0: string; token1: string; fee: number | null }>>`
+          SELECT factory, version, token0, token1, fee FROM elysium_dex_pool WHERE pool = ${a}`,
+        prismaHistorical.$queryRaw<Array<{ pools: number; version: string | null }>>`
+          SELECT count(*)::int AS pools, max(version) AS version FROM elysium_dex_pool WHERE factory = ${a}`,
+        prismaHistorical.$queryRaw<Array<{ pool: string; version: string; other: string }>>`
+          SELECT pool, version, CASE WHEN token0 = ${a} THEN token1 ELSE token0 END AS other
+          FROM elysium_dex_pool WHERE token0 = ${a} OR token1 = ${a} ORDER BY created_at DESC LIMIT 10`,
+        this.methodNames(),
+      ]);
+
+      const d = dep[0];
+      let deployer: unknown = null;
+      if (d) {
+        const [count, siblings] = await Promise.all([
+          prismaHistorical.$queryRaw<Array<{ n: number; first: number | null }>>`
+            SELECT count(*)::int AS n, (extract(epoch FROM min(deployed_at)) * 1000)::float8 AS first
+            FROM elysium_contract WHERE deployer = ${d.deployer}`,
+          prismaHistorical.$queryRaw<Array<{ address: string; deployed_at: number; name: string | null; symbol: string | null; standard: string | null }>>`
+            SELECT c.address, (extract(epoch FROM c.deployed_at) * 1000)::float8 AS deployed_at, t.name, t.symbol, t.standard
+            FROM elysium_contract c LEFT JOIN elysium_token t ON t.address = c.address
+            WHERE c.deployer = ${d.deployer} AND c.address <> ${a}
+            ORDER BY (t.symbol IS NULL), c.deployed_at DESC LIMIT 12`,
+        ]);
+        deployer = {
+          address: d.deployer,
+          contracts: count[0]?.n ?? 0,
+          firstDeploy: iso(count[0]?.first ?? null),
+          others: siblings.map((s) => ({
+            address: s.address,
+            deployedAt: iso(s.deployed_at),
+            name: s.name,
+            symbol: s.symbol,
+            standard: s.standard,
+          })),
+        };
+      }
+
+      const t = token[0];
+      const pool = asPool[0];
+      const f = asFactory[0];
+      return {
+        address: a,
+        deployment: d
+          ? { deployer: d.deployer, tx: d.deploy_tx, at: iso(d.deployed_at), block: Number(d.block_number) }
+          : null,
+        deployer,
+        token: t
+          ? { standard: t.standard, name: t.name, symbol: t.symbol, decimals: t.decimals, origin: t.origin, transfers: Number(t.transfer_count) }
+          : null,
+        usage: {
+          txs7d: usage[0]?.txs ?? 0,
+          callers7d: usage[0]?.callers ?? 0,
+          failed7d: usage[0]?.failed ?? 0,
+          firstCall: iso(allTime[0]?.first ?? null),
+          lastCall: iso(allTime[0]?.last ?? null),
+          topMethods: methods.map((m) => ({ ...this.methodRef(m.method_id, names), txs: m.txs })),
+        },
+        dex: {
+          pool: pool ? { factory: pool.factory, version: pool.version, token0: pool.token0, token1: pool.token1, fee: pool.fee } : null,
+          factory: f && f.pools > 0 ? { pools: f.pools, version: f.version } : null,
+          pools: inPools.map((p) => ({ pool: p.pool, version: p.version, pairedWith: p.other })),
+        },
+      };
+    });
+  }
 }

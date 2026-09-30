@@ -35,6 +35,7 @@ const mockService = {
   getDex: jest.fn().mockResolvedValue({ daily: [] }),
   getTokens: jest.fn().mockResolvedValue({ daily: [] }),
   getAddress: jest.fn().mockResolvedValue({ tags: [] }),
+  getContract: jest.fn().mockResolvedValue({ deployment: null }),
 };
 
 jest.mock('../../../src/services/elysium/elysium-analytics.service', () => ({
@@ -73,6 +74,7 @@ describe('Elysium analytics GET validation smoke', () => {
     '/elysium/analytics/dex?days=14',
     '/elysium/analytics/tokens',
     '/elysium/analytics/address/0x1E4f06e89a0c4f0c47f42a78881c8ee357dd628e',
+    '/elysium/analytics/contract/0x1E4f06e89a0c4f0c47f42a78881c8ee357dd628e',
   ];
 
   it.each(paths)('%s — no Zod body validation failure', async (path) => {
@@ -103,6 +105,8 @@ describe('Elysium analytics GET validation smoke', () => {
     const a = '0x1e4f06e89a0c4f0c47f42a78881c8ee357dd628e';
     await request(app).get(`/elysium/analytics/address/${a}`);
     expect(mockService.getAddress).toHaveBeenLastCalledWith(a);
+    await request(app).get(`/elysium/analytics/contract/${a}`);
+    expect(mockService.getContract).toHaveBeenLastCalledWith(a);
   });
 });
 
@@ -118,6 +122,7 @@ describe('Elysium analytics query validation', () => {
     '/elysium/analytics/tokens?days=0',
     '/elysium/analytics/address/0x123',
     '/elysium/analytics/address/not-an-address',
+    '/elysium/analytics/contract/0x123',
   ];
 
   it.each(invalid)('%s — returns 400', async (path) => {

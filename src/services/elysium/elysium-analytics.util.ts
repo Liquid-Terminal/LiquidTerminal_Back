@@ -88,3 +88,18 @@ export function retentionFraction(
 export function share(part: number, total: number): number {
   return total > 0 ? part / total : 0;
 }
+
+/**
+ * The status route is public: serve a fixed category, never the raw message,
+ * which can name upstream hosts or the internal database address. The full
+ * text stays in the database and the logs.
+ */
+export function errorCategory(message: string | null): string | null {
+  if (!message) return null;
+  const http = /API error:?\s*(\d{3})/i.exec(message);
+  if (http) return `upstream_http_${http[1]}`;
+  if (/time(d)? ?out/i.test(message)) return 'timeout';
+  if (/prisma|database|can't reach|ECONNREFUSED|ECONNRESET/i.test(message)) return 'db_error';
+  if (/page/i.test(message)) return 'page_cap';
+  return 'error';
+}

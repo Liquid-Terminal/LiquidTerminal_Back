@@ -11,6 +11,7 @@ import {
   toDayKey,
 } from './elysium-analytics.util';
 import { methodName } from './elysium-dex.util';
+import { errorCategory } from './elysium-analytics.util';
 
 const CACHE_TTL_S = 60;
 const CACHE_PREFIX = 'elysium:analytics';
@@ -74,7 +75,7 @@ export class ElysiumAnalyticsService {
           cursor: r.cursor ? r.cursor.toISOString() : null,
           rows: Number(r.rows),
           backfillDone: r.backfillDone,
-          lastError: r.lastError,
+          lastError: errorCategory(r.lastError),
           lagSeconds: r.cursor ? Math.max(0, Math.round((now - r.cursor.getTime()) / 1000)) : null,
         })),
       };
@@ -822,6 +823,21 @@ export class ElysiumAnalyticsService {
   // 10. address profile (tags from our tables)
   // ---------------------------------------------------------------------------
 
+  /**
+   * Network-wide user txs over 24h. Cached under ONE key: it does not depend on
+   * the address, and running it inside every address profile let each fresh
+   * address (an unbounded key space) trigger a full 24h count.
+   */
+  private networkTxs24h(): Promise<number> {
+    return this.cached('network-txs-24h', 'v1', async () => {
+      const since24h = new Date(Date.now() - DAY_MS);
+      const rows = await prismaHistorical.$queryRaw<Array<{ total: number }>>`
+        SELECT count(*)::int AS total FROM elysium_tx WHERE block_time >= ${ts(since24h)}::timestamptz
+          AND NOT is_spam AND COALESCE(tx_type, '') NOT IN ('0x64', '0x68', '0x69')`;
+      return rows[0]?.total ?? 0;
+    });
+  }
+
   /** Tags and counts for one address, computed from the ingested tables. */
   public getAddress(address: string): Promise<unknown> {
     const a = address.toLowerCase();
@@ -836,9 +852,7 @@ export class ElysiumAnalyticsService {
                  (SELECT count(*) FROM elysium_tx WHERE from_addr = ${a} AND block_time >= ${ts(since24h)}::timestamptz
                    AND NOT is_spam AND COALESCE(tx_type, '') NOT IN ('0x64', '0x68', '0x69'))::int AS txs24h
           FROM elysium_address_day WHERE address = ${a}`,
-        prismaHistorical.$queryRaw<Array<{ total: number }>>`
-          SELECT count(*)::int AS total FROM elysium_tx WHERE block_time >= ${ts(since24h)}::timestamptz
-            AND NOT is_spam AND COALESCE(tx_type, '') NOT IN ('0x64', '0x68', '0x69')`,
+        this.networkTxs24h(),
         prismaHistorical.$queryRaw<Array<{ n: number; last: number | null }>>`
           SELECT count(*)::int AS n, (extract(epoch FROM max(deployed_at)) * 1000)::float8 AS last
           FROM elysium_contract WHERE deployer = ${a}`,
@@ -863,7 +877,7 @@ export class ElysiumAnalyticsService {
       ]);
 
       const txs24h = act[0]?.txs24h ?? 0;
-      const total24h = net[0]?.total ?? 0;
+      const total24h = net;
       const share24h = share(txs24h, total24h);
       const contracts = deploys[0]?.n ?? 0;
       const swaps = dex[0]?.swaps ?? 0;

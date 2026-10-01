@@ -1,6 +1,6 @@
 import { Router, Request, Response, RequestHandler } from 'express';
 import { z } from 'zod';
-import { marketRateLimiter } from '../../middleware/apiRateLimiter';
+import { addressLookupRateLimiter, marketRateLimiter } from '../../middleware/apiRateLimiter';
 import { validateGetRequest } from '../../middleware/validation';
 import {
   elysiumAnalyticsAddressSchema,
@@ -32,13 +32,15 @@ function register<S extends QuerySchema>(
   path: string,
   schema: S,
   code: string,
-  handler: (query: z.infer<S['shape']['query']>, params: z.infer<S['shape']['params']>) => Promise<unknown>
+  handler: (query: z.infer<S['shape']['query']>, params: z.infer<S['shape']['params']>) => Promise<unknown>,
+  extraLimiter?: RequestHandler
 ): void {
   const querySchema = schema.shape.query;
   const paramsSchema = schema.shape.params;
   router.get(
     path,
     marketRateLimiter,
+    ...(extraLimiter ? [extraLimiter] : []),
     validateGetRequest(schema),
     (async (req: Request, res: Response) => {
       try {
@@ -86,12 +88,21 @@ register('/dex', elysiumAnalyticsDaysSchema, 'ELYSIUM_ANALYTICS_DEX_ERROR', (q) 
 
 register('/tokens', elysiumAnalyticsDaysSchema, 'ELYSIUM_ANALYTICS_TOKENS_ERROR', (q) => service.getTokens(q.days));
 
-register('/address/:address', elysiumAnalyticsAddressSchema, 'ELYSIUM_ANALYTICS_ADDRESS_ERROR', (_q, p) =>
-  service.getAddress(p.address)
+// Any address is a fresh cache key and ~10 queries: tighter per-IP limit.
+register(
+  '/address/:address',
+  elysiumAnalyticsAddressSchema,
+  'ELYSIUM_ANALYTICS_ADDRESS_ERROR',
+  (_q, p) => service.getAddress(p.address),
+  addressLookupRateLimiter
 );
 
-register('/contract/:address', elysiumAnalyticsAddressSchema, 'ELYSIUM_ANALYTICS_CONTRACT_ERROR', (_q, p) =>
-  service.getContract(p.address)
+register(
+  '/contract/:address',
+  elysiumAnalyticsAddressSchema,
+  'ELYSIUM_ANALYTICS_CONTRACT_ERROR',
+  (_q, p) => service.getContract(p.address),
+  addressLookupRateLimiter
 );
 
 export default router;

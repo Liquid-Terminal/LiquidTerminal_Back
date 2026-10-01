@@ -141,6 +141,13 @@ describe('helpers', () => {
     expect(pickSignature([])).toBeNull();
   });
 
+  it('pickSignature drops free text registered in public signature databases', () => {
+    expect(pickSignature([{ name: 'claim at https://scam.xyz()', filtered: false }, { name: 'claim()', filtered: false }])).toBe('claim()');
+    expect(pickSignature([{ name: `a(${'uint256,'.repeat(40)}uint256)`, filtered: false }])).toBeNull();
+    expect(pickSignature([{ name: 'f(<img src=x>)', filtered: false }])).toBeNull();
+    expect(pickSignature([{ name: 'swap((address,uint256)[],bytes)', filtered: false }])).toBe('swap((address,uint256)[],bytes)');
+  });
+
   it('methodName strips the argument list', () => {
     expect(methodName('transfer(address,uint256)')).toBe('transfer');
     expect(methodName(null)).toBeNull();

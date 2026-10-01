@@ -1,4 +1,5 @@
 import {
+  errorCategory,
   fillDays,
   lastDays,
   precompileLabel,
@@ -87,5 +88,16 @@ describe('retentionFraction', () => {
   it('share is 0 on empty totals', () => {
     expect(share(3, 0)).toBe(0);
     expect(share(1, 4)).toBe(0.25);
+  });
+});
+
+describe('errorCategory', () => {
+  it('never returns the raw message (no hosts, no internal addresses)', () => {
+    expect(errorCategory('API error: 503 Service Unavailable https://upstream.example/elysium/testnet/transactions')).toBe('upstream_http_503');
+    expect(errorCategory("Can't reach database server at `db.railway.internal:5432`")).toBe('db_error');
+    expect(errorCategory('Command timed out')).toBe('timeout');
+    expect(errorCategory('Elysium ingest: window exceeded the page cap')).toBe('page_cap');
+    expect(errorCategory('something else at 10.0.0.3')).toBe('error');
+    expect(errorCategory(null)).toBeNull();
   });
 });

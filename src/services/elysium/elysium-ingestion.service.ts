@@ -34,6 +34,15 @@ import {
 const PAGE_SIZE = 1000;
 /** Hard stop per window: 200k rows/hour is ~20x the measured peak. */
 const MAX_PAGES_PER_WINDOW = 200;
+/** Smallest tx window the stream shrinks to when a window overflows the page cap. */
+const TX_MIN_STEP_MS = 60_000;
+
+class PageCapError extends Error {
+  constructor() {
+    super('Elysium ingest: window exceeded the page cap');
+    this.name = 'PageCapError';
+  }
+}
 /** At most ~2 upstream calls per second across every stream. */
 const MIN_CALL_GAP_MS = 500;
 /** Work budget per tick so a lock never outlives its TTL. */
@@ -130,6 +139,8 @@ export class ElysiumIngestionService {
   private failures = new Map<ElysiumStream, number>();
   private lastBridgeWideAt = 0;
   private backfillWindows = 0;
+  /** Current tx window length: halves on a page-cap overflow, grows back after. */
+  private txStepMs = TX_STEP_MS;
 
   public static getInstance(): ElysiumIngestionService {
     if (!ElysiumIngestionService.instance) {
@@ -218,21 +229,29 @@ export class ElysiumIngestionService {
     if (this.stopped) throw new IngestStoppedError();
   }
 
-  /** Pages a list endpoint until a short page, handing each page to `onPage`. */
+  /**
+   * Pages a list endpoint until a short page, handing each page to `onPage`.
+   * At the page cap it throws PageCapError, or with `truncate` keeps what it
+   * read and returns true: anyone can write to the testnet, so a window that
+   * spam pushes past the cap must not stall a stream forever.
+   */
   private async pageAll(
     path: ElysiumIngestPath,
     params: Record<string, string | boolean>,
-    onPage: (rows: unknown[]) => Promise<void>
-  ): Promise<void> {
+    onPage: (rows: unknown[]) => Promise<void>,
+    opts: { truncate?: boolean } = {}
+  ): Promise<boolean> {
     for (let page = 0; page < MAX_PAGES_PER_WINDOW; page++) {
       this.ensureRunning();
       await this.throttle.wait();
       const query: ElysiumIngestPageQuery = { ...params, limit: PAGE_SIZE, offset: page * PAGE_SIZE };
       const rows = await this.client.fetchIngestPage(path, query);
       await onPage(rows);
-      if (rows.length < PAGE_SIZE) return;
+      if (rows.length < PAGE_SIZE) return false;
     }
-    throw new Error('Elysium ingest: window exceeded the page cap');
+    if (!opts.truncate) throw new PageCapError();
+    logDeduplicator.warn('Elysium ingest: window truncated at the page cap', { path });
+    return true;
   }
 
   // ---------------------------------------------------------------------------
@@ -252,29 +271,40 @@ export class ElysiumIngestionService {
         backfillDone,
         now: new Date(),
         genesis: ELYSIUM_GENESIS,
-        stepMs: TX_STEP_MS,
+        stepMs: this.txStepMs,
         overlapMs: TX_OVERLAP_MS,
         settleMs: TX_SETTLE_MS,
       });
       if (!w) return TX_LIVE_INTERVAL_MS;
 
       let inserted = 0;
-      await this.pageAll(
-        '/transactions',
-        {
-          start_time: toUpstreamTime(w.start),
-          end_time: toUpstreamTime(w.end),
-          include_spam: true,
-          include_system: false,
-        },
-        async (raw) => {
-          const rows = dedupeBy(
-            raw.map(normalizeTx).filter((r): r is TxRow => r !== null),
-            (r) => r.tx_hash
-          );
-          inserted += (await this.repo.insertTxs(rows)).inserted;
-        }
-      );
+      try {
+        await this.pageAll(
+          '/transactions',
+          {
+            start_time: toUpstreamTime(w.start),
+            end_time: toUpstreamTime(w.end),
+            include_spam: true,
+            include_system: false,
+          },
+          async (raw) => {
+            const rows = dedupeBy(
+              raw.map(normalizeTx).filter((r): r is TxRow => r !== null),
+              (r) => r.tx_hash
+            );
+            inserted += (await this.repo.insertTxs(rows)).inserted;
+          },
+          // At the smallest step, keep what was read and move on.
+          { truncate: this.txStepMs <= TX_MIN_STEP_MS }
+        );
+      } catch (error) {
+        if (!(error instanceof PageCapError)) throw error;
+        // Too many txs in this window (a spam burst): retry it in halves.
+        this.txStepMs = Math.max(TX_MIN_STEP_MS, Math.floor(this.txStepMs / 2));
+        continue;
+      }
+      // Window fit: grow back toward the normal step.
+      this.txStepMs = Math.min(TX_STEP_MS, this.txStepMs * 2);
 
       const finishesBackfill = !backfillDone && w.caughtUp;
       await this.repo.advance('tx', {
@@ -311,7 +341,7 @@ export class ElysiumIngestionService {
         (r) => r.transfer_id
       );
       changed += await this.repo.upsertBridgeTransfers(rows);
-    });
+    }, { truncate: true });
     return changed;
   }
 
@@ -386,7 +416,7 @@ export class ElysiumIngestionService {
         (r) => r.address
       );
       upserted += await this.repo.upsertTokens(rows);
-    });
+    }, { truncate: true });
     // rows = size of the latest listing (a snapshot), not a running total.
     await this.repo.advance('tokens', { cursor: new Date(), setRows: upserted, backfillDone: true });
     return TOKENS_INTERVAL_MS;
@@ -406,7 +436,7 @@ export class ElysiumIngestionService {
           (r) => r.pool
         );
         inserted += await this.repo.insertDexPools(rows);
-      });
+      }, { truncate: true });
     }
     for (const topic0 of [DEX_TOPICS.v2Swap, DEX_TOPICS.v3Swap]) {
       await this.pageAll('/logs', { ...time, topic0 }, async (raw) => {
@@ -415,7 +445,7 @@ export class ElysiumIngestionService {
           (r) => `${r.tx_hash}:${r.log_index}`
         );
         inserted += await this.repo.insertDexSwaps(rows);
-      });
+      }, { truncate: true });
     }
     return inserted;
   }

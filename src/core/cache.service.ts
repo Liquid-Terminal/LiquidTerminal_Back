@@ -55,16 +55,19 @@ export class CacheService {
         }
       }
 
-      // Lock not acquired — wait for the lock holder to populate cache
-      for (let i = 0; i < 3; i++) {
-        await new Promise(resolve => setTimeout(resolve, 200));
+      // Lock not acquired — wait for the lock holder to populate the cache for
+      // as long as it holds the lock (up to 15s). Giving up after 600ms let a
+      // burst on one slow key run the same heavy query once per request.
+      for (let i = 0; i < 60; i++) {
+        await new Promise(resolve => setTimeout(resolve, 250));
         const retryCache = await redisService.get(key);
         if (retryCache) {
           return JSON.parse(retryCache);
         }
+        if (!(await redis.exists(lockKey))) break; // holder failed or finished without caching
       }
 
-      // Lock holder may have failed, fetch directly
+      // Lock holder failed (or is still running after 15s): fetch directly
       return await fetchFn();
     } catch (error) {
       logDeduplicator.warn('Cache error, falling back to direct fetch', { 

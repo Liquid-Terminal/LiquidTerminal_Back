@@ -1,6 +1,6 @@
 import { Router, Request, Response, RequestHandler } from 'express';
 import { z } from 'zod';
-import { marketRateLimiter } from '../../middleware/apiRateLimiter';
+import { addressLookupRateLimiter, marketRateLimiter } from '../../middleware/apiRateLimiter';
 import { validateGetRequest } from '../../middleware/validation';
 import {
   elysiumStatsQuerySchema,
@@ -36,13 +36,15 @@ function register<S extends QuerySchema>(
   path: string,
   schema: S,
   code: string,
-  handler: (query: z.infer<S['shape']['query']>, params: z.infer<S['shape']['params']>) => Promise<unknown>
+  handler: (query: z.infer<S['shape']['query']>, params: z.infer<S['shape']['params']>) => Promise<unknown>,
+  extraLimiter?: RequestHandler
 ): void {
   const querySchema = schema.shape.query;
   const paramsSchema = schema.shape.params;
   router.get(
     path,
     marketRateLimiter,
+    ...(extraLimiter ? [extraLimiter] : []),
     validateGetRequest(schema),
     (async (req: Request, res: Response) => {
       try {
@@ -102,16 +104,30 @@ register('/bridge/tokens', elysiumBridgeTokensQuerySchema, 'INDEXER_ELYSIUM_BRID
 
 register('/tokens', elysiumTokensQuerySchema, 'INDEXER_ELYSIUM_TOKENS_ERROR', (q) => service.getTokens(q));
 
-register('/user/:address/balances', elysiumUserBalancesSchema, 'INDEXER_ELYSIUM_USER_BALANCES_ERROR', (_q, p) =>
-  service.getUserBalances(p.address)
+// Per-address pass-through: every address is a cache miss and a paid upstream
+// call, so these share the tighter address-lookup limit.
+register(
+  '/user/:address/balances',
+  elysiumUserBalancesSchema,
+  'INDEXER_ELYSIUM_USER_BALANCES_ERROR',
+  (_q, p) => service.getUserBalances(p.address),
+  addressLookupRateLimiter
 );
 
-register('/user/:address/activity', elysiumUserActivitySchema, 'INDEXER_ELYSIUM_USER_ACTIVITY_ERROR', (q, p) =>
-  service.getUserActivity(p.address, q)
+register(
+  '/user/:address/activity',
+  elysiumUserActivitySchema,
+  'INDEXER_ELYSIUM_USER_ACTIVITY_ERROR',
+  (q, p) => service.getUserActivity(p.address, q),
+  addressLookupRateLimiter
 );
 
-register('/user/:address/bridge', elysiumUserBridgeSchema, 'INDEXER_ELYSIUM_USER_BRIDGE_ERROR', (q, p) =>
-  service.getUserBridge(p.address, q)
+register(
+  '/user/:address/bridge',
+  elysiumUserBridgeSchema,
+  'INDEXER_ELYSIUM_USER_BRIDGE_ERROR',
+  (q, p) => service.getUserBridge(p.address, q),
+  addressLookupRateLimiter
 );
 
 export default router;

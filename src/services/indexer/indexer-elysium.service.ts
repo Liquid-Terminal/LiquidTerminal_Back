@@ -14,6 +14,7 @@ import type {
 } from '../../clients/hypedexer/rest/elysium/elysium-indexer.client';
 import { buildHypedexerCacheKey } from '../../clients/hypedexer/rest/shared/hypedexer-cache.helper';
 import { cacheService } from '../../core/cache.service';
+import { RateLimiterService } from '../../core/hyperLiquid.ratelimiter.service';
 import { HYPEDEXER_TTL } from '../../constants/hypedexer.cache';
 
 const ELYSIUM_CACHE_DOMAIN = 'elysium';
@@ -25,6 +26,11 @@ const ELYSIUM_CACHE_DOMAIN = 'elysium';
 export class IndexerElysiumService {
   private static instance: IndexerElysiumService;
   private readonly client = HypeDexerElysiumIndexerClient.getInstance();
+  /** 240 per-address upstream calls a minute across all users (weight 1 each). */
+  private readonly userBudget = RateLimiterService.getInstance('elysium-user-lookups', {
+    maxWeightPerMinute: 240,
+    requestWeight: 1,
+  });
 
   public static getInstance(): IndexerElysiumService {
     if (!IndexerElysiumService.instance) {
@@ -100,24 +106,37 @@ export class IndexerElysiumService {
   }
 
   /** Addresses are lower-cased so checksum variants share one cache entry. */
+  /**
+   * Global budget for per-address upstream calls (cache misses only). Each
+   * address is a fresh cache key, so a scan spread over many IPs would
+   * otherwise spend the paid upstream quota and take the shared outbound
+   * slots from every other route. Over budget, these lookups fail fast.
+   */
+  private userLookup<T>(fetch: () => Promise<T>): Promise<T> {
+    if (!this.userBudget.checkRateLimit('global')) {
+      return Promise.reject(new Error('Elysium per-address lookup budget exhausted'));
+    }
+    return fetch();
+  }
+
   public getUserBalances(address: string): Promise<unknown> {
     const a = address.toLowerCase();
     return this.cached('user:balances', { address: a }, HYPEDEXER_TTL.elysiumUser, () =>
-      this.client.getUserBalances(a)
+      this.userLookup(() => this.client.getUserBalances(a))
     );
   }
 
   public getUserActivity(address: string, params?: ElysiumUserActivityQuery): Promise<unknown> {
     const a = address.toLowerCase();
     return this.cached('user:activity', { address: a, ...params }, HYPEDEXER_TTL.elysiumUser, () =>
-      this.client.getUserActivity(a, params)
+      this.userLookup(() => this.client.getUserActivity(a, params))
     );
   }
 
   public getUserBridge(address: string, params?: ElysiumUserBridgeQuery): Promise<unknown> {
     const a = address.toLowerCase();
     return this.cached('user:bridge', { address: a, ...params }, HYPEDEXER_TTL.elysiumUser, () =>
-      this.client.getUserBridge(a, params)
+      this.userLookup(() => this.client.getUserBridge(a, params))
     );
   }
 }

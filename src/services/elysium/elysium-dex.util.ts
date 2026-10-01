@@ -207,12 +207,20 @@ export function decodeSwap(raw: unknown): DexSwapRow | null {
  * returns for a selector: the first one backed by a verified contract, else
  * the first unfiltered one. Returns null when there is none.
  */
+/**
+ * A Solidity function signature and nothing else: identifier, then a list of
+ * ABI types. Anyone can register text in the public databases; this keeps
+ * free text (URLs, spaces, markup) out of the labels we store and serve.
+ */
+const SIGNATURE_RE = /^[A-Za-z_$][A-Za-z0-9_$]*\([A-Za-z0-9_,[\]()]*\)$/;
+const MAX_SIGNATURE_LENGTH = 256;
+
 export function pickSignature(
   candidates: Array<{ name?: unknown; filtered?: unknown; hasVerifiedContract?: unknown }> | null | undefined
 ): string | null {
   const list = (candidates ?? []).filter(
     (c): c is { name: string; filtered?: unknown; hasVerifiedContract?: unknown } =>
-      typeof c?.name === 'string' && c.name.length > 0
+      typeof c?.name === 'string' && c.name.length > 0 && c.name.length <= MAX_SIGNATURE_LENGTH && SIGNATURE_RE.test(c.name)
   );
   const verified = list.find((c) => c.hasVerifiedContract === true && c.filtered !== true);
   if (verified) return verified.name;

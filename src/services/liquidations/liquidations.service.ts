@@ -14,6 +14,7 @@ import {
 } from '../../types/liquidations.types';
 import { AnalyticsLiquidationStatsResponse } from '../../types/analytics-liquidations.types';
 import { logDeduplicator } from '../../utils/logDeduplicator';
+import { mergeLiquidationResponse } from '../../utils/liquidations-merge';
 import { redisService } from '../../core/redis.service';
 import { SSEManagerService } from './sse-manager.service';
 import { LiquidationDataProvider } from '../../types/liquidation-provider.interface';
@@ -274,7 +275,7 @@ export class LiquidationsService implements LiquidationDataProvider {
     try {
       const limit = params.limit ?? LiquidationsService.DEFAULT_LIMIT;
       const response = await this.client.getLiquidations({ ...params, limit });
-      return response;
+      return mergeLiquidationResponse(response);
     } catch (error) {
       logDeduplicator.error('LiquidationsService.getLiquidations failed', {
         error: error instanceof Error ? error.message : String(error),
@@ -293,7 +294,8 @@ export class LiquidationsService implements LiquidationDataProvider {
     try {
       const limit = params.limit ?? LiquidationsService.DEFAULT_LIMIT;
       const hours = params.hours ?? 2;
-      const cacheKey = `liquidations:recent:${hours}h:${limit}`;
+      // v2: rows are merged per event before caching (see liquidations-merge).
+      const cacheKey = `liquidations:recent:v2:${hours}h:${limit}`;
 
       try {
         const cached = await redisService.get(cacheKey);
@@ -302,7 +304,9 @@ export class LiquidationsService implements LiquidationDataProvider {
         logDeduplicator.warn('Redis cache error, proceeding without cache', { error: String(cacheError) });
       }
 
-      const response = await this.client.getRecentLiquidations({ ...params, limit });
+      const response = mergeLiquidationResponse(
+        await this.client.getRecentLiquidations({ ...params, limit })
+      );
 
       try {
         await redisService.set(cacheKey, JSON.stringify(response), LiquidationsService.RECENT_CACHE_TTL);

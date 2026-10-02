@@ -220,6 +220,31 @@ export class RedisService {
     }
   }
 
+  /**
+   * Claim many keys at once (SET NX EX, one pipeline round trip). Returns, per
+   * key, true when this call created it (first claim) and false when it already
+   * existed. Returns null when Redis is unavailable, so callers can fall back.
+   */
+  public async claimKeys(keys: string[], ttlSeconds: number): Promise<boolean[] | null> {
+    if (!keys.length) return [];
+    if (!redisAvailable()) return null;
+    try {
+      const pipeline = redisNormal.pipeline();
+      for (const key of keys) pipeline.set(key, '1', 'EX', ttlSeconds, 'NX');
+      const results = await pipeline.exec();
+      recordRedisSuccess();
+      if (!results) return null;
+      return results.map(([error, reply]) => !error && reply === 'OK');
+    } catch (error) {
+      recordRedisFailure();
+      logDeduplicator.error('Redis claimKeys error', {
+        count: keys.length,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    }
+  }
+
   public async set(key: string, value: string, ttl?: number): Promise<void> {
     if (!redisAvailable()) return; // circuit open — skip write, no wait
     try {

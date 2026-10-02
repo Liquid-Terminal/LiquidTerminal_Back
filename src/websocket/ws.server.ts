@@ -14,6 +14,7 @@ import {
   WSServerMessage,
   WSLiquidationFilters,
   WSConnectionStats,
+  WSInternalSubscriptionType,
 } from '../types/websocket.types';
 import { CompletedTrade } from '../types/wallet-events.types';
 
@@ -35,6 +36,11 @@ export class InternalWebSocketServer {
   private wss: WebSocketServer | null = null;
   private clients: Map<string, WSClient> = new Map();
   private clientsBySocket: Map<WebSocket, string> = new Map();
+  /**
+   * Sockets that presented the bot key. Private alerts only ever go to these,
+   * so a delivery costs O(bot connections), not O(every public client).
+   */
+  private authenticatedSockets: Set<WebSocket> = new Set();
   private ipConnectionCount: Map<string, number> = new Map();
 
   // Rate limiting
@@ -56,6 +62,7 @@ export class InternalWebSocketServer {
     'fill_alert',
     'doc_update_alert',
     'bot_announcement',
+    'alert',
   ]);
 
   /**
@@ -184,6 +191,7 @@ export class InternalWebSocketServer {
       fill_alert: 0,
       doc_update_alert: 0,
       bot_announcement: 0,
+      alert: 0,
     };
 
     for (const client of this.clients.values()) {
@@ -283,6 +291,7 @@ export class InternalWebSocketServer {
 
     this.clients.set(clientId, client);
     this.clientsBySocket.set(ws, clientId);
+    if (isAuthenticated) this.authenticatedSockets.add(ws);
     this.incrementIpCount(ip);
 
     // Setup socket event handlers
@@ -376,12 +385,13 @@ export class InternalWebSocketServer {
         subType !== 'liquidation_alert' &&
         subType !== 'fill_alert' &&
         subType !== 'doc_update_alert' &&
-        subType !== 'bot_announcement')
+        subType !== 'bot_announcement' &&
+        subType !== 'alert')
     ) {
       this.sendMessage(ws, {
         type: 'error',
         error:
-          'Invalid subscription type. Supported: liquidation, l4book, wallet_event, liquidation_alert, fill_alert, doc_update_alert, bot_announcement',
+          'Invalid subscription type. Supported: liquidation, l4book, wallet_event, liquidation_alert, fill_alert, doc_update_alert, bot_announcement, alert',
         code: 'INVALID_SUBSCRIPTION',
         timestamp: new Date().toISOString(),
       });
@@ -472,12 +482,13 @@ export class InternalWebSocketServer {
         subType !== 'liquidation_alert' &&
         subType !== 'fill_alert' &&
         subType !== 'doc_update_alert' &&
-        subType !== 'bot_announcement')
+        subType !== 'bot_announcement' &&
+        subType !== 'alert')
     ) {
       this.sendMessage(ws, {
         type: 'error',
         error:
-          'Invalid subscription type. Supported: liquidation, l4book, wallet_event, liquidation_alert, fill_alert, doc_update_alert, bot_announcement',
+          'Invalid subscription type. Supported: liquidation, l4book, wallet_event, liquidation_alert, fill_alert, doc_update_alert, bot_announcement, alert',
         code: 'INVALID_SUBSCRIPTION',
         timestamp: new Date().toISOString(),
       });
@@ -521,6 +532,7 @@ export class InternalWebSocketServer {
     this.decrementIpCount(client.ip);
     this.clients.delete(clientId);
     this.clientsBySocket.delete(ws);
+    this.authenticatedSockets.delete(ws);
     this.messageCounters.delete(clientId);
 
     logDeduplicator.info('InternalWebSocketServer: Client disconnected', {
@@ -764,6 +776,38 @@ export class InternalWebSocketServer {
   }
 
   /**
+   * Send a serialized privileged message to every authenticated client that
+   * subscribed to `type`. Returns how many received it.
+   */
+  private sendToSubscribers(type: WSInternalSubscriptionType, serialized: string): number {
+    let sentCount = 0;
+    for (const ws of this.authenticatedSockets) {
+      const clientId = this.clientsBySocket.get(ws);
+      const client = clientId ? this.clients.get(clientId) : undefined;
+      if (!client || !client.subscriptions.some((s) => s.type === type)) continue;
+      this.sendRawMessage(ws, serialized);
+      sentCount++;
+    }
+    return sentCount;
+  }
+
+  /**
+   * Generic alert channel: any alert type the backend formats as text. The
+   * bot forwards `message` to `telegramId` without knowing the type, so new
+   * alert types need no bot release. `kind` is informational (logs, metrics).
+   * @returns Number of WebSocket clients that received the message.
+   */
+  public broadcastAlert(telegramId: string, message: string, kind: string): number {
+    if (!this.wss) return 0;
+    const serialized = JSON.stringify({
+      type: 'alert',
+      data: { telegramId, message, kind },
+      timestamp: new Date().toISOString(),
+    } satisfies WSServerMessage);
+    return this.sendToSubscribers('alert', serialized);
+  }
+
+  /**
    * Broadcast a wallet event to all clients subscribed to 'wallet_event'.
    * The Telegram bot (1 connected client) receives the event and routes it
    * to the correct Telegram user via telegramId in the payload.
@@ -781,21 +825,10 @@ export class InternalWebSocketServer {
       timestamp: new Date().toISOString(),
     } satisfies WSServerMessage);
 
-    let sentCount = 0;
-
-    for (const [ws, clientId] of this.clientsBySocket) {
-      const client = this.clients.get(clientId);
-      if (!client) continue;
-
-      const hasSub = client.subscriptions.some((s) => s.type === 'wallet_event');
-      if (!hasSub) continue;
-
-      this.sendRawMessage(ws, serialized);
-      sentCount++;
-    }
+    const sentCount = this.sendToSubscribers('wallet_event', serialized);
 
     if (sentCount > 0) {
-      logDeduplicator.info('InternalWebSocketServer: Broadcast wallet event', {
+      logDeduplicator.debug('InternalWebSocketServer: Broadcast wallet event', {
         telegramId,
         tradeId: trade.tradeId,
         coin: trade.coin,
@@ -818,21 +851,10 @@ export class InternalWebSocketServer {
       timestamp: new Date().toISOString(),
     } satisfies WSServerMessage);
 
-    let sentCount = 0;
-
-    for (const [ws, clientId] of this.clientsBySocket) {
-      const client = this.clients.get(clientId);
-      if (!client) continue;
-
-      const hasSub = client.subscriptions.some((s) => s.type === 'liquidation_alert');
-      if (!hasSub) continue;
-
-      this.sendRawMessage(ws, serialized);
-      sentCount++;
-    }
+    const sentCount = this.sendToSubscribers('liquidation_alert', serialized);
 
     if (sentCount > 0) {
-      logDeduplicator.info('InternalWebSocketServer: Broadcast liquidation alert', {
+      logDeduplicator.debug('InternalWebSocketServer: Broadcast liquidation alert', {
         telegramId,
         clientCount: sentCount,
       });
@@ -855,21 +877,10 @@ export class InternalWebSocketServer {
       timestamp: new Date().toISOString(),
     } satisfies WSServerMessage);
 
-    let sentCount = 0;
-
-    for (const [ws, clientId] of this.clientsBySocket) {
-      const client = this.clients.get(clientId);
-      if (!client) continue;
-
-      const hasSub = client.subscriptions.some((s) => s.type === 'fill_alert');
-      if (!hasSub) continue;
-
-      this.sendRawMessage(ws, serialized);
-      sentCount++;
-    }
+    const sentCount = this.sendToSubscribers('fill_alert', serialized);
 
     if (sentCount > 0) {
-      logDeduplicator.info('InternalWebSocketServer: Broadcast fill alert', {
+      logDeduplicator.debug('InternalWebSocketServer: Broadcast fill alert', {
         telegramId,
         clientCount: sentCount,
       });
@@ -891,15 +902,7 @@ export class InternalWebSocketServer {
       timestamp: new Date().toISOString(),
     } satisfies WSServerMessage);
 
-    let sentCount = 0;
-
-    for (const [ws, clientId] of this.clientsBySocket) {
-      const client = this.clients.get(clientId);
-      if (!client) continue;
-      if (!client.subscriptions.some((s) => s.type === 'bot_announcement')) continue;
-      this.sendRawMessage(ws, serialized);
-      sentCount++;
-    }
+    const sentCount = this.sendToSubscribers('bot_announcement', serialized);
 
     if (sentCount === 0) {
       logDeduplicator.warn('InternalWebSocketServer: [announce_ws] Broadcast bot announcement to 0 clients (bot disconnected?)', {
@@ -923,18 +926,7 @@ export class InternalWebSocketServer {
       timestamp: new Date().toISOString(),
     } satisfies WSServerMessage);
 
-    let sentCount = 0;
-
-    for (const [ws, clientId] of this.clientsBySocket) {
-      const client = this.clients.get(clientId);
-      if (!client) continue;
-
-      const hasSub = client.subscriptions.some((s) => s.type === 'doc_update_alert');
-      if (!hasSub) continue;
-
-      this.sendRawMessage(ws, serialized);
-      sentCount++;
-    }
+    const sentCount = this.sendToSubscribers('doc_update_alert', serialized);
 
     if (sentCount > 0) {
       logDeduplicator.info('InternalWebSocketServer: Broadcast doc update alert', {

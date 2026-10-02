@@ -220,6 +220,41 @@ export class RedisService {
     }
   }
 
+  /** Read many keys in one round trip. Null entries for misses; null overall when Redis is unavailable. */
+  public async mget(keys: string[]): Promise<(string | null)[] | null> {
+    if (!keys.length) return [];
+    if (!redisAvailable()) return null;
+    try {
+      const values = await redisNormal.mget(...keys);
+      recordRedisSuccess();
+      return values;
+    } catch (error) {
+      recordRedisFailure();
+      logDeduplicator.error('Redis mget error', {
+        count: keys.length,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    }
+  }
+
+  /** Write many keys with one TTL in one round trip (best effort). */
+  public async msetEx(entries: [string, string][], ttlSeconds: number): Promise<void> {
+    if (!entries.length || !redisAvailable()) return;
+    try {
+      const pipeline = redisNormal.pipeline();
+      for (const [k, v] of entries) pipeline.set(k, v, 'EX', ttlSeconds);
+      await pipeline.exec();
+      recordRedisSuccess();
+    } catch (error) {
+      recordRedisFailure();
+      logDeduplicator.error('Redis msetEx error', {
+        count: entries.length,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
   /**
    * Claim many keys at once (SET NX EX, one pipeline round trip). Returns, per
    * key, true when this call created it (first claim) and false when it already

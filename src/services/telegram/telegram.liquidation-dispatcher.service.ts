@@ -4,7 +4,7 @@ import { logDeduplicator } from '../../utils/logDeduplicator';
 import { LiquidationsWebSocketService } from '../liquidations/liquidations.ws.service';
 import { InternalWebSocketServer } from '../../websocket/ws.server';
 import { AggregatedLiquidation } from '../../types/liquidations.types';
-import { formatLiquidationAlert } from '../../utils/telegram.formatting';
+import { formatLiquidationAlert, formatLiquidationDigestLine } from '../../utils/telegram.formatting';
 import { startSentAlertPurge } from '../../utils/telegram.alert-dedup';
 import { AlertEngine, AlertRule } from '../alerts/alert-engine';
 
@@ -83,6 +83,7 @@ export class TelegramLiquidationDispatcherService {
     deliver: (rule, liq) => {
       InternalWebSocketServer.getInstance().broadcastLiquidationAlert(rule.telegramId, formatLiquidationAlert(liq));
     },
+    summarize: (_rule, liq) => formatLiquidationDigestLine(liq),
     notify: (telegramId, message) => {
       InternalWebSocketServer.getInstance().broadcastLiquidationAlert(telegramId, message);
     },

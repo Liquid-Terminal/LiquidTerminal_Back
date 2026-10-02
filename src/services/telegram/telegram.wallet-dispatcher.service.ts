@@ -5,6 +5,7 @@ import { TelegramWalletSubscriptionService } from './telegram.wallet-subscriptio
 import { InternalWebSocketServer } from '../../websocket/ws.server';
 import { CompletedTrade } from '../../types/wallet-events.types';
 import { startSentAlertPurge } from '../../utils/telegram.alert-dedup';
+import { formatTradeDigestLine } from '../../utils/telegram.formatting';
 import { AlertEngine, AlertRule } from '../alerts/alert-engine';
 
 const CONTEXT = 'TelegramWalletDispatcherService';
@@ -66,7 +67,8 @@ export class TelegramWalletDispatcherService {
     deliver: (rule, trade) => {
       InternalWebSocketServer.getInstance().broadcastWalletEvent(rule.telegramId, trade, rule.name);
     },
-    // wallet_event carries a trade, not text: notices go through the plain-text channel.
+    summarize: (rule, trade) => formatTradeDigestLine(trade, rule.name),
+    // wallet_event carries a trade, not text: digests go through the plain-text channel.
     notify: (telegramId, message) => {
       InternalWebSocketServer.getInstance().broadcastFillAlert(telegramId, message);
     },

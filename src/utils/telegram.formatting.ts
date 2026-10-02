@@ -1,5 +1,6 @@
 import { AggregatedLiquidation } from '../types/liquidations.types';
 import { AggregatedFill } from '../types/fill-alerts.types';
+import { CompletedTrade } from '../types/wallet-events.types';
 
 /**
  * Format a dollar amount in a human-readable way
@@ -231,4 +232,29 @@ ${transactionBlock}
 <i>Data by <a href="https://app.hypedexer.com/">HypeDexer</a> (Enigma Validator)</i>
 <a href="https://x.com/liquidterminal">𝕏</a> • <a href="https://liquidterminal.xyz/">Website</a>
 `.trim();
+}
+
+// ==================== DIGEST LINES ====================
+// One line per alert, used when a user is over the per-minute budget and their
+// alerts are grouped into a digest message (see AlertEngine).
+
+const walletLink = (wallet: string, label?: string) =>
+  `<a href="https://liquidterminal.xyz/market/tracker/wallet/${wallet}">${escapeHtml(label || shortenAddress(wallet))}</a>`;
+
+export function formatFillDigestLine(fill: AggregatedFill, subscriptionName: string, walletLabel?: string): string {
+  const side = fill.side === 'B' ? '🟢' : '🔴';
+  const what = fill.source === 'perp' && fill.dir ? escapeHtml(fill.dir) : fill.side === 'B' ? 'Buy' : 'Sell';
+  const pnl =
+    fill.closedPnlTotal !== undefined && fill.closedPnlTotal !== 0 ? ` · PnL ${formatSignedPnl(fill.closedPnlTotal)}` : '';
+  return `${side} <b>${escapeHtml(fill.coin)}</b> ${what} ${formatAmount(fill.notionalUsd)}${pnl} · ${walletLink(fill.wallet, walletLabel)} · <i>${escapeHtml(subscriptionName)}</i>`;
+}
+
+export function formatLiquidationDigestLine(liq: AggregatedLiquidation): string {
+  const dir = liq.liq_dir ? ` ${liq.liq_dir}` : '';
+  return `🚨 <b>${escapeHtml(liq.coin)}</b>${dir} liquidated ${formatAmount(liq.notional_total)} · ${walletLink(liq.liquidated_user.toLowerCase())}`;
+}
+
+export function formatTradeDigestLine(trade: CompletedTrade, subscriptionName: string): string {
+  const icon = trade.pnlRealized >= 0 ? '✅' : '❌';
+  return `${icon} <b>${escapeHtml(trade.coin)}</b> ${trade.direction} closed · PnL ${formatSignedPnl(trade.pnlRealized)} on ${formatAmount(trade.positionValue)} · ${walletLink(trade.user)} · <i>${escapeHtml(subscriptionName)}</i>`;
 }

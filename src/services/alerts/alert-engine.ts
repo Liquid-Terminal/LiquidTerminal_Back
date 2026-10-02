@@ -16,11 +16,12 @@ import { RecentEventCache } from '../../utils/telegram.alert-dedup';
  * - Dedup claims the (scope, event) keys in one Redis pipeline (SET NX EX), with
  *   an in-memory cache in front. If Redis is down it falls back to memory and
  *   fails open, as before. No database write per alert any more.
- * - A per-user budget caps how many alerts one Telegram user receives per
- *   minute, so one noisy rule cannot eat the bot's global send budget; the
- *   overflow is reported once per window instead of dropped silently.
- * - Event batches go through a bounded serial queue: a burst can't grow
- *   memory without limit, it drops the oldest batches and counts them.
+ * - A per-user budget (50 individual alerts/min, under the bot's 60/min
+ *   per-chat rate) stops one noisy rule from building an ever-growing backlog
+ *   in the bot; past it, alerts are grouped into digests, so they still
+ *   arrive on time.
+ * - Events go through a serial queue that drains in large passes (one Redis
+ *   round trip per pass); its cap is a memory guard, counted if ever hit.
  * - Counters per pipeline are logged every 5 minutes.
  *
  * Adding an alert type means writing a pipeline, not another dispatcher.
@@ -55,7 +56,9 @@ export interface AlertPipeline<E, R extends AlertRule<E> = AlertRule<E>> {
   loadRules: () => Promise<R[]>;
   keys: (event: E) => EventKeys;
   deliver: (rule: R, event: E) => void;
-  /** Sends a plain notice to a user (used for the throttling notice). */
+  /** One short HTML line for an alert sent inside a digest (over-budget users). */
+  summarize: (rule: R, event: E) => string;
+  /** Sends a plain HTML message to a user (used for digests). */
   notify: (telegramId: string, message: string) => void;
 }
 
@@ -64,8 +67,8 @@ export interface AlertEngineOptions {
   refreshMs?: number;
   /** Per-user budget. Defaults to the process-wide shared limiter. */
   limiter?: DeliveryLimiter;
-  /** Event batches waiting before the oldest are dropped. */
-  maxPendingBatches?: number;
+  /** Events waiting before the oldest are dropped (memory guard, never hit in normal load). */
+  maxPendingEvents?: number;
   /** Dedup key lifetime. */
   dedupTtlSeconds?: number;
 }
@@ -119,9 +122,9 @@ function push<K, V>(map: Map<K, V[]>, key: K, value: V): void {
   else map.set(key, [value]);
 }
 
-/** Sliding per-user budget; reports what it held back once per window. */
+/** Fixed-window per-user budget. */
 export class DeliveryLimiter {
-  private readonly windows = new Map<string, { start: number; sent: number; held: number }>();
+  private readonly windows = new Map<string, { start: number; sent: number }>();
 
   constructor(
     readonly limit: number,
@@ -129,52 +132,52 @@ export class DeliveryLimiter {
     private readonly now: () => number = Date.now
   ) {}
 
-  /** True if the user may receive one more alert now. */
+  /** True if the user may receive one more individual alert now. */
   allow(user: string): boolean {
     const t = this.now();
     let w = this.windows.get(user);
     if (!w || t - w.start >= this.windowMs) {
-      w = { start: t, sent: 0, held: 0 };
+      w = { start: t, sent: 0 };
       this.windows.set(user, w);
+      if (this.windows.size > 50_000) this.prune(t);
     }
     if (w.sent < this.limit) {
       w.sent += 1;
       return true;
     }
-    w.held += 1;
     return false;
   }
 
-  /** Users whose window has closed with alerts held back; resets them. */
-  drainHeld(): { user: string; held: number }[] {
-    const t = this.now();
-    const out: { user: string; held: number }[] = [];
-    for (const [user, w] of this.windows) {
-      if (t - w.start < this.windowMs) continue;
-      if (w.held > 0) out.push({ user, held: w.held });
-      this.windows.delete(user);
-    }
-    return out;
+  private prune(t: number): void {
+    for (const [user, w] of this.windows) if (t - w.start >= this.windowMs) this.windows.delete(user);
   }
 }
 
-/** Serial queue with a cap on waiting batches: drops the oldest instead of growing. */
+/**
+ * Serial event queue. Producers push events (any batch size); the worker takes
+ * everything waiting, up to `chunk` events, in one call, so a burst is handled
+ * in a few large passes instead of thousands of small ones. The cap counts
+ * events and is a memory guard only: past it the oldest events are dropped
+ * and counted, which should never happen in normal operation.
+ */
 export class BoundedSerialQueue<T> {
-  private readonly pending: T[] = [];
+  private pending: T[] = [];
   private running = false;
   dropped = 0;
 
   constructor(
-    private readonly max: number,
-    private readonly worker: (item: T) => Promise<void>,
-    private readonly context: string
+    private readonly maxEvents: number,
+    private readonly worker: (items: T[]) => Promise<void>,
+    private readonly context: string,
+    private readonly chunk: number = 5_000
   ) {}
 
-  push(item: T): void {
-    this.pending.push(item);
-    if (this.pending.length > this.max) {
-      this.pending.shift();
-      this.dropped += 1;
+  push(items: T[]): void {
+    for (const item of items) this.pending.push(item);
+    const over = this.pending.length - this.maxEvents;
+    if (over > 0) {
+      this.pending.splice(0, over);
+      this.dropped += over;
     }
     if (!this.running) void this.drain();
   }
@@ -186,9 +189,10 @@ export class BoundedSerialQueue<T> {
   private async drain(): Promise<void> {
     this.running = true;
     while (this.pending.length) {
-      const item = this.pending.shift() as T;
+      const items = this.pending.length <= this.chunk ? this.pending : this.pending.slice(0, this.chunk);
+      this.pending = this.pending.length <= this.chunk ? [] : this.pending.slice(this.chunk);
       try {
-        await this.worker(item);
+        await this.worker(items);
       } catch (error) {
         logDeduplicator.error(`${this.context}: batch failed`, {
           error: error instanceof Error ? error.message : String(error),
@@ -200,10 +204,18 @@ export class BoundedSerialQueue<T> {
 }
 
 /**
- * One budget per Telegram user across every alert type: the cap protects the
- * bot's global send rate, so fills and liquidations share it.
+ * One budget per Telegram user across every alert type. The bot sends at most
+ * 1 message/s to a chat (Telegram's per-chat limit), 60/min. Individual alerts
+ * get 50 of those; past it, alerts are grouped into digests (at most
+ * DIGEST_MESSAGES_PER_FLUSH messages every DIGEST_FLUSH_MS, i.e. 8/min), so
+ * an over-active user still sees every alert, on time, in fewer messages,
+ * instead of a backlog that the old pipeline delivered later and later.
  */
-export const DEFAULT_PER_USER_LIMIT = 30;
+export const DEFAULT_PER_USER_LIMIT = 50;
+const DIGEST_FLUSH_MS = 15_000;
+const DIGEST_MESSAGES_PER_FLUSH = 2;
+const DIGEST_MAX_CHARS = 3_800; // Telegram caps a message at 4096
+const DIGEST_MAX_LINES_HELD = 2_000; // memory guard per user
 export const DEFAULT_PER_USER_WINDOW_MS = 60_000;
 export const sharedDeliveryLimiter = new DeliveryLimiter(DEFAULT_PER_USER_LIMIT, DEFAULT_PER_USER_WINDOW_MS);
 
@@ -212,49 +224,55 @@ interface Counters {
   candidates: number;
   matched: number;
   duplicates: number;
-  throttled: number;
+  digested: number;
+  digestOverflow: number;
   sent: number;
 }
 
-const zero = (): Counters => ({ events: 0, candidates: 0, matched: 0, duplicates: 0, throttled: 0, sent: 0 });
+const zero = (): Counters => ({ events: 0, candidates: 0, matched: 0, duplicates: 0, digested: 0, digestOverflow: 0, sent: 0 });
 
 export class AlertEngine<E, R extends AlertRule<E> = AlertRule<E>> {
   private index: RuleIndex<E, R> = new RuleIndex<E, R>([]);
   private readonly recent = new RecentEventCache();
   private readonly limiter: DeliveryLimiter;
-  private readonly queue: BoundedSerialQueue<E[]>;
+  private readonly queue: BoundedSerialQueue<E>;
   private counters = zero();
   private timers: NodeJS.Timeout[] = [];
   private loaded = false;
   private refreshing: Promise<void> | null = null;
+  /** Over-budget alerts waiting for the next digest, per Telegram user. */
+  private readonly held = new Map<string, { lines: string[]; overflow: number }>();
   private readonly opts: Required<AlertEngineOptions>;
 
   constructor(private readonly pipeline: AlertPipeline<E, R>, options: AlertEngineOptions = {}) {
     this.opts = {
       refreshMs: 30_000,
       limiter: sharedDeliveryLimiter,
-      maxPendingBatches: 500,
+      maxPendingEvents: 100_000,
       dedupTtlSeconds: 24 * 60 * 60,
       ...options,
     };
     this.limiter = this.opts.limiter;
-    this.queue = new BoundedSerialQueue(this.opts.maxPendingBatches, (batch) => this.process(batch), `AlertEngine:${pipeline.name}`);
+    this.queue = new BoundedSerialQueue<E>(this.opts.maxPendingEvents, (batch) => this.process(batch), `AlertEngine:${pipeline.name}`);
   }
 
   start(): void {
     void this.refresh();
     this.timers.push(setInterval(() => void this.refresh(), this.opts.refreshMs));
-    this.timers.push(setInterval(() => this.flushHeldNotices(), 15_000));
+    this.timers.push(setInterval(() => this.flushDigests(), DIGEST_FLUSH_MS));
     this.timers.push(setInterval(() => this.logCounters(), 5 * 60_000));
     for (const t of this.timers) t.unref?.();
   }
 
   stop(): void {
+    // Send what is still waiting for a digest instead of dropping it.
+    this.flushDigests(Number.POSITIVE_INFINITY);
     for (const t of this.timers) clearInterval(t);
     this.timers = [];
     this.index = new RuleIndex<E, R>([]);
     this.loaded = false;
     this.recent.clear();
+    this.held.clear();
   }
 
   /** Queue a batch of events. Never blocks the caller. */
@@ -285,75 +303,116 @@ export class AlertEngine<E, R extends AlertRule<E> = AlertRule<E>> {
     return this.refreshing;
   }
 
-  /** Exposed for tests: run one batch through matching, dedup, budget and delivery. */
+  /**
+   * Run one batch through matching, dedup, budget and delivery (exposed for
+   * tests). Matching is synchronous; dedup is one Redis round trip for the
+   * whole batch; delivery keeps the events' order.
+   */
   async process(events: E[]): Promise<void> {
     if (!this.loaded) await this.refresh();
     const index = this.index;
     if (index.size === 0) return;
 
+    const fresh: { rule: R; event: E; key: string; eventId: string }[] = [];
     for (const event of events) {
       this.counters.events += 1;
       const keys = this.pipeline.keys(event);
       const candidates = index.candidates(keys);
       if (!candidates.length) continue;
       this.counters.candidates += candidates.length;
-
-      const matched: R[] = [];
       for (const rule of candidates) {
-        if (rule.matches(event)) matched.push(rule);
-      }
-      if (!matched.length) continue;
-      this.counters.matched += matched.length;
-
-      // Memory first, then one Redis round trip for the rest.
-      const fresh: { rule: R; key: string }[] = [];
-      for (const rule of matched) {
+        if (!rule.matches(event)) continue;
+        this.counters.matched += 1;
+        // Memory first: repeats inside the stream never reach Redis.
         const key = `alert:${this.pipeline.name}:${rule.dedupScope}:${keys.id}`;
         if (this.recent.has(key)) {
           this.counters.duplicates += 1;
           continue;
         }
         this.recent.add(key);
-        fresh.push({ rule, key });
+        fresh.push({ rule, event, key, eventId: keys.id });
       }
-      if (!fresh.length) continue;
-      // null = Redis unavailable: memory dedup only, fail open.
-      const claimed = await redisService.claimKeys(fresh.map((f) => f.key), this.opts.dedupTtlSeconds);
+    }
+    if (!fresh.length) return;
 
-      fresh.forEach(({ rule }, i) => {
-        if (claimed && !claimed[i]) {
-          this.counters.duplicates += 1;
-          return;
-        }
-        if (!this.limiter.allow(rule.telegramId)) {
-          this.counters.throttled += 1;
-          return;
-        }
-        try {
-          this.pipeline.deliver(rule, event);
-          this.counters.sent += 1;
-        } catch (error) {
-          logDeduplicator.error(`AlertEngine:${this.pipeline.name}: delivery failed`, {
-            ruleId: rule.id,
-            eventId: keys.id,
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
-      });
+    // One pipeline for the batch. null = Redis unavailable: memory dedup only, fail open.
+    const claimed = await redisService.claimKeys(fresh.map((f) => f.key), this.opts.dedupTtlSeconds);
+
+    fresh.forEach(({ rule, event, eventId }, i) => {
+      if (claimed && !claimed[i]) {
+        this.counters.duplicates += 1;
+        return;
+      }
+      if (!this.limiter.allow(rule.telegramId)) {
+        this.hold(rule, event);
+        return;
+      }
+      try {
+        this.pipeline.deliver(rule, event);
+        this.counters.sent += 1;
+      } catch (error) {
+        logDeduplicator.error(`AlertEngine:${this.pipeline.name}: delivery failed`, {
+          ruleId: rule.id,
+          eventId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    });
+  }
+
+  private hold(rule: R, event: E): void {
+    let h = this.held.get(rule.telegramId);
+    if (!h) {
+      h = { lines: [], overflow: 0 };
+      this.held.set(rule.telegramId, h);
+    }
+    if (h.lines.length >= DIGEST_MAX_LINES_HELD) {
+      h.overflow += 1;
+      return;
+    }
+    try {
+      h.lines.push(this.pipeline.summarize(rule, event));
+      this.counters.digested += 1;
+    } catch {
+      h.overflow += 1;
     }
   }
 
-  private flushHeldNotices(): void {
-    for (const { user, held } of this.limiter.drainHeld()) {
-      try {
-        this.pipeline.notify(
-          user,
-          `⏸ <b>${held} alert${held > 1 ? 's' : ''} held back</b> in the last minute: ` +
-            `alerts are capped at ${this.limiter.limit} per minute. Raise the minimum size or narrow the coins to see fewer, bigger moves.`
-        );
-      } catch {
-        // Best effort.
+  /**
+   * Send each over-budget user their held alerts as digests: up to
+   * DIGEST_MESSAGES_PER_FLUSH messages of whole lines. Lines that don't fit
+   * wait for the next flush; only past DIGEST_MAX_LINES_HELD are they counted
+   * instead of listed (and the count is always shown).
+   */
+  flushDigests(maxMessages: number = DIGEST_MESSAGES_PER_FLUSH): void {
+    for (const [user, h] of this.held) {
+      const messages: string[] = [];
+      while (h.lines.length && messages.length < maxMessages) {
+        const header = `📦 <b>More ${this.pipeline.name} alerts</b> <i>(grouped: over ${this.limiter.limit}/min)</i>\n`;
+        let body = '';
+        let taken = 0;
+        while (taken < h.lines.length && header.length + body.length + h.lines[taken].length + 1 < DIGEST_MAX_CHARS) {
+          body += h.lines[taken] + '\n';
+          taken += 1;
+        }
+        if (taken === 0) taken = 1; // a single oversized line still moves on
+        h.lines.splice(0, taken);
+        messages.push(header + body);
       }
+      if (!h.lines.length && h.overflow) {
+        const last = messages.length ? messages.pop() as string : '';
+        messages.push(`${last}… and ${h.overflow} more not listed. Raise the minimum size or narrow the coins to see every alert.`);
+        this.counters.digestOverflow += h.overflow;
+        h.overflow = 0;
+      }
+      for (const m of messages) {
+        try {
+          this.pipeline.notify(user, m);
+        } catch {
+          // Best effort.
+        }
+      }
+      if (!h.lines.length && !h.overflow) this.held.delete(user);
     }
   }
 
@@ -361,10 +420,13 @@ export class AlertEngine<E, R extends AlertRule<E> = AlertRule<E>> {
     const c = this.counters;
     this.counters = zero();
     if (!c.events && !this.queue.dropped) return;
+    let heldLines = 0;
+    for (const h of this.held.values()) heldLines += h.lines.length;
     logDeduplicator.info(`AlertEngine:${this.pipeline.name}: 5 min summary`, {
       rules: this.index.size,
       ...c,
       queueDepth: this.queue.depth,
+      digestBacklog: heldLines,
       droppedBatches: this.queue.dropped,
     });
     this.queue.dropped = 0;

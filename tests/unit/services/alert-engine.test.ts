@@ -71,49 +71,67 @@ describe('RuleIndex', () => {
 });
 
 describe('DeliveryLimiter', () => {
-  it('caps a user per window and reports what it held back once', () => {
+  it('caps a user per window, independently of other users, and resets', () => {
     let t = 0;
     const lim = new DeliveryLimiter(3, 1000, () => t);
     expect([1, 2, 3, 4, 5].map(() => lim.allow('u'))).toEqual([true, true, true, false, false]);
     expect(lim.allow('other')).toBe(true);
-    expect(lim.drainHeld()).toEqual([]);
     t = 1000;
-    expect(lim.drainHeld()).toEqual([{ user: 'u', held: 2 }]);
     expect(lim.allow('u')).toBe(true);
   });
 });
 
 describe('BoundedSerialQueue', () => {
-  it('drops the oldest batches past its cap and processes in order', async () => {
+  it('drains everything waiting in large passes, in order, without loss under its cap', async () => {
+    const passes: number[][] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((res) => (release = res));
+    const q = new BoundedSerialQueue<number>(10_000, async (items) => {
+      if (!passes.length) await gate;
+      passes.push(items);
+    }, 'test', 1000);
+    q.push([0]);
+    for (let i = 1; i <= 2500; i++) q.push([i]); // burst of single-event batches
+    release();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(q.dropped).toBe(0);
+    expect(passes.flat()).toEqual(Array.from({ length: 2501 }, (_, i) => i));
+    expect(passes.length).toBeLessThanOrEqual(4); // [0], then 1000 + 1000 + 500
+  });
+
+  it('drops the oldest events only past its cap, and counts them', async () => {
     const seen: number[] = [];
     let release!: () => void;
     const gate = new Promise<void>((res) => (release = res));
-    const q = new BoundedSerialQueue<number>(2, async (n) => {
-      if (n === 0) await gate;
-      seen.push(n);
+    const q = new BoundedSerialQueue<number>(3, async (items) => {
+      if (!seen.length && items[0] === 0) await gate;
+      seen.push(...items);
     }, 'test');
-    [0, 1, 2, 3, 4].forEach((n) => q.push(n));
+    q.push([0]);
+    q.push([1, 2, 3, 4, 5]);
     expect(q.dropped).toBe(2);
     release();
     await new Promise((r) => setTimeout(r, 10));
-    expect(seen).toEqual([0, 3, 4]);
+    expect(seen).toEqual([0, 3, 4, 5]);
   });
 });
 
 describe('AlertEngine', () => {
   const makeEngine = (rules: AlertRule<Ev>[], limiter = new DeliveryLimiter(100, 60_000)) => {
     const delivered: string[] = [];
+    const notices: { user: string; text: string }[] = [];
     const engine = new AlertEngine<Ev>(
       {
         name: 'test',
         loadRules: async () => rules,
         keys: (e) => ({ id: e.id, wallets: [e.wallet], coin: e.coin }),
         deliver: (rule, e) => delivered.push(`${rule.id}:${e.id}`),
-        notify: () => undefined,
+        summarize: (rule, e) => `line ${rule.id}:${e.id}`,
+        notify: (user, text) => notices.push({ user, text }),
       },
       { limiter }
     );
-    return { engine, delivered };
+    return { engine, delivered, notices };
   };
   const rule = (id: string, extra: Partial<AlertRule<Ev>> = {}): AlertRule<Ev> => ({
     id, telegramId: 't1', wallets: ['0xa'], coins: [], dedupScope: id, matches: () => true, ...extra,
@@ -151,11 +169,32 @@ describe('AlertEngine', () => {
     expect(delivered).toEqual(['r1:e1']);
   });
 
-  it('holds back alerts past the per-user budget', async () => {
+  it('groups alerts past the per-user budget into a digest, losing none', async () => {
     claimKeys.mockImplementation(async (keys: string[]) => keys.map(() => true));
-    const { engine, delivered } = makeEngine([rule('r1')], new DeliveryLimiter(2, 60_000));
-    await engine.process([ev('e1'), ev('e2'), ev('e3')]);
-    expect(delivered).toEqual(['r1:e1', 'r1:e2']);
+    const { engine, delivered, notices } = makeEngine([rule('r1')], new DeliveryLimiter(2, 60_000));
+    await engine.process(Array.from({ length: 50 }, (_, i) => ev(`e${i}`)));
+    expect(delivered).toEqual(['r1:e0', 'r1:e1']);
+    engine.flushDigests();
+    expect(notices).toHaveLength(1);
+    expect(notices[0].user).toBe('t1');
+    const listed = notices[0].text.split('\n').filter((l) => l.startsWith('line '));
+    expect(listed).toEqual(Array.from({ length: 48 }, (_, i) => `line r1:e${i + 2}`));
+  });
+
+  it('spreads a huge digest over successive flushes, under Telegram length limits', async () => {
+    claimKeys.mockImplementation(async (keys: string[]) => keys.map(() => true));
+    const { engine, notices } = makeEngine([rule('r1')], new DeliveryLimiter(0, 60_000));
+    await engine.process(Array.from({ length: 1500 }, (_, i) => ev(`e${i}`)));
+    const flushes: number[] = [];
+    for (let i = 0; i < 20 && (i === 0 || flushes[flushes.length - 1] > 0); i++) {
+      const before = notices.length;
+      engine.flushDigests();
+      flushes.push(notices.length - before);
+    }
+    expect(Math.max(...flushes)).toBeLessThanOrEqual(2);
+    expect(notices.every((n) => n.text.length <= 4096)).toBe(true);
+    const listed = notices.flatMap((n) => n.text.split('\n').filter((l) => l.startsWith('line ')));
+    expect(listed).toHaveLength(1500);
   });
 });
 

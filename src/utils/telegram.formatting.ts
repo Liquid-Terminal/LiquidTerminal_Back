@@ -157,14 +157,28 @@ function formatDurationMs(durationMs: number): string {
  * Format a Fill alert message for Telegram (HTML parse mode).
  * Driven by HypeDexer `allFills` (perp) and `fills_spot` (spot) — an executed order.
  */
-export function formatFillAlert(fill: AggregatedFill, subscriptionName: string): string {
+export interface FillAlertContext {
+  /** Name the user gave this wallet in their Liquid Terminal list. */
+  walletLabel?: string;
+  /** The alert follows a Liquid Terminal list: link the wallet to its tracker page. */
+  fromList?: boolean;
+}
+
+export function formatFillAlert(
+  fill: AggregatedFill,
+  subscriptionName: string,
+  context: FillAlertContext = {}
+): string {
   const isBuy = fill.side === 'B';
   const sideEmoji = isBuy ? '🟢' : '🔴';
   const sideLabel = isBuy ? 'BUY' : 'SELL';
   const sourceTag = fill.source === 'perp' ? 'PERP' : 'SPOT';
   const twapTag = fill.twapId != null ? ' <code>TWAP</code>' : '';
 
-  const liquidTerminalAddress = `https://liquidterminal.xyz/explorer/address/${fill.wallet}`;
+  const liquidTerminalAddress = context.fromList
+    ? `https://liquidterminal.xyz/market/tracker/wallet/${fill.wallet}`
+    : `https://liquidterminal.xyz/explorer/address/${fill.wallet}`;
+  const walletLabel = context.walletLabel ? `<b>${escapeHtml(context.walletLabel)}</b> ` : '';
   const hypurrscanAddress = `https://hypurrscan.io/address/${fill.wallet}`;
 
   const dirLine =
@@ -210,7 +224,7 @@ ${sideEmoji} <b>${escapeHtml(fill.coin)}</b> ${sideLabel}
 
 ${transactionBlock}
 
-<b>👛 Wallet</b> <code>${escapeHtml(shortenAddress(fill.wallet))}</code>
+<b>👛 Wallet</b> ${walletLabel}<code>${escapeHtml(shortenAddress(fill.wallet))}</code>
 <a href="${liquidTerminalAddress}">Liquid Terminal</a> • <a href="${hypurrscanAddress}">Hypurrscan</a>
 
 ━━━━━━━━━━━━━━━━━━━━

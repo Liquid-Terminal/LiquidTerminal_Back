@@ -220,6 +220,7 @@ model User {
   assignedEducationalResources    EducationalResourceCategory[] @relation("EducationalResourceAssigner")
   readLists                       ReadList[]
   walletLists                     WalletList[]
+  walletListAlerts                WalletListAlert[]
   submittedPublicGoods            PublicGood[]                  @relation("SubmittedGoods")
   reviewedPublicGoods             PublicGood[]                  @relation("ReviewedGoods")
   reviewedEducationalResources    EducationalResource[]         @relation("EducationalResourceReviewer")
@@ -307,6 +308,26 @@ model WalletList {
   
   creator     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   items       WalletListItem[]
+  alerts      WalletListAlert[]
+}
+
+/// Telegram alerts driven by a wallet list. The alert itself is a fill
+/// subscription in the Telegram DB (fillSubscriptionId, no cross-DB FK); its
+/// wallet filter is re-resolved from the list on every dispatcher refresh, so
+/// adding or removing a wallet in Liquid Terminal changes the alerts at once.
+/// A user can follow their own lists and any public list.
+model WalletListAlert {
+  id                 Int        @id @default(autoincrement())
+  userId             Int
+  walletListId       Int
+  fillSubscriptionId String     @unique @db.VarChar(64)
+  createdAt          DateTime   @default(now()) @db.Timestamp(6)
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  walletList WalletList @relation(fields: [walletListId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, walletListId])
+  @@index([walletListId])
 }
 
 model WalletListItem {

@@ -197,7 +197,10 @@ export class TelegramFillAlertDispatcherService {
 
       // Format message and broadcast via /ws.
       try {
-        const message = formatFillAlert(fill, sub.name);
+        const message = formatFillAlert(fill, sub.name, {
+          walletLabel: sub.walletLabels?.[fill.wallet],
+          fromList: sub.walletListId !== undefined,
+        });
         InternalWebSocketServer.getInstance().broadcastFillAlert(sub.telegramId, message);
 
         logDeduplicator.info('TelegramFillAlertDispatcherService: Alert dispatched', {

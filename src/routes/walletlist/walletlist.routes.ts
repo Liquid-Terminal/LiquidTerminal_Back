@@ -15,6 +15,9 @@ import { WalletListError } from '../../errors/walletlist.errors';
 import { logDeduplicator } from '../../utils/logDeduplicator';
 import { prisma } from '../../core/prisma.service';
 import { XP_REWARDS } from '../../constants/xp.constants';
+import { z } from 'zod';
+import { WalletListAlertService } from '../../services/telegram/wallet-list-alert.service';
+import { TelegramError } from '../../errors/telegram.errors';
 
 const router = express.Router();
 const walletListService = new WalletListService();
@@ -111,6 +114,72 @@ router.get('/userlists', validatePrivyToken, validateWalletListQuery, (async (re
       return res.status(error.statusCode).json({ success: false, error: error.message, code: error.code });
     }
     res.status(500).json({ success: false, error: 'Internal server error', code: 'INTERNAL_SERVER_ERROR' });
+  }
+}) as RequestHandler);
+
+// ========== TELEGRAM ALERTS ON A LIST ==========
+
+const listAlertService = WalletListAlertService.getInstance();
+
+const listAlertBodySchema = z.object({
+  minUsd: z.coerce.number().min(0).max(1_000_000_000).default(0),
+  direction: z.enum(['OPEN', 'CLOSE']).nullable().default(null),
+  source: z.enum(['PERP', 'SPOT']).nullable().default(null),
+  isActive: z.boolean().default(true),
+}).strict();
+
+async function currentUserId(req: Request): Promise<number | null> {
+  const privyUserId = req.user?.sub;
+  if (!privyUserId) return null;
+  const user = await prisma.user.findUnique({ where: { privyUserId }, select: { id: true } });
+  return user?.id ?? null;
+}
+
+function sendAlertError(res: Response, error: unknown, context: string) {
+  if (error instanceof TelegramError || error instanceof WalletListError) {
+    return res.status(error.statusCode).json({ success: false, error: error.message, code: error.code });
+  }
+  logDeduplicator.error(context, { error: error instanceof Error ? error.message : String(error) });
+  return res.status(500).json({ success: false, error: 'Internal server error', code: 'INTERNAL_SERVER_ERROR' });
+}
+
+// My list alerts, plus whether Telegram is linked
+router.get('/alerts', validatePrivyToken, (async (req: Request, res: Response) => {
+  try {
+    const userId = await currentUserId(req);
+    if (!userId) return res.status(401).json({ success: false, error: 'User not authenticated', code: 'UNAUTHENTICATED' });
+    res.json({ success: true, data: await listAlertService.list(userId) });
+  } catch (error) {
+    sendAlertError(res, error, 'Error listing wallet list alerts');
+  }
+}) as RequestHandler);
+
+// Turn Telegram alerts on for a list (own or public), or change their settings
+router.put('/:id/alert', validatePrivyToken, (async (req: Request, res: Response) => {
+  try {
+    const id = parseInt(String(req.params.id), 10);
+    if (isNaN(id)) return res.status(400).json({ success: false, error: 'Invalid ID format', code: 'INVALID_ID_FORMAT' });
+    const parsed = listAlertBodySchema.safeParse(req.body ?? {});
+    if (!parsed.success) return res.status(400).json({ success: false, error: 'Invalid alert settings', code: 'VALIDATION_ERROR' });
+    const userId = await currentUserId(req);
+    if (!userId) return res.status(401).json({ success: false, error: 'User not authenticated', code: 'UNAUTHENTICATED' });
+    res.json({ success: true, data: await listAlertService.upsert(userId, id, parsed.data) });
+  } catch (error) {
+    sendAlertError(res, error, 'Error saving wallet list alert');
+  }
+}) as RequestHandler);
+
+// Turn Telegram alerts off for a list
+router.delete('/:id/alert', validatePrivyToken, (async (req: Request, res: Response) => {
+  try {
+    const id = parseInt(String(req.params.id), 10);
+    if (isNaN(id)) return res.status(400).json({ success: false, error: 'Invalid ID format', code: 'INVALID_ID_FORMAT' });
+    const userId = await currentUserId(req);
+    if (!userId) return res.status(401).json({ success: false, error: 'User not authenticated', code: 'UNAUTHENTICATED' });
+    await listAlertService.remove(userId, id);
+    res.json({ success: true });
+  } catch (error) {
+    sendAlertError(res, error, 'Error removing wallet list alert');
   }
 }) as RequestHandler);
 
@@ -218,6 +287,14 @@ router.delete('/:id', validatePrivyToken, (async (req: Request, res: Response) =
       return res.status(403).json({ success: false, error: 'Access denied', code: 'ACCESS_DENIED' });
     }
 
+    // Alerts following this list live in the Telegram DB: drop them first so
+    // they can't keep firing on their last snapshot.
+    await listAlertService.removeAllForList(id).catch((error) =>
+      logDeduplicator.warn('Could not remove alerts of a deleted wallet list', {
+        id,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    );
     await walletListService.delete(id);
     res.json({ success: true, message: 'Wallet list deleted successfully' });
   } catch (error) {

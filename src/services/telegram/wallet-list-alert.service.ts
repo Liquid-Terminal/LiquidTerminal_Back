@@ -10,7 +10,7 @@ const MAX_FILL_SUBSCRIPTIONS_PER_USER = 10;
 const MAX_WALLETS_PER_ALERT = 500;
 const NAME_MAX = 100;
 
-export type AlertDirection = 'OPEN' | 'CLOSE' | null;
+export type AlertDirection = 'OPEN' | 'CLOSE' | 'FLIP' | null;
 export type AlertSource = 'PERP' | 'SPOT' | null;
 
 export interface ListAlertSettings {

@@ -221,6 +221,7 @@ model User {
   readLists                       ReadList[]
   walletLists                     WalletList[]
   walletListAlerts                WalletListAlert[]
+  alertRules                      AlertRule[]
   submittedPublicGoods            PublicGood[]                  @relation("SubmittedGoods")
   reviewedPublicGoods             PublicGood[]                  @relation("ReviewedGoods")
   reviewedEducationalResources    EducationalResource[]         @relation("EducationalResourceReviewer")
@@ -636,4 +637,25 @@ model HyperliquidDocPage {
 
   @@index([contentHash])
   @@map("hyperliquid_doc_pages")
+}
+
+/// Generic Telegram alert rule (price, market, liquidation-cascade, ...).
+/// One table for every rule type: `type` names the rule, `params` holds its
+/// settings (validated per type by the API). Adding a type needs no migration.
+/// Delivered to `telegramId` through the alert engine's generic channel.
+model AlertRule {
+  id         String   @id @default(cuid())
+  userId     Int
+  telegramId BigInt
+  type       String   @db.VarChar(40)
+  name       String   @db.VarChar(100)
+  params     Json
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now()) @db.Timestamp(6)
+  updatedAt  DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([isActive, type])
 }

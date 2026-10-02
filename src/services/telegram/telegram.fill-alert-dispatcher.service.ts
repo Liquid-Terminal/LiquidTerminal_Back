@@ -214,6 +214,8 @@ export class TelegramFillAlertDispatcherService {
       const isClose = fill.dir.includes('Close');
       if (sub.filterDirection === 'OPEN' && !isOpen) return false;
       if (sub.filterDirection === 'CLOSE' && !isClose) return false;
+      // Hyperliquid names a flip "Long > Short" / "Short > Long".
+      if (sub.filterDirection === 'FLIP' && !fill.dir.includes('>')) return false;
     }
 
     return true;

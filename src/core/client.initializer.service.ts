@@ -29,6 +29,7 @@ import { TelegramWalletDispatcherService } from '../services/telegram/telegram.w
 import { TelegramLiquidationDispatcherService } from '../services/telegram/telegram.liquidation-dispatcher.service';
 import { TelegramDocUpdateDispatcherService } from '../services/telegram/telegram.doc-update-dispatcher.service';
 import { TelegramFillAlertDispatcherService } from '../services/telegram/telegram.fill-alert-dispatcher.service';
+import { MarketAlertsService } from '../services/alerts/market-alerts.service';
 import { BotAnnouncementService } from '../services/telegram/bot-announcement.service';
 import { logDeduplicator } from '../utils/logDeduplicator';
 
@@ -231,6 +232,11 @@ export class ClientInitializerService {
       this.clients.set('fillAlertDispatcher', fillAlertDispatcher);
       logDeduplicator.info('Telegram Fill Alert Dispatcher service initialized successfully');
 
+      // Market alerts (price, funding, OI, listings, leverage, liquidation cascades)
+      const marketAlerts = MarketAlertsService.getInstance();
+      this.clients.set('marketAlerts', marketAlerts);
+      logDeduplicator.info('Market Alerts service initialized successfully');
+
       const botAnnouncementService = BotAnnouncementService.getInstance();
       this.clients.set('botAnnouncementService', botAnnouncementService);
       logDeduplicator.info('Bot Announcement service initialized successfully');
@@ -377,6 +383,17 @@ export class ClientInitializerService {
       }
     }
 
+    // 7. Start market alerts (reads the perp snapshot cache + liquidation stream)
+    const marketAlerts = this.clients.get('marketAlerts');
+    if (marketAlerts) {
+      try {
+        marketAlerts.start();
+        logDeduplicator.info('Started Market Alerts Service');
+      } catch (error) {
+        logDeduplicator.error('Error starting Market Alerts Service:', { error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+
     logDeduplicator.info('All client polling started successfully');
   }
 
@@ -443,6 +460,15 @@ export class ClientInitializerService {
         logDeduplicator.info('Telegram Doc Update Dispatcher Service stopped');
       } catch (error) {
         logDeduplicator.error('Error stopping Telegram Doc Update Dispatcher Service:', { error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+
+    const marketAlerts = this.clients.get('marketAlerts');
+    if (marketAlerts) {
+      try {
+        marketAlerts.stop();
+      } catch (error) {
+        logDeduplicator.error('Error stopping Market Alerts Service:', { error: error instanceof Error ? error.message : String(error) });
       }
     }
 

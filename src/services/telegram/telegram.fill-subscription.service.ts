@@ -17,8 +17,8 @@ export interface ActiveFillSubscription {
   filterSide: 'BUY' | 'SELL' | null;
   /// 'PERP' | 'SPOT' | null (both)
   filterSource: 'PERP' | 'SPOT' | null;
-  /// 'OPEN' | 'CLOSE' | null (both) — perp only
-  filterDirection: 'OPEN' | 'CLOSE' | null;
+  /// 'OPEN' | 'CLOSE' | 'FLIP' | null (any) — perp only
+  filterDirection: 'OPEN' | 'CLOSE' | 'FLIP' | null;
   /// null = no upper bound
   maxUsd: number | null;
   /// Set when the subscription follows a Liquid Terminal wallet list.
@@ -123,7 +123,7 @@ function normalizeSource(value: string | null): 'PERP' | 'SPOT' | null {
   return null;
 }
 
-function normalizeDirection(value: string | null): 'OPEN' | 'CLOSE' | null {
-  if (value === 'OPEN' || value === 'CLOSE') return value;
+function normalizeDirection(value: string | null): 'OPEN' | 'CLOSE' | 'FLIP' | null {
+  if (value === 'OPEN' || value === 'CLOSE' || value === 'FLIP') return value;
   return null;
 }

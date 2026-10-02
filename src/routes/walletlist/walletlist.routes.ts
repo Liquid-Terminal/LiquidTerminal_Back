@@ -123,7 +123,7 @@ const listAlertService = WalletListAlertService.getInstance();
 
 const listAlertBodySchema = z.object({
   minUsd: z.coerce.number().min(0).max(1_000_000_000).default(0),
-  direction: z.enum(['OPEN', 'CLOSE']).nullable().default(null),
+  direction: z.enum(['OPEN', 'CLOSE', 'FLIP']).nullable().default(null),
   source: z.enum(['PERP', 'SPOT']).nullable().default(null),
   isActive: z.boolean().default(true),
 }).strict();

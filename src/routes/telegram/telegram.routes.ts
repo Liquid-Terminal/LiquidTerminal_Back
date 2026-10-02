@@ -203,7 +203,7 @@ router.post('/verify-link',
     try {
       const { code, telegramId, username, firstName } = req.body;
 
-      if (!code || typeof code !== 'string') {
+      if (!code || typeof code !== 'string' || !TelegramService.LINK_CODE_PATTERN.test(code)) {
         return res.status(400).json({
           success: false,
           message: 'code is required',

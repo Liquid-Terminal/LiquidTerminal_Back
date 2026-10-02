@@ -200,6 +200,26 @@ export class RedisService {
     }
   }
 
+  /**
+   * Atomically read and delete a key (GETDEL). For one-time credentials: two
+   * concurrent callers can never both read the value. The key is not logged,
+   * since callers use it for secrets.
+   */
+  public async getDel(key: string): Promise<string | null> {
+    if (!redisAvailable()) return null;
+    try {
+      const value = await redisNormal.getdel(key);
+      recordRedisSuccess();
+      return value;
+    } catch (error) {
+      recordRedisFailure();
+      logDeduplicator.error('Redis getdel error', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    }
+  }
+
   public async set(key: string, value: string, ttl?: number): Promise<void> {
     if (!redisAvailable()) return; // circuit open — skip write, no wait
     try {

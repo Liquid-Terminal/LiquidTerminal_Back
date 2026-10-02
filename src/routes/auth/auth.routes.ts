@@ -66,7 +66,10 @@ router.post("/login", validatePrivyToken, validateLogin, (req: Request, res: Res
   }
 
   authService.findOrCreateUser(req.user, name, referrerName)
-    .then(user => {
+    .then(async user => {
+      // The client keeps this object as its session user: carry the Telegram
+      // link state so the UI shows it on every load.
+      const telegram = await telegramService.getLinkedTelegram(user.id);
       logDeduplicator.info('User authenticated successfully', { 
         userId: user.id,
         userRole: user.role
@@ -75,7 +78,7 @@ router.post("/login", validatePrivyToken, validateLogin, (req: Request, res: Res
       res.status(200).json({ 
         success: true,
         message: "User authenticated successfully", 
-        user 
+        user: { ...user, telegramLinked: telegram.linked, telegramUsername: telegram.username }
       });
     })
     .catch(error => {
@@ -122,7 +125,7 @@ router.get("/me", validatePrivyToken, (req: Request, res: Response): void => {
     }
 
     userRepository.findByPrivyUserId(privyUserId)
-      .then(user => {
+      .then(async user => {
         if (!user) {
           logDeduplicator.warn('User not found in /me', { privyUserId, path: req.path });
           res.status(404).json({
@@ -139,11 +142,15 @@ router.get("/me", validatePrivyToken, (req: Request, res: Response): void => {
           path: req.path 
         });
         
+        const telegram = await telegramService.getLinkedTelegram(user.id);
+
         res.status(200).json({
           success: true,
           message: 'User info retrieved successfully',
           data: {
             user: {
+              telegramLinked: telegram.linked,
+              telegramUsername: telegram.username,
               id: user.id,
               name: user.name,
               email: user.email,
@@ -203,7 +210,7 @@ router.get("/user/:privyUserId", validatePrivyToken, validateUserParams, (req: R
   }
 
   userRepository.findByPrivyUserId(req.params.privyUserId)
-    .then(user => {
+    .then(async user => {
       if (!user) {
         logDeduplicator.warn('User not found in /user/:id', { privyUserId: req.params.privyUserId, path: req.path });
         res.status(404).json({
@@ -220,10 +227,11 @@ router.get("/user/:privyUserId", validatePrivyToken, validateUserParams, (req: R
         path: req.path 
       });
       
+      const telegram = await telegramService.getLinkedTelegram(user.id);
       res.status(200).json({ 
         success: true,
         message: "User retrieved successfully",
-        user 
+        user: { ...user, telegramLinked: telegram.linked, telegramUsername: telegram.username }
       });
     })
     .catch(error => {
@@ -344,7 +352,7 @@ router.get("/telegram/link-status/:code", validatePrivyToken, async (req: Reques
     }
 
     const code = String(req.params.code);
-    if (!code || code.length !== 8) {
+    if (!TelegramService.LINK_CODE_PATTERN.test(code)) {
       res.status(400).json({
         success: false,
         message: 'Invalid code format',

@@ -33,3 +33,9 @@ export const elysiumAnalyticsAddressSchema = z.object({
   query: z.object({}),
   params: z.object({ address: z.string().regex(/^0x[0-9a-fA-F]{40}$/) }),
 });
+
+/** GET /elysium/analytics/fees?window=24h|7d|30d (default 7d) */
+export const elysiumAnalyticsFeesSchema = z.object({
+  query: z.object({ window: z.enum(['24h', '7d', '30d']).default('7d') }),
+  params: noParams,
+});

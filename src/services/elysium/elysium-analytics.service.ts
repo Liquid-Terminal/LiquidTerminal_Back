@@ -25,6 +25,7 @@ const iso = (v: number | null): string | null => (v === null || v === undefined 
 const ts = (d: Date): string => d.toISOString();
 
 export type ContractsWindow = '24h' | '7d';
+export type FeesWindow = '24h' | '7d' | '30d';
 
 /** Address tag rule for "bot-like": this many user txs in the last 24h, or this share of all of them. */
 export const BOT_TXS_24H = 500;
@@ -449,6 +450,143 @@ export class ElysiumAnalyticsService {
         })),
       };
     });
+  }
+
+  // ---------------------------------------------------------------------------
+  // 5b. fees by app
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Gas fees paid to each called contract and each deployer over the window,
+   * with their share of all non-spam fees. "Apps" are deployed contracts and
+   * registry tokens; precompile calls (bridge retryables, system) are totalled
+   * apart as "system" but still listed; plain transfers to EOAs count in the
+   * total only. Fees include the parent
+   * posting part (fee_wei is the full receipt fee). Cached 5 min: the 30d
+   * window scans every tx of the month.
+   */
+  public getFees(window: FeesWindow): Promise<unknown> {
+    return cacheService.getOrSet(
+      `${CACHE_PREFIX}:fees:${window}`,
+      async () => {
+        const spanMs = (window === '30d' ? 30 : window === '7d' ? 7 : 1) * DAY_MS;
+        const now = new Date();
+        const start = new Date(now.getTime() - spanMs);
+        const prevStart = new Date(now.getTime() - 2 * spanMs);
+
+        const rows = await prismaHistorical.$queryRaw<
+          Array<{ kind: string; key: string | null; fees: number; txs: number; gas: string | null; n: number }>
+        >`
+          WITH f AS (
+            SELECT t.to_addr AS address, sum(t.fee_wei) AS fee, count(*)::int AS txs, sum(t.gas_used) AS gas
+            FROM elysium_tx t
+            WHERE t.block_time >= ${ts(start)}::timestamptz AND t.block_time < ${ts(now)}::timestamptz
+              AND NOT t.is_spam AND t.to_addr IS NOT NULL
+            GROUP BY t.to_addr
+          ),
+          k AS (
+            SELECT f.*, c.deployer
+            FROM f
+            LEFT JOIN elysium_contract c ON c.address = f.address
+            LEFT JOIN elysium_token tk ON tk.address = f.address
+            WHERE f.address LIKE ${PRECOMPILE_LIKE} OR c.address IS NOT NULL OR tk.address IS NOT NULL
+          )
+          SELECT 'total' AS kind, NULL AS key, (COALESCE(sum(fee), 0) / 1e18)::float8 AS fees,
+                 COALESCE(sum(txs), 0)::int AS txs, sum(gas)::text AS gas, count(*)::int AS n FROM f
+          UNION ALL
+          SELECT 'apps', NULL, (COALESCE(sum(fee), 0) / 1e18)::float8, COALESCE(sum(txs), 0)::int, sum(gas)::text, count(*)::int
+          FROM k WHERE address NOT LIKE ${PRECOMPILE_LIKE}
+          UNION ALL
+          SELECT 'system', NULL, (COALESCE(sum(fee), 0) / 1e18)::float8, COALESCE(sum(txs), 0)::int, sum(gas)::text, count(*)::int
+          FROM k WHERE address LIKE ${PRECOMPILE_LIKE}
+          UNION ALL
+          (SELECT 'contract', address, (fee / 1e18)::float8, txs, gas::text, 1 FROM k ORDER BY fee DESC, address LIMIT 25)
+          UNION ALL
+          (SELECT 'deployer', deployer, (sum(fee) / 1e18)::float8, sum(txs)::int, sum(gas)::text, count(*)::int
+           FROM k WHERE deployer IS NOT NULL GROUP BY deployer ORDER BY sum(fee) DESC, deployer LIMIT 15)`;
+
+        const total = rows.find((r) => r.kind === 'total');
+        const apps = rows.find((r) => r.kind === 'apps');
+        const system = rows.find((r) => r.kind === 'system');
+        const contracts = rows.filter((r) => r.kind === 'contract' && r.key);
+        const deployers = rows.filter((r) => r.kind === 'deployer' && r.key);
+        const addrs = contracts.map((r) => r.key as string);
+
+        const [meta, prev, callers] = addrs.length
+          ? await Promise.all([
+              prismaHistorical.$queryRaw<
+                Array<{ address: string; deployer: string | null; name: string | null; symbol: string | null; is_token: boolean }>
+              >`
+                SELECT a.address, c.deployer, tk.name, tk.symbol, (tk.address IS NOT NULL) AS is_token
+                FROM unnest(${addrs}::text[]) AS a(address)
+                LEFT JOIN elysium_contract c ON c.address = a.address
+                LEFT JOIN elysium_token tk ON tk.address = a.address`,
+              prismaHistorical.$queryRaw<Array<{ address: string; fees: number }>>`
+                SELECT to_addr AS address, (sum(fee_wei) / 1e18)::float8 AS fees FROM elysium_tx
+                WHERE to_addr = ANY(${addrs}::text[]) AND NOT is_spam
+                  AND block_time >= ${ts(prevStart)}::timestamptz AND block_time < ${ts(start)}::timestamptz
+                GROUP BY to_addr`,
+              prismaHistorical.$queryRaw<Array<{ address: string; callers: number }>>`
+                SELECT to_addr AS address, count(DISTINCT from_addr)::int AS callers FROM elysium_tx
+                WHERE to_addr = ANY(${addrs}::text[]) AND NOT is_spam
+                  AND block_time >= ${ts(start)}::timestamptz AND block_time < ${ts(now)}::timestamptz
+                GROUP BY to_addr`,
+            ])
+          : [[], [], []];
+        const metaBy = new Map(meta.map((m) => [m.address, m]));
+        const prevBy = new Map(prev.map((p) => [p.address, num(p.fees)]));
+        const callersBy = new Map(callers.map((c) => [c.address, c.callers]));
+
+        const totalFees = num(total?.fees);
+        const pct = (v: number) => (totalFees > 0 ? v / totalFees : 0);
+
+        return {
+          window,
+          from: start.toISOString(),
+          to: now.toISOString(),
+          totals: {
+            feesHype: totalFees,
+            txs: total?.txs ?? 0,
+            gasUsed: num(total?.gas),
+            appFeesHype: num(apps?.fees),
+            appTxs: apps?.txs ?? 0,
+            appShare: pct(num(apps?.fees)),
+            apps: apps?.n ?? 0,
+            systemFeesHype: num(system?.fees),
+            systemShare: pct(num(system?.fees)),
+          },
+          contracts: contracts.map((r) => {
+            const address = r.key as string;
+            const m = metaBy.get(address);
+            const pre = precompileLabel(address);
+            const fees = num(r.fees);
+            return {
+              address,
+              kind: pre ? 'precompile' : m?.is_token ? 'token' : 'contract',
+              label: pre ?? (m?.is_token ? m.name : null),
+              symbol: m?.symbol ?? null,
+              deployer: m?.deployer ?? null,
+              feesHype: fees,
+              feesHypePrev: prevBy.get(address) ?? 0,
+              share: pct(fees),
+              txs: r.txs,
+              callers: callersBy.get(address) ?? 0,
+              gasUsed: num(r.gas),
+              avgFeeHype: r.txs > 0 ? fees / r.txs : 0,
+            };
+          }),
+          deployers: deployers.map((r) => ({
+            deployer: r.key as string,
+            contracts: r.n,
+            feesHype: num(r.fees),
+            share: pct(num(r.fees)),
+            txs: r.txs,
+            gasUsed: num(r.gas),
+          })),
+        };
+      },
+      300
+    );
   }
 
   // ---------------------------------------------------------------------------

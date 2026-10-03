@@ -7,6 +7,7 @@ import {
   elysiumAnalyticsContractsSchema,
   elysiumAnalyticsMethodsSchema,
   elysiumAnalyticsDaysSchema,
+  elysiumAnalyticsFeesSchema,
   elysiumAnalyticsStatusSchema,
 } from '../../schemas/elysium-analytics.schema';
 import { ElysiumAnalyticsService } from '../../services/elysium/elysium-analytics.service';
@@ -83,6 +84,8 @@ register('/economics', elysiumAnalyticsDaysSchema, 'ELYSIUM_ANALYTICS_ECONOMICS_
 register('/methods', elysiumAnalyticsMethodsSchema, 'ELYSIUM_ANALYTICS_METHODS_ERROR', (q) =>
   service.getMethods(q.window)
 );
+
+register('/fees', elysiumAnalyticsFeesSchema, 'ELYSIUM_ANALYTICS_FEES_ERROR', (q) => service.getFees(q.window));
 
 register('/dex', elysiumAnalyticsDaysSchema, 'ELYSIUM_ANALYTICS_DEX_ERROR', (q) => service.getDex(q.days));
 

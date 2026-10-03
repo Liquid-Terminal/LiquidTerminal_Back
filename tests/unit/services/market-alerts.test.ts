@@ -17,6 +17,8 @@ import {
   MarketRuleRow,
   MARKET_WIDE,
   PerpRow,
+  reserveYieldEvents,
+  LedgerUpdate,
 } from '../../../src/services/alerts/market-alerts.service';
 import { parseRuleParams, defaultRuleName } from '../../../src/services/alerts/alert-rule.types';
 import { TelegramFillAlertDispatcherService } from '../../../src/services/telegram/telegram.fill-alert-dispatcher.service';
@@ -164,5 +166,48 @@ describe('fill alerts: flips', () => {
     expect(TelegramFillAlertDispatcherService.matchesFilters(fill('Long > Short'), sub)).toBe(true);
     expect(TelegramFillAlertDispatcherService.matchesFilters(fill('Short > Long'), sub)).toBe(true);
     expect(TelegramFillAlertDispatcherService.matchesFilters(fill('Open Long'), sub)).toBe(false);
+  });
+});
+
+describe('reserve yield', () => {
+  // The interest address ledger as it read on 3 Oct 2026.
+  const ledger: LedgerUpdate[] = [
+    { time: 1787855644307, hash: '0x8248', delta: { type: 'send', user: '0x8536a52900b5e7b23b08d6dcc50fd5689b5e270c', destination: '0x5000000000000000000000000000000000000000', token: 'USDC', amount: '1.0' } },
+    { time: 1790960738677, hash: '0x7009', delta: { type: 'send', user: '0x8536a52900b5e7b23b08d6dcc50fd5689b5e270c', destination: '0x5000000000000000000000000000000000000000', token: 'USDC', amount: '1.0' } },
+    { time: 1790985600106, hash: '0x' + '0'.repeat(64), delta: { type: 'send', user: '0x5000000000000000000000000000000000000000', destination: '0xfefefefefefefefefefefefefefefefefefefefe', token: 'USDC', amount: '2.0' } },
+    { time: 1790995390017, hash: '0x4f7f', delta: { type: 'send', user: '0x8536a52900b5e7b23b08d6dcc50fd5689b5e270c', destination: '0x5000000000000000000000000000000000000000', token: 'USDC', amount: '14580777.2100000009' } },
+  ];
+  const forward: LedgerUpdate = {
+    time: 1791072000106,
+    hash: '0x' + '0'.repeat(64),
+    delta: { type: 'send', user: '0x5000000000000000000000000000000000000000', destination: '0xfefefefefefefefefefefefefefefefefefefefe', token: 'USDC', amount: '14580777.21' },
+  };
+
+  it('turns the payment into one event and ignores 1-2 USDC test transfers', () => {
+    const events = reserveYieldEvents(ledger, 0);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ kind: 'reserve_yield', stage: 'paid', amount: 14580777.21 });
+  });
+
+  it('reports the forward to the Assistance Fund and skips what the cursor already passed', () => {
+    const events = reserveYieldEvents([...ledger, forward], 1790995390017);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ stage: 'to_fund', amount: 14580777.21 });
+  });
+
+  it('matches reserve_yield rules and formats both stages with a link to the page', () => {
+    const [rule] = compileMarketRules(
+      [{ id: 'r1', telegramId: '1', type: 'reserve_yield', name: defaultRuleName('reserve_yield', parseRuleParams('reserve_yield', {})), params: parseRuleParams('reserve_yield', {}) }],
+      new Map()
+    );
+    const [paid] = reserveYieldEvents(ledger, 0);
+    const [fwd] = reserveYieldEvents([forward], 0);
+    expect(rule.matches(paid)).toBe(true);
+    expect(formatMarketAlert(rule, paid)).toContain('14,580,777.21 USDC');
+    expect(formatMarketAlert(rule, paid)).toContain('/explorer/transaction/0x4f7f');
+    expect(formatMarketAlert(rule, fwd)).toContain('Assistance Fund');
+    expect(formatMarketAlert(rule, fwd)).not.toContain('/explorer/transaction/');
+    expect(formatMarketAlert(rule, fwd)).toContain('/hype/reserve-yield');
+    expect(() => parseRuleParams('reserve_yield', { coin: 'BTC' })).toThrow();
   });
 });

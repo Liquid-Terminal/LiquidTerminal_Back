@@ -42,6 +42,8 @@ export const ALERT_RULE_SCHEMAS = {
   leverage: z.object({ coin: optionalCoin }).strict(),
   /** Liquidations totalling at least `minUsd` within 60 seconds, on a coin or market-wide. */
   liq_cascade: z.object({ coin: optionalCoin, minUsd: z.coerce.number().min(10_000).max(1e12) }).strict(),
+  /** USDC reserve yield (AQAv2): a payment reaches the protocol, then the Assistance Fund. */
+  reserve_yield: z.object({}).strict(),
 } as const;
 
 export type AlertRuleType = keyof typeof ALERT_RULE_SCHEMAS;
@@ -81,6 +83,8 @@ export function defaultRuleName(type: AlertRuleType, params: AlertRuleParams[Ale
       return `${where} max leverage changes`;
     case 'liq_cascade':
       return `${(p.coin as string | null) ?? 'Market-wide'} liquidations ${usd(p.minUsd as number)}+ in 60s`;
+    case 'reserve_yield':
+      return 'USDC reserve yield payments';
   }
 }
 

@@ -41,7 +41,18 @@ export type MarketEvent =
     }
   | { kind: 'listing'; id: string; coin: string; ts: number; maxLeverage: number; px: number }
   | { kind: 'leverage'; id: string; coin: string; ts: number; from: number; to: number }
-  | { kind: 'cascade'; id: string; coin: string; ts: number; usd60s: number; count60s: number; scope: 'coin' | 'market' };
+  | { kind: 'cascade'; id: string; coin: string; ts: number; usd60s: number; count60s: number; scope: 'coin' | 'market' }
+  | {
+      kind: 'reserve_yield';
+      id: string;
+      coin: string;
+      ts: number;
+      /** `paid`: reached the interest address; `to_fund`: sent on to the Assistance Fund. */
+      stage: 'paid' | 'to_fund';
+      amount: number;
+      from: string;
+      hash: string;
+    };
 
 /** Market-wide events carry this coin; coin-specific rules never match it. */
 export const MARKET_WIDE = '*';
@@ -157,6 +168,44 @@ export class CascadeTracker {
 }
 
 // ============================================================================
+// RESERVE YIELD
+// ============================================================================
+
+/** System interest address for USDC (0x50..00 + token index 0) and the Assistance Fund. */
+export const RY_INTEREST_ADDRESS = '0x5000000000000000000000000000000000000000';
+export const RY_ASSISTANCE_FUND = '0xfefefefefefefefefefefefefefefefefefefefe';
+/** Activation and test transfers (1 USDC) are not payments. */
+export const RY_MIN_USDC = 1_000;
+
+export interface LedgerUpdate {
+  time: number;
+  hash: string;
+  delta: { type: string; user?: string; destination?: string; token?: string; amount?: string };
+}
+
+/**
+ * Reads the interest address ledger into reserve yield events: USDC arriving
+ * from outside is a payment, USDC leaving for the Assistance Fund is the
+ * forward. System sends carry a zero hash, so ids include the time.
+ */
+export function reserveYieldEvents(updates: LedgerUpdate[], after: number): MarketEvent[] {
+  const out: MarketEvent[] = [];
+  for (const u of updates) {
+    if (u.time <= after || u.delta.type !== 'send' || u.delta.token !== 'USDC') continue;
+    const from = (u.delta.user ?? '').toLowerCase();
+    const to = (u.delta.destination ?? '').toLowerCase();
+    const amount = Number(u.delta.amount ?? 0);
+    if (!(amount >= RY_MIN_USDC)) continue;
+    let stage: 'paid' | 'to_fund' | null = null;
+    if (to === RY_INTEREST_ADDRESS && from !== RY_INTEREST_ADDRESS) stage = 'paid';
+    else if (from === RY_INTEREST_ADDRESS && to === RY_ASSISTANCE_FUND) stage = 'to_fund';
+    if (!stage) continue;
+    out.push({ kind: 'reserve_yield', id: `ry:${stage}:${u.hash}:${u.time}`, coin: 'USDC', ts: u.time, stage, amount, from, hash: u.hash });
+  }
+  return out.sort((a, b) => a.ts - b.ts);
+}
+
+// ============================================================================
 // RULES
 // ============================================================================
 
@@ -259,6 +308,9 @@ export function compileMarketRules(rows: MarketRuleRow[], cooldowns: Map<string,
           cooled(row, e.coin, e.ts, RULE_COOLDOWN_MS.liq_cascade as number);
         break;
       }
+      case 'reserve_yield':
+        test = (e) => e.kind === 'reserve_yield';
+        break;
       default:
         test = () => false;
     }
@@ -309,6 +361,15 @@ export function formatMarketAlert(rule: MarketRule, e: MarketEvent): string {
         `\n<a href="https://liquidterminal.xyz/explorer/liquidations">Open the liquidations feed</a>` +
         FOOTER
       );
+    case 'reserve_yield': {
+      const amount = `${e.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDC`;
+      const tx = /^0x0+$/.test(e.hash) ? '' : ` · <a href="https://liquidterminal.xyz/explorer/transaction/${e.hash}">tx</a>`;
+      const body =
+        e.stage === 'paid'
+          ? `💵 USDC reserve yield paid to Hyperliquid: <b>${amount}</b> reached the protocol's interest address${tx}.\nIt goes on to the Assistance Fund, which buys HYPE with it.`
+          : `🔥 <b>${amount}</b> of USDC reserve yield sent to the Assistance Fund${tx}, ready for HYPE buybacks.`;
+      return head + body + `\n<a href="https://liquidterminal.xyz/hype/reserve-yield">Follow the reserve yield</a>` + FOOTER;
+    }
   }
 }
 
@@ -322,6 +383,8 @@ export function summarizeMarketAlert(rule: MarketRule, e: MarketEvent): string {
       return `⚙️ ${escapeHtml(e.coin)} max leverage ${e.from}x → ${e.to}x`;
     case 'cascade':
       return `🚨 ${e.coin === MARKET_WIDE ? 'All markets' : escapeHtml(e.coin)} ${money(e.usd60s)} liquidated in 60s`;
+    case 'reserve_yield':
+      return e.stage === 'paid' ? `💵 Reserve yield paid: ${money(e.amount)}` : `🔥 Reserve yield to the fund: ${money(e.amount)}`;
   }
 }
 
@@ -329,9 +392,23 @@ export function summarizeMarketAlert(rule: MarketRule, e: MarketEvent): string {
 // SERVICE
 // ============================================================================
 
-const MARKET_TYPES: AlertRuleType[] = ['price_cross', 'price_move', 'funding', 'oi_surge', 'listing', 'leverage', 'liq_cascade'];
+const MARKET_TYPES: AlertRuleType[] = [
+  'price_cross',
+  'price_move',
+  'funding',
+  'oi_surge',
+  'listing',
+  'leverage',
+  'liq_cascade',
+  'reserve_yield',
+];
 const KNOWN_COINS_KEY = 'alerts:market:known_perps';
 const POLL_MS = 10_000;
+/** Payments land once a month; one ledger read a minute is plenty. */
+const RY_POLL_MS = 60_000;
+/** Time of the last ledger entry turned into events, so a restart neither replays nor skips. */
+const RY_CURSOR_KEY = 'alerts:market:reserve_yield_cursor';
+const INFO_URL = 'https://api.hyperliquid.xyz/info';
 
 /**
  * Feeds market events into an AlertEngine. Rules come from AlertRule and are
@@ -343,6 +420,7 @@ export class MarketAlertsService {
   private tracker: MarketSnapshotTracker | null = null;
   private readonly cascades = new CascadeTracker();
   private timer: NodeJS.Timeout | null = null;
+  private ryTimer: NodeJS.Timeout | null = null;
   private unsubscribeLiq: (() => void) | null = null;
 
   private readonly engine = new AlertEngine<MarketEvent, MarketRule>({
@@ -367,6 +445,8 @@ export class MarketAlertsService {
     this.engine.start();
     this.timer = setInterval(() => void this.poll(), POLL_MS);
     this.timer.unref?.();
+    this.ryTimer = setInterval(() => void this.pollReserveYield(), RY_POLL_MS);
+    this.ryTimer.unref?.();
     this.unsubscribeLiq = LiquidationsWebSocketService.getInstance().onProcessedLiquidation((liqs) => {
       const now = Date.now();
       this.engine.ingest(liqs.flatMap((l) => this.cascades.add(l, now)));
@@ -377,6 +457,8 @@ export class MarketAlertsService {
   public stop(): void {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
+    if (this.ryTimer) clearInterval(this.ryTimer);
+    this.ryTimer = null;
     this.unsubscribeLiq?.();
     this.unsubscribeLiq = null;
     this.engine.stop();
@@ -406,6 +488,34 @@ export class MarketAlertsService {
       this.engine.ingest(events);
     } catch (error) {
       logDeduplicator.warn('MarketAlertsService: snapshot unavailable, skipping this tick', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  private async pollReserveYield(): Promise<void> {
+    try {
+      const stored = await redisService.get(RY_CURSOR_KEY);
+      // First run: start from now rather than alerting on past payments.
+      if (!stored) {
+        await redisService.set(RY_CURSOR_KEY, String(Date.now()));
+        return;
+      }
+      const cursor = Number(stored);
+      const res = await fetch(INFO_URL, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ type: 'userNonFundingLedgerUpdates', user: RY_INTEREST_ADDRESS, startTime: cursor }),
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!res.ok) throw new Error(`info ${res.status}`);
+      const updates = (await res.json()) as LedgerUpdate[];
+      const latest = updates.reduce((m, u) => Math.max(m, u.time), cursor);
+      const events = reserveYieldEvents(updates, cursor);
+      if (events.length) this.engine.ingest(events);
+      if (latest > cursor) await redisService.set(RY_CURSOR_KEY, String(latest));
+    } catch (error) {
+      logDeduplicator.warn('MarketAlertsService: reserve yield ledger unavailable, skipping this tick', {
         error: error instanceof Error ? error.message : String(error),
       });
     }

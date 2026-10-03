@@ -12,10 +12,12 @@ import hip3Routes from './hip3.routes';
 import hip4Routes from './hip4.routes';
 import spotIndexerRoutes from './spot-indexer.routes';
 import twapsRoutes from './twaps.routes';
+import candlesRoutes from './candles.routes';
 import vaultsIndexerRoutes from './vaults-indexer.routes';
 
 const router = Router();
 
+router.use('/candles', candlesRoutes);
 router.use('/fills', fillsRoutes);
 router.use('/users', usersRoutes);
 router.use('/overview', overviewRoutes);

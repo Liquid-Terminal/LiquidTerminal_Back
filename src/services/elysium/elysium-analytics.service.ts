@@ -462,8 +462,8 @@ export class ElysiumAnalyticsService {
    * registry tokens; precompile calls (bridge retryables, system) are totalled
    * apart as "system" but still listed; plain transfers to EOAs count in the
    * total only. Fees include the parent
-   * posting part (fee_wei is the full receipt fee). Cached 5 min: the 30d
-   * window scans every tx of the month.
+   * posting part (fee_wei is the full receipt fee). Cached 5 min (24h), 10 min
+   * (7d) and 30 min (30d): the 30d window scans every tx of the month.
    */
   public getFees(window: FeesWindow): Promise<unknown> {
     return cacheService.getOrSet(
@@ -585,7 +585,8 @@ export class ElysiumAnalyticsService {
           })),
         };
       },
-      300
+      // The window sets the scan size: ~0.5M txs a day, so 30d reads ~15M rows.
+      window === '30d' ? 1800 : window === '7d' ? 600 : 300
     );
   }
 

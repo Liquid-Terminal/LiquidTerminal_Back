@@ -12,6 +12,7 @@ const CONTEXT = 'TelegramLiquidationDispatcherService';
 
 interface LiquidationSubscriptionRow {
   id: string;
+  name: string;
   telegramUserId: string;
   subscriptionType: string; // 'all' | 'filtered'
   filterCoins: string[];
@@ -31,14 +32,19 @@ interface LiquidationSubscriptionRow {
  * - one alert per (Telegram user, liquidation hash), across their subscriptions.
  * Linked wallets are resolved here, in one query, instead of per event.
  */
+/** A compiled liquidation subscription; the name goes in the alert message. */
+export interface LiquidationRule extends AlertRule<AggregatedLiquidation> {
+  name: string;
+}
+
 export function compileLiquidationRules(
   subs: LiquidationSubscriptionRow[],
   linkedWalletsByUserId: Map<number, string[]>
-): AlertRule<AggregatedLiquidation>[] {
-  const rules: AlertRule<AggregatedLiquidation>[] = [];
+): LiquidationRule[] {
+  const rules: LiquidationRule[] = [];
   for (const sub of subs) {
     const telegramId = sub.telegramUser.telegramId.toString();
-    const base = { id: sub.id, telegramId, dedupScope: sub.telegramUserId };
+    const base = { id: sub.id, telegramId, dedupScope: sub.telegramUserId, name: sub.name };
     if (sub.subscriptionType === 'all') {
       rules.push({ ...base, wallets: [], coins: [], matches: () => true });
       continue;
@@ -76,12 +82,12 @@ export class TelegramLiquidationDispatcherService {
   private unsubscribeCallback: (() => void) | null = null;
   private purgeTimer: NodeJS.Timeout | null = null;
 
-  private readonly engine = new AlertEngine<AggregatedLiquidation>({
+  private readonly engine = new AlertEngine<AggregatedLiquidation, LiquidationRule>({
     name: 'liquidation',
     loadRules: () => this.loadRules(),
     keys: (liq) => ({ id: liq.hash, wallets: [liq.liquidated_user.toLowerCase()], coin: liq.coin }),
     deliver: (rule, liq) => {
-      InternalWebSocketServer.getInstance().broadcastLiquidationAlert(rule.telegramId, formatLiquidationAlert(liq));
+      InternalWebSocketServer.getInstance().broadcastLiquidationAlert(rule.telegramId, formatLiquidationAlert(liq, rule.name));
     },
     summarize: (_rule, liq) => formatLiquidationDigestLine(liq),
     notify: (telegramId, message) => {
@@ -126,7 +132,7 @@ export class TelegramLiquidationDispatcherService {
     logDeduplicator.info('TelegramLiquidationDispatcherService: Stopped');
   }
 
-  private async loadRules(): Promise<AlertRule<AggregatedLiquidation>[]> {
+  private async loadRules(): Promise<LiquidationRule[]> {
     const subs = await prismaTelegram.telegramSubscription.findMany({
       where: { isActive: true },
       include: { telegramUser: { select: { telegramId: true, linkedUserId: true } } },

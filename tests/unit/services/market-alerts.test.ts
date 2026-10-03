@@ -141,7 +141,10 @@ describe('compileMarketRules', () => {
   it('formats a readable message with the rule name and a link', () => {
     const [r] = compileMarketRules([rule('price_cross', { coin: 'BTC', level: 100, direction: 'above' })], new Map());
     const msg = formatMarketAlert(r, tick('BTC', 101, 99, 0));
-    expect(msg).toContain('crossed above $100');
+    expect(msg).toContain('<b>BTC above $100</b>');
+    // Default name equals the headline: shown once.
+    expect(msg.split('BTC above $100').length - 1).toBe(1);
+    expect(msg).toContain('Now $101');
     expect(msg).toContain('https://liquidterminal.xyz/market/perp/BTC');
     expect(msg).not.toContain('—');
   });

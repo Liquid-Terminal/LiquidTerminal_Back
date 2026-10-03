@@ -7,6 +7,7 @@ import { HyperliquidPerpClient } from '../../clients/hyperliquid/perp/perp.asset
 import { LiquidationsWebSocketService } from '../liquidations/liquidations.ws.service';
 import { AggregatedLiquidation } from '../../types/liquidations.types';
 import { escapeHtml } from '../../utils/telegram.formatting';
+import { renderAlertMessage, SITE } from '../../utils/alert-message';
 import { AlertEngine, AlertRule } from './alert-engine';
 import { AlertRuleParams, AlertRuleType } from './alert-rule.types';
 
@@ -328,47 +329,98 @@ const money = (v: number) =>
   Math.abs(v) >= 1e9 ? `$${(v / 1e9).toFixed(2)}B` : Math.abs(v) >= 1e6 ? `$${(v / 1e6).toFixed(2)}M` : Math.abs(v) >= 1e3 ? `$${(v / 1e3).toFixed(1)}K` : `$${v.toFixed(2)}`;
 const price = (v: number) => `$${v.toLocaleString('en-US', { maximumSignificantDigits: 6 })}`;
 const signed = (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`;
-const coinLink = (coin: string) =>
-  coin === MARKET_WIDE ? 'All markets' : `<a href="https://liquidterminal.xyz/market/perp/${encodeURIComponent(coin)}">${escapeHtml(coin)}</a>`;
-const FOOTER = `\n━━━━━━━━━━━━━━━━━━━━\n<a href="https://liquidterminal.xyz/alerts">Manage alerts</a> • <a href="https://liquidterminal.xyz/">Liquid Terminal</a>`;
+const coinName = (coin: string) => (coin === MARKET_WIDE ? 'All markets' : escapeHtml(coin));
+const marketLink = (coin: string) =>
+  coin === MARKET_WIDE
+    ? { label: 'Perp markets', url: `${SITE}/market/perp` }
+    : { label: `${coin} market`, url: `${SITE}/market/perp/${encodeURIComponent(coin)}` };
 
+/** Market alerts share the alert message shape of fills and liquidations (utils/alert-message). */
 export function formatMarketAlert(rule: MarketRule, e: MarketEvent): string {
-  const head = `🔔 <b>${escapeHtml(rule.name)}</b>\n\n`;
   switch (e.kind) {
     case 'tick': {
-      let line: string;
+      const ch24 = e.change24hPct !== null ? `${signed(e.change24hPct)} in 24h` : null;
       if (rule.type === 'price_cross') {
-        line = `${coinLink(e.coin)} crossed ${rule.params.direction} ${price(rule.params.level as number)}: now <b>${price(e.px)}</b>`;
-      } else if (rule.type === 'funding') {
-        line = `${coinLink(e.coin)} funding at <b>${e.fundingAprPct.toFixed(1)}% APR</b> (${e.fundingAprPct >= 0 ? 'longs pay shorts' : 'shorts pay longs'})`;
-      } else if (rule.type === 'oi_surge') {
-        line = `${coinLink(e.coin)} open interest <b>${signed(e.oiChange1hPct ?? 0)}</b> in 1h, now ${money(e.oiUsd)}`;
-      } else {
-        const ch1 = e.change1hPct !== null ? `${signed(e.change1hPct)} 1h` : null;
-        const ch24 = e.change24hPct !== null ? `${signed(e.change24hPct)} 24h` : null;
-        line = `${coinLink(e.coin)} at ${price(e.px)} · ${[ch1, ch24].filter(Boolean).join(' · ')}`;
+        const up = rule.params.direction === 'above';
+        return renderAlertMessage({
+          icon: '🎯',
+          headline: `${coinName(e.coin)} ${up ? 'above' : 'below'} ${price(rule.params.level as number)}`,
+          alertName: rule.name,
+          lines: [`💵 Now ${price(e.px)}${ch24 ? ` · ${ch24}` : ''}`],
+          links: [marketLink(e.coin)],
+        });
       }
-      return head + line + FOOTER;
+      if (rule.type === 'funding') {
+        return renderAlertMessage({
+          icon: '💸',
+          headline: `${coinName(e.coin)} funding ${e.fundingAprPct.toFixed(1)}% a year`,
+          alertName: rule.name,
+          lines: [
+            e.fundingAprPct >= 0 ? '🟢 Longs pay shorts' : '🔴 Shorts pay longs',
+            `💵 ${price(e.px)} · open interest ${money(e.oiUsd)}`,
+          ],
+          links: [marketLink(e.coin)],
+        });
+      }
+      if (rule.type === 'oi_surge') {
+        return renderAlertMessage({
+          icon: '📊',
+          headline: `${coinName(e.coin)} open interest ${signed(e.oiChange1hPct ?? 0)} in 1h`,
+          alertName: rule.name,
+          lines: [`📊 Now ${money(e.oiUsd)}`, `💵 ${price(e.px)}${ch24 ? ` · ${ch24}` : ''}`],
+          links: [marketLink(e.coin)],
+        });
+      }
+      const window = rule.params.window === '1h' ? '1h' : '24h';
+      const ch = window === '1h' ? e.change1hPct : e.change24hPct;
+      return renderAlertMessage({
+        icon: (ch ?? 0) >= 0 ? '📈' : '📉',
+        headline: `${coinName(e.coin)} ${signed(ch ?? 0)} in ${window}`,
+        alertName: rule.name,
+        lines: [
+          `💵 Now ${price(e.px)}`,
+          window === '1h' && e.change24hPct !== null ? `📅 ${signed(e.change24hPct)} in 24h` : null,
+        ],
+        links: [marketLink(e.coin)],
+      });
     }
     case 'listing':
-      return head + `🆕 ${coinLink(e.coin)} perp is live, up to ${e.maxLeverage}x, mark ${price(e.px)}` + FOOTER;
+      return renderAlertMessage({
+        icon: '🆕',
+        headline: `${coinName(e.coin)} perp is live`,
+        alertName: rule.name,
+        lines: [`⚙️ Up to ${e.maxLeverage}x leverage`, `💵 Mark ${price(e.px)}`],
+        links: [marketLink(e.coin)],
+      });
     case 'leverage':
-      return head + `⚙️ ${coinLink(e.coin)} max leverage ${e.from}x → <b>${e.to}x</b>` + FOOTER;
+      return renderAlertMessage({
+        icon: '⚙️',
+        headline: `${coinName(e.coin)} max leverage ${e.from}x → ${e.to}x`,
+        alertName: rule.name,
+        lines: [e.to < e.from ? '🔻 Leverage cut: positions above the new cap may need more margin' : '🔺 Leverage raised'],
+        links: [marketLink(e.coin)],
+      });
     case 'cascade':
-      return (
-        head +
-        `🚨 ${coinLink(e.coin)}: <b>${money(e.usd60s)}</b> liquidated in the last 60s (${e.count60s} liquidation${e.count60s > 1 ? 's' : ''})` +
-        `\n<a href="https://liquidterminal.xyz/explorer/liquidations">Open the liquidations feed</a>` +
-        FOOTER
-      );
+      return renderAlertMessage({
+        icon: '🚨',
+        headline: `${coinName(e.coin)}: ${money(e.usd60s)} liquidated in 60s`,
+        alertName: rule.name,
+        lines: [`🧩 ${e.count60s} liquidation${e.count60s > 1 ? 's' : ''} in the last minute`],
+        links: [{ label: 'Liquidations feed', url: `${SITE}/explorer/liquidations` }, marketLink(e.coin)],
+      });
     case 'reserve_yield': {
       const amount = `${e.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDC`;
-      const tx = /^0x0+$/.test(e.hash) ? '' : ` · <a href="https://liquidterminal.xyz/explorer/transaction/${e.hash}">tx</a>`;
-      const body =
-        e.stage === 'paid'
-          ? `💵 USDC reserve yield paid to Hyperliquid: <b>${amount}</b> reached the protocol's interest address${tx}.\nIt goes on to the Assistance Fund, which buys HYPE with it.`
-          : `🔥 <b>${amount}</b> of USDC reserve yield sent to the Assistance Fund${tx}, ready for HYPE buybacks.`;
-      return head + body + `\n<a href="https://liquidterminal.xyz/hype/reserve-yield">Follow the reserve yield</a>` + FOOTER;
+      const tx = /^0x0+$/.test(e.hash) ? [] : [{ label: 'Transaction', url: `${SITE}/explorer/transaction/${e.hash}` }];
+      return renderAlertMessage({
+        icon: e.stage === 'paid' ? '💵' : '🔥',
+        headline: e.stage === 'paid' ? `Reserve yield paid to Hyperliquid · ${money(e.amount)}` : `Reserve yield sent to the Assistance Fund · ${money(e.amount)}`,
+        alertName: rule.name,
+        lines:
+          e.stage === 'paid'
+            ? [`💵 ${amount} reached the protocol's interest address`, '➡️ Next: it goes to the Assistance Fund, which buys HYPE with it']
+            : [`🔥 ${amount} now with the Assistance Fund, for HYPE buybacks`],
+        links: [...tx, { label: 'Reserve yield', url: `${SITE}/hype/reserve-yield` }],
+      });
     }
   }
 }

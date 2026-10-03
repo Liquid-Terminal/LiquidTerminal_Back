@@ -30,7 +30,6 @@ import { TelegramLiquidationDispatcherService } from '../services/telegram/teleg
 import { TelegramDocUpdateDispatcherService } from '../services/telegram/telegram.doc-update-dispatcher.service';
 import { TelegramFillAlertDispatcherService } from '../services/telegram/telegram.fill-alert-dispatcher.service';
 import { MarketAlertsService } from '../services/alerts/market-alerts.service';
-import { BotAnnouncementService } from '../services/telegram/bot-announcement.service';
 import { logDeduplicator } from '../utils/logDeduplicator';
 
 export type StartupStatus = 'booting' | 'ready' | 'degraded';
@@ -237,10 +236,6 @@ export class ClientInitializerService {
       this.clients.set('marketAlerts', marketAlerts);
       logDeduplicator.info('Market Alerts service initialized successfully');
 
-      const botAnnouncementService = BotAnnouncementService.getInstance();
-      this.clients.set('botAnnouncementService', botAnnouncementService);
-      logDeduplicator.info('Bot Announcement service initialized successfully');
-
       // Démarrer le polling pour tous les clients
       logDeduplicator.info('All clients created, starting polling...');
       await this.startAllPolling();
@@ -350,16 +345,8 @@ export class ClientInitializerService {
       }
     }
 
-    // 5d. Start Bot Announcement Service (broadcasts changelog on deploy)
-    const botAnnouncementService = this.clients.get('botAnnouncementService');
-    if (botAnnouncementService) {
-      try {
-        botAnnouncementService.start();
-        logDeduplicator.info('Started Bot Announcement Service');
-      } catch (error) {
-        logDeduplicator.error('Error starting Bot Announcement Service:', { error: error instanceof Error ? error.message : String(error) });
-      }
-    }
+    // 5d. Bot release announcements are sent by the bot itself (its own
+    // changelog and delivery); the backend no longer broadcasts them.
 
     // 5e. Start Telegram Fill Alert Dispatcher (connects to HypeDexer allFills + fills_spot)
     const fillAlertDispatcher = this.clients.get('fillAlertDispatcher');
@@ -483,15 +470,6 @@ export class ClientInitializerService {
       }
     }
 
-    const botAnnouncementService = this.clients.get('botAnnouncementService');
-    if (botAnnouncementService) {
-      try {
-        botAnnouncementService.stop();
-        logDeduplicator.info('Bot Announcement Service stopped');
-      } catch (error) {
-        logDeduplicator.error('Error stopping Bot Announcement Service:', { error: error instanceof Error ? error.message : String(error) });
-      }
-    }
 
     // Stop ingestion FIRST — flush remaining batch before disconnecting DB
     const ingestionClient = this.clients.get('liquidationsIngestion');

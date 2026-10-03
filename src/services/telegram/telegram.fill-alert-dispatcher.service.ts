@@ -6,6 +6,7 @@ import { TelegramFillSubscriptionService, ActiveFillSubscription } from './teleg
 import { InternalWebSocketServer } from '../../websocket/ws.server';
 import { NormalizedFill, AggregatedFill, SpotFill } from '../../types/fill-alerts.types';
 import { formatFillAlert, formatFillDigestLine } from '../../utils/telegram.formatting';
+import { prefetchWalletNames } from '../names/alert-wallet-names';
 import { FillAggregator } from './fill-aggregator';
 import { startSentAlertPurge } from '../../utils/telegram.alert-dedup';
 import { AlertEngine, AlertRule } from '../alerts/alert-engine';
@@ -62,6 +63,7 @@ export class TelegramFillAlertDispatcherService {
       });
       InternalWebSocketServer.getInstance().broadcastFillAlert(rule.telegramId, message);
     },
+    prepare: (fills) => prefetchWalletNames(fills.map((f) => f.wallet)),
     summarize: (rule, fill) => formatFillDigestLine(fill, rule.sub.name, rule.sub.walletLabels?.[fill.wallet]),
     notify: (telegramId, message) => {
       InternalWebSocketServer.getInstance().broadcastFillAlert(telegramId, message);

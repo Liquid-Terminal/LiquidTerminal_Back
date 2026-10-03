@@ -27,6 +27,20 @@ const keyPrimary = (a: string) => `hlnames:primary:${a}`;
 const keyForward = (n: string) => `hlnames:fwd:${n}`;
 const keyProfile = (a: string) => `hlnames:profile:${a}`;
 
+/** USDC on HyperEVM, the one ERC20 we offer for minting (their Minter prices it 1:1 in USD). */
+export const HLNAMES_USDC = '0xb88339CB7199b77E23DB6E890353E22632Ba630f';
+
+/** Signed arguments for one call to their Minter contract (valid about 60 seconds). */
+export interface MintPass {
+  label: string;
+  sig: string;
+  timestamp: number;
+  /** "native" (HYPE) or the ERC20 address. */
+  token: string;
+  /** Price before any referral discount, in the token's smallest unit. */
+  amountRequired: string;
+}
+
 async function call<T>(path: string, init?: RequestInit): Promise<{ status: number; body: T | null }> {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
@@ -174,5 +188,27 @@ export class HlNamesClient {
     };
     await redisService.set(keyProfile(a), JSON.stringify(profile), TTL_S);
     return profile;
+  }
+
+  /**
+   * Signed mint pass for `label` (no ".hl"), priced in HYPE or USDC
+   * (Builder Program, github.com/HLnames/hln_api_minting). Never cached: the
+   * signature expires within a minute. It does not tell whether the name is
+   * free; the caller checks ownership on chain.
+   */
+  async mintPass(label: string, token: 'native' | 'usdc'): Promise<MintPass> {
+    const { status, body } = await call<MintPass>(`/sign_mintpass/${encodeURIComponent(label)}`, {
+      method: 'POST',
+      body: JSON.stringify(token === 'usdc' ? { token: HLNAMES_USDC } : {}),
+    });
+    if (status !== 200 || !body?.sig || !body.amountRequired) throw new Error(`hlnames mint pass status ${status}`);
+    return body;
+  }
+
+  /** Drops the cached name and profile of an address (after a mint, so the new name shows up). */
+  async forget(address: string): Promise<void> {
+    const a = address.toLowerCase();
+    if (!ADDRESS_RE.test(a)) return;
+    await Promise.all([redisService.delete(keyPrimary(a)), redisService.delete(keyProfile(a))]);
   }
 }

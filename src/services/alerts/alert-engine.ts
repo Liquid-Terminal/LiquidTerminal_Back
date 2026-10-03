@@ -56,6 +56,11 @@ export interface AlertPipeline<E, R extends AlertRule<E> = AlertRule<E>> {
   loadRules: () => Promise<R[]>;
   keys: (event: E) => EventKeys;
   deliver: (rule: R, event: E) => void;
+  /**
+   * Optional: runs once per batch before delivery with the events about to
+   * go out (to look up data the messages need). Errors are ignored.
+   */
+  prepare?: (events: E[]) => Promise<void>;
   /** One short HTML line for an alert sent inside a digest (over-budget users). */
   summarize: (rule: R, event: E) => string;
   /** Sends a plain HTML message to a user (used for digests). */
@@ -337,6 +342,11 @@ export class AlertEngine<E, R extends AlertRule<E> = AlertRule<E>> {
 
     // One pipeline for the batch. null = Redis unavailable: memory dedup only, fail open.
     const claimed = await redisService.claimKeys(fresh.map((f) => f.key), this.opts.dedupTtlSeconds);
+
+    if (this.pipeline.prepare) {
+      const going = fresh.filter((_f, i) => !claimed || claimed[i]).map((f) => f.event);
+      if (going.length) await this.pipeline.prepare(going).catch(() => undefined);
+    }
 
     fresh.forEach(({ rule, event, eventId }, i) => {
       if (claimed && !claimed[i]) {

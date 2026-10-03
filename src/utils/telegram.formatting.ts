@@ -2,6 +2,7 @@ import { renderAlertMessage, shortAddr, utcTime, SITE, HYPEDEXER_CREDIT } from '
 import { AggregatedLiquidation } from '../types/liquidations.types';
 import { AggregatedFill } from '../types/fill-alerts.types';
 import { CompletedTrade } from '../types/wallet-events.types';
+import { walletName } from '../services/names/alert-wallet-names';
 
 /**
  * Format a dollar amount in a human-readable way
@@ -53,6 +54,16 @@ function formatTimeRange(timeRange: [number, number]): string {
 }
 
 /**
+ * How a wallet reads in an alert: the user's own label first, then its .hl
+ * name (Hyperliquid Names, when known), then the short address.
+ */
+function whoIs(wallet: string, label?: string): string {
+  const name = walletName(wallet);
+  if (label) return `<b>${escapeHtml(label)}</b> ${name ? escapeHtml(name) : shortAddr(wallet)}`;
+  return name ? `<b>${escapeHtml(name)}</b>` : shortAddr(wallet);
+}
+
+/**
  * Liquidation alert (HTML). The headline says who lost what: a liquidated
  * long is red (longs got wiped), a liquidated short green, as on the site.
  */
@@ -71,7 +82,7 @@ export function formatLiquidationAlert(liq: AggregatedLiquidation, alertName?: s
     lines: [
       `📉 ${formatSize(size)} ${escapeHtml(liq.coin)} closed at ${formatTokenPrice(px)}${liq.fill_px_vwap != null ? ` · mark ${formatTokenPrice(liq.mark_px)}` : ''}`,
       agg ? `🧩 ${agg.count} liquidations of this wallet in ${formatTimeRange(agg.timeRangeMs)}` : null,
-      `👛 <a href="${SITE}/market/tracker/wallet/${wallet}">${shortAddr(wallet)}</a> · 🕐 ${utcTime(liq.time)}`,
+      `👛 <a href="${SITE}/market/tracker/wallet/${wallet}">${whoIs(wallet)}</a> · 🕐 ${utcTime(liq.time)}`,
     ],
     links: [
       { label: 'Transaction', url: `${SITE}/explorer/transaction/${liq.hash}` },
@@ -154,9 +165,7 @@ export function formatFillAlert(
   const walletUrl = context.fromList
     ? `${SITE}/market/tracker/wallet/${fill.wallet}`
     : `${SITE}/explorer/address/${fill.wallet}`;
-  const who = context.walletLabel
-    ? `<b>${escapeHtml(context.walletLabel)}</b> ${shortAddr(fill.wallet)}`
-    : shortAddr(fill.wallet);
+  const who = whoIs(fill.wallet, context.walletLabel);
 
   // Several fills of one order: the price is their VWAP over the window.
   const isAggregated = fill.fillCount > 1;
@@ -194,7 +203,7 @@ export function formatFillAlert(
 // alerts are grouped into a digest message (see AlertEngine).
 
 const walletLink = (wallet: string, label?: string) =>
-  `<a href="https://liquidterminal.xyz/market/tracker/wallet/${wallet}">${escapeHtml(label || shortenAddress(wallet))}</a>`;
+  `<a href="https://liquidterminal.xyz/market/tracker/wallet/${wallet}">${escapeHtml(label || walletName(wallet) || shortenAddress(wallet))}</a>`;
 
 export function formatFillDigestLine(fill: AggregatedFill, subscriptionName: string, walletLabel?: string): string {
   const side = fill.side === 'B' ? '🟢' : '🔴';

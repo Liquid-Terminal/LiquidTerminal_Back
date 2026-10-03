@@ -7,7 +7,8 @@ import { HlNamesClient, HL_NAME_RE } from '../../clients/hlnames/hlnames.client'
 /**
  * Hyperliquid Names (.hl) for the site: batch reverse lookup for address
  * lists, forward resolution for search, and a profile for wallet headers.
- * Public data, cached server-side (see HlNamesClient).
+ * Public data, cached server-side (see HlNamesClient). Also hands out the
+ * signed mint passes for minting a name on the site.
  */
 const router = express.Router();
 const names = HlNamesClient.getInstance();
@@ -55,6 +56,34 @@ router.get('/profile/:address', (async (req: Request, res: Response) => {
   } catch (error) {
     unavailable(res, 'names/profile failed', error);
   }
+}) as RequestHandler);
+
+/** A label as the Minter takes it: already ENS-normalized by the client, 1 to 30 characters, no dot or space. */
+const LABEL = /^[^\s./?#%]{1,30}$/u;
+const mintPassSchema = z.object({ token: z.enum(['native', 'usdc']).default('native') }).strict();
+
+/** POST /names/mintpass/:label { token } → signed Minter arguments, valid about 60s */
+router.post('/mintpass/:label', (async (req: Request, res: Response) => {
+  const label = String(req.params.label);
+  const body = mintPassSchema.safeParse(req.body ?? {});
+  if (!LABEL.test(label) || [...label].length > 30 || !body.success) {
+    return res.status(400).json({ success: false, error: 'Invalid label or token', code: 'VALIDATION_ERROR' });
+  }
+  try {
+    res.set('Cache-Control', 'no-store');
+    res.json({ success: true, data: await names.mintPass(label, body.data.token) });
+  } catch (error) {
+    unavailable(res, 'names/mintpass failed', error);
+  }
+}) as RequestHandler);
+
+/** POST /names/forget/:address → drops cached name data so a fresh mint shows up */
+router.post('/forget/:address', (async (req: Request, res: Response) => {
+  const address = String(req.params.address);
+  if (!ADDRESS.test(address)) return res.status(400).json({ success: false, error: 'Not an address', code: 'VALIDATION_ERROR' });
+  await names.forget(address).catch(() => undefined);
+  res.set('Cache-Control', 'no-store');
+  res.json({ success: true });
 }) as RequestHandler);
 
 export default router;

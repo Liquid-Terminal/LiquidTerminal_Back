@@ -5,6 +5,7 @@ import { LiquidationsWebSocketService } from '../liquidations/liquidations.ws.se
 import { InternalWebSocketServer } from '../../websocket/ws.server';
 import { AggregatedLiquidation } from '../../types/liquidations.types';
 import { formatLiquidationAlert, formatLiquidationDigestLine } from '../../utils/telegram.formatting';
+import { prefetchWalletNames } from '../names/alert-wallet-names';
 import { startSentAlertPurge } from '../../utils/telegram.alert-dedup';
 import { AlertEngine, AlertRule } from '../alerts/alert-engine';
 
@@ -89,6 +90,7 @@ export class TelegramLiquidationDispatcherService {
     deliver: (rule, liq) => {
       InternalWebSocketServer.getInstance().broadcastLiquidationAlert(rule.telegramId, formatLiquidationAlert(liq, rule.name));
     },
+    prepare: (liqs) => prefetchWalletNames(liqs.map((l) => l.liquidated_user)),
     summarize: (_rule, liq) => formatLiquidationDigestLine(liq),
     notify: (telegramId, message) => {
       InternalWebSocketServer.getInstance().broadcastLiquidationAlert(telegramId, message);

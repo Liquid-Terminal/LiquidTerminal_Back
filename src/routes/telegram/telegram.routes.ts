@@ -12,7 +12,9 @@ import {
   updateWalletSubscriptionSchema,
   walletSubscriptionQuerySchema,
   walletSubscriptionByIdSchema,
+  siteAlertsActiveSchema,
 } from '../../schemas/telegram.schema';
+import { prisma } from '../../core/prisma.service';
 import { WalletEventType } from '../../types/prisma-enums';
 import { logDeduplicator } from '../../utils/logDeduplicator';
 
@@ -400,6 +402,60 @@ router.get('/wallet-subscriptions/active',
       res.json({ success: true, data });
     } catch (error) {
       logDeduplicator.error('Error fetching active wallet subscriptions:', { error: error instanceof Error ? error.message : String(error) });
+      res.status(500).json({ success: false, message: 'Internal server error', code: 'INTERNAL_SERVER_ERROR' });
+    }
+  }) as RequestHandler
+);
+
+// ==================== SITE ALERTS (rules created on liquidterminal.xyz) ====================
+
+/**
+ * GET /telegram/site-alerts?telegramId=XXX
+ * Alert rules created on the site (price, funding, OI, listings, leverage,
+ * liquidation cascades, reserve yield) that deliver to this Telegram account,
+ * so the bot can list them next to its own alerts.
+ */
+router.get('/site-alerts',
+  validateTelegramBotApiKey,
+  marketRateLimiter,
+  validateRequest(telegramIdQuerySchema),
+  (async (req: Request, res: Response) => {
+    try {
+      const telegramId = BigInt(req.query.telegramId as string);
+      const rules = await prisma.alertRule.findMany({
+        where: { telegramId },
+        orderBy: { createdAt: 'asc' },
+        select: { id: true, type: true, name: true, isActive: true },
+      });
+      res.json({ success: true, data: { rules } });
+    } catch (error) {
+      logDeduplicator.error('Error listing site alerts:', { error: error instanceof Error ? error.message : String(error) });
+      res.status(500).json({ success: false, message: 'Internal server error', code: 'INTERNAL_SERVER_ERROR' });
+    }
+  }) as RequestHandler
+);
+
+/**
+ * PUT /telegram/site-alerts/active
+ * Body: { telegramId, isActive, id? } · pause or resume one site rule, or all of them.
+ */
+router.put('/site-alerts/active',
+  validateTelegramBotApiKey,
+  marketRateLimiter,
+  validateRequest(siteAlertsActiveSchema),
+  (async (req: Request, res: Response) => {
+    try {
+      const { telegramId, isActive, id } = req.body as { telegramId: string; isActive: boolean; id?: string };
+      const result = await prisma.alertRule.updateMany({
+        where: { telegramId: BigInt(telegramId), ...(id ? { id } : {}) },
+        data: { isActive },
+      });
+      if (id && result.count === 0) {
+        return res.status(404).json({ success: false, message: 'Alert not found', code: 'SITE_ALERT_NOT_FOUND' });
+      }
+      res.json({ success: true, data: { updated: result.count } });
+    } catch (error) {
+      logDeduplicator.error('Error updating site alerts:', { error: error instanceof Error ? error.message : String(error) });
       res.status(500).json({ success: false, message: 'Internal server error', code: 'INTERNAL_SERVER_ERROR' });
     }
   }) as RequestHandler

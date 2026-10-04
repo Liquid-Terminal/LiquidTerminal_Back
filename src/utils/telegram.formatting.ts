@@ -1,4 +1,3 @@
-import { renderAlertMessage, shortAddr, utcTime, SITE, HYPEDEXER_CREDIT } from './alert-message';
 import { AggregatedLiquidation } from '../types/liquidations.types';
 import { AggregatedFill } from '../types/fill-alerts.types';
 import { CompletedTrade } from '../types/wallet-events.types';
@@ -54,43 +53,47 @@ function formatTimeRange(timeRange: [number, number]): string {
 }
 
 /**
- * How a wallet reads in an alert: the user's own label first, then its .hl
- * name (Hyperliquid Names, when known), then the short address.
+ * Format a liquidation alert message for Telegram (HTML parse mode)
  */
-function whoIs(wallet: string, label?: string): string {
-  const name = walletName(wallet);
-  if (label) return `<b>${escapeHtml(label)}</b> ${name ? escapeHtml(name) : shortAddr(wallet)}`;
-  return name ? `<b>${escapeHtml(name)}</b>` : shortAddr(wallet);
-}
+export function formatLiquidationAlert(liq: AggregatedLiquidation, _alertName?: string | null): string {
+  // null direction: neutral marker rather than defaulting to the Short styling.
+  const directionEmoji = liq.liq_dir === 'Long' ? '🟢' : liq.liq_dir === 'Short' ? '🔴' : '⚪';
+  const trendEmoji = liq.liq_dir === 'Long' ? '📉' : liq.liq_dir === 'Short' ? '📈' : '➖';
+  const directionLabel = liq.liq_dir ?? 'Liquidation';
+  const amountFormatted = formatAmount(liq.notional_total);
+  const priceFormatted = formatPrice(liq.mark_px);
+  const timeFormatted = liq.time.slice(0, 16).replace('T', ' ');
 
-/**
- * Liquidation alert (HTML). The headline says who lost what: a liquidated
- * long is red (longs got wiped), a liquidated short green, as on the site.
- */
-export function formatLiquidationAlert(liq: AggregatedLiquidation, alertName?: string | null): string {
-  const side = liq.liq_dir === 'Long' ? 'long' : liq.liq_dir === 'Short' ? 'short' : 'position';
-  const icon = liq.liq_dir === 'Long' ? '🟥' : liq.liq_dir === 'Short' ? '🟩' : '⚡';
-  const agg = liq.aggregation?.isAggregated ? liq.aggregation : null;
-  const size = agg ? agg.totalSize : liq.size_total;
-  const px = liq.fill_px_vwap ?? liq.mark_px;
-  const wallet = liq.liquidated_user.toLowerCase();
+  const liquidTerminalTx = `https://liquidterminal.xyz/explorer/transaction/${liq.hash}`;
+  const liquidTerminalAddress = `https://liquidterminal.xyz/explorer/address/${liq.liquidated_user}`;
+  const hypurrscanTx = `https://hypurrscan.io/tx/${liq.hash}`;
+  const hypurrscanAddress = `https://hypurrscan.io/address/${liq.liquidated_user}`;
 
-  return renderAlertMessage({
-    icon,
-    headline: `${escapeHtml(liq.coin)} ${side} liquidated · ${formatAmount(liq.notional_total)}`,
-    alertName,
-    lines: [
-      `📉 ${formatSize(size)} ${escapeHtml(liq.coin)} closed at ${formatTokenPrice(px)}${liq.fill_px_vwap != null ? ` · mark ${formatTokenPrice(liq.mark_px)}` : ''}`,
-      agg ? `🧩 ${agg.count} liquidations of this wallet in ${formatTimeRange(agg.timeRangeMs)}` : null,
-      `👛 <a href="${SITE}/market/tracker/wallet/${wallet}">${whoIs(wallet)}</a> · 🕐 ${utcTime(liq.time)}`,
-    ],
-    links: [
-      { label: 'Transaction', url: `${SITE}/explorer/transaction/${liq.hash}` },
-      { label: 'Wallet', url: `${SITE}/explorer/address/${wallet}` },
-      { label: 'Liquidations feed', url: `${SITE}/explorer/liquidations` },
-    ],
-    dataCredit: HYPEDEXER_CREDIT,
-  });
+  const name = walletName(liq.liquidated_user);
+  const isAggregated = liq.aggregation?.isAggregated;
+  const aggregationInfo = isAggregated
+    ? `\n📊 <b>${liq.aggregation!.count} liquidations agrégées</b> (${formatTimeRange(liq.aggregation!.timeRangeMs)})`
+    : '';
+
+  return `
+🚨 <b>LIQUIDATION ALERT</b>${aggregationInfo}
+
+${directionEmoji} <b>${escapeHtml(liq.coin)}</b> ${directionLabel}: ${amountFormatted}
+${trendEmoji} Mark Price: ${priceFormatted}
+🕐 ${timeFormatted} UTC
+
+<b>📝 Transaction</b>
+<a href="${liquidTerminalTx}">Liquid Terminal</a> • <a href="${hypurrscanTx}">Hypurrscan</a>
+<code>${escapeHtml(liq.hash)}</code>
+
+<b>👛 Liquidated Wallet</b>${name ? ` · <b>${escapeHtml(name)}</b>` : ''}
+<a href="${liquidTerminalAddress}">Liquid Terminal</a> • <a href="${hypurrscanAddress}">Hypurrscan</a>
+<code>${escapeHtml(liq.liquidated_user)}</code>
+
+━━━━━━━━━━━━━━━━━━━━
+<i>Data by <a href="https://app.hypedexer.com/">HypeDexer</a> (Enigma Validator)</i>
+<a href="https://x.com/liquidterminal">𝕏</a> • <a href="https://liquidterminal.xyz/">Website</a>
+`.trim();
 }
 
 /**
@@ -111,6 +114,14 @@ function formatTokenPrice(price: number): string {
 function shortenAddress(address: string): string {
   if (address.length <= 12) return address;
   return `${address.slice(0, 6)}…${address.slice(-4)}`;
+}
+
+/**
+ * Format a fill time (ISO string or epoch ms) as `YYYY-MM-DD HH:MM`.
+ */
+function formatFillTime(time: string | number): string {
+  const iso = typeof time === 'number' ? new Date(time).toISOString() : time;
+  return iso.slice(0, 16).replace('T', ' ');
 }
 
 /**
@@ -161,41 +172,68 @@ export function formatFillAlert(
   context: FillAlertContext = {}
 ): string {
   const isBuy = fill.side === 'B';
-  const market = fill.source === 'perp' ? 'perp' : 'spot';
-  const walletUrl = context.fromList
-    ? `${SITE}/market/tracker/wallet/${fill.wallet}`
-    : `${SITE}/explorer/address/${fill.wallet}`;
-  const who = whoIs(fill.wallet, context.walletLabel);
+  const sideEmoji = isBuy ? '🟢' : '🔴';
+  const sideLabel = isBuy ? 'BUY' : 'SELL';
+  const sourceTag = fill.source === 'perp' ? 'PERP' : 'SPOT';
+  const twapTag = fill.twapId != null ? ' <code>TWAP</code>' : '';
 
-  // Several fills of one order: the price is their VWAP over the window.
+  const liquidTerminalAddress = context.fromList
+    ? `https://liquidterminal.xyz/market/tracker/wallet/${fill.wallet}`
+    : `https://liquidterminal.xyz/explorer/address/${fill.wallet}`;
+  const label = context.walletLabel || walletName(fill.wallet);
+  const walletLabel = label ? `<b>${escapeHtml(label)}</b> ` : '';
+  const hypurrscanAddress = `https://hypurrscan.io/address/${fill.wallet}`;
+
+  const dirLine =
+    fill.source === 'perp' && fill.dir ? `\n🧭 Direction: ${escapeHtml(fill.dir)}` : '';
+
+  // The order may have been filled in several fills — show the count + flag VWAP.
   const isAggregated = fill.fillCount > 1;
-  const fills = isAggregated
-    ? ` · ${fill.fillCount} fills${fill.aggregationDurationMs !== undefined ? ` in ${formatDurationMs(fill.aggregationDurationMs)}` : ''}`
+  const priceLabel = isAggregated ? ' <i>(VWAP)</i>' : '';
+  const durationSuffix =
+    isAggregated && fill.aggregationDurationMs !== undefined
+      ? ` (${formatDurationMs(fill.aggregationDurationMs)})`
+      : '';
+  const fillCountLine = isAggregated
+    ? `\n🧩 Filled in ${fill.fillCount} fills${durationSuffix}`
     : '';
-  const pnl =
-    fill.closedPnlTotal !== undefined && fill.closedPnlTotal !== 0
-      ? `💰 Realized PnL ${fill.closedPnlTotal > 0 ? '🟢' : '🔴'} <b>${formatSignedPnl(fill.closedPnlTotal)}</b>`
-      : null;
 
-  return renderAlertMessage({
-    icon: isBuy ? '🟢' : '🔴',
-    headline: `${isBuy ? 'Buy' : 'Sell'} ${formatSize(fill.sz)} ${escapeHtml(fill.coin)} · ${formatAmount(fill.notionalUsd)}`,
-    alertName: subscriptionName,
-    lines: [
-      `💵 ${formatTokenPrice(fill.px)}${isAggregated ? ' avg' : ''} · ${market}${fills}${fill.twapId != null ? ' · TWAP' : ''}`,
-      fill.source === 'perp' && fill.dir ? `🧭 ${escapeHtml(fill.dir)}` : null,
-      pnl,
-      `👛 <a href="${walletUrl}">${who}</a> · 🕐 ${utcTime(fill.time)}`,
-    ],
-    links:
-      fill.twapId != null
-        ? [{ label: 'Wallet', url: `${SITE}/explorer/address/${fill.wallet}` }]
-        : [
-            { label: 'Transaction', url: `${SITE}/explorer/transaction/${fill.hash}` },
-            { label: 'Wallet', url: `${SITE}/explorer/address/${fill.wallet}` },
-          ],
-    dataCredit: HYPEDEXER_CREDIT,
-  });
+  // Realized PnL line — perp only, hidden when 0 or undefined.
+  const pnlLine =
+    fill.closedPnlTotal !== undefined && fill.closedPnlTotal !== 0
+      ? `\n💰 Realized PnL: ${fill.closedPnlTotal > 0 ? '🟢' : '🔴'} ${formatSignedPnl(fill.closedPnlTotal)}`
+      : '';
+
+  // TWAP orders aren't tied to a single transaction hash — replace the
+  // transaction block with the TWAP id instead.
+  const transactionBlock =
+    fill.twapId != null
+      ? `<b>🧵 TWAP</b> <code>${escapeHtml(String(fill.twapId))}</code>`
+      : (() => {
+          const liquidTerminalTx = `https://liquidterminal.xyz/explorer/transaction/${fill.hash}`;
+          const hypurrscanTx = `https://hypurrscan.io/tx/${fill.hash}`;
+          return `<b>📝 Transaction</b>
+<a href="${liquidTerminalTx}">Liquid Terminal</a> • <a href="${hypurrscanTx}">Hypurrscan</a>
+<code>${escapeHtml(fill.hash)}</code>`;
+        })();
+
+  return `
+💸 <b>FILL ALERT</b> <code>${sourceTag}</code>${twapTag} · <i>${escapeHtml(subscriptionName)}</i>
+
+${sideEmoji} <b>${escapeHtml(fill.coin)}</b> ${sideLabel}
+💵 Notional: ${formatAmount(fill.notionalUsd)}
+📦 Size: ${formatSize(fill.sz)} @ ${formatTokenPrice(fill.px)}${priceLabel}${pnlLine}${fillCountLine}${dirLine}
+🕐 ${formatFillTime(fill.time)} UTC
+
+${transactionBlock}
+
+<b>👛 Wallet</b> ${walletLabel}<code>${escapeHtml(shortenAddress(fill.wallet))}</code>
+<a href="${liquidTerminalAddress}">Liquid Terminal</a> • <a href="${hypurrscanAddress}">Hypurrscan</a>
+
+━━━━━━━━━━━━━━━━━━━━
+<i>Data by <a href="https://app.hypedexer.com/">HypeDexer</a> (Enigma Validator)</i>
+<a href="https://x.com/liquidterminal">𝕏</a> • <a href="https://liquidterminal.xyz/">Website</a>
+`.trim();
 }
 
 // ==================== DIGEST LINES ====================

@@ -22,42 +22,17 @@ const liq = (o: Partial<AggregatedLiquidation> = {}): AggregatedLiquidation => (
   ...o,
 });
 
-describe('alert messages share one shape', () => {
-  it('liquidation: event and amount first, alert name, wallet link, no raw hash dump', () => {
+describe('liquidation and fill alerts keep their original layout', () => {
+  it('liquidation: header, coin and amount, mark price, transaction and wallet blocks', () => {
     const m = formatLiquidationAlert(liq(), 'Big Liquidations');
-    const lines = m.split('\n');
-    expect(lines[0]).toBe('🟥 <b>BTC long liquidated · $1.25M</b>');
-    expect(lines[1]).toBe('<i>Big Liquidations</i>');
-    expect(m).toContain('14.8 BTC closed at $84,512.00');
-    expect(m).toContain('/market/tracker/wallet/0x1234567890abcdef1234567890abcdef12345678');
-    expect(m).toContain('14:03:21 UTC');
-    expect(m).not.toContain('<code>0xabc</code>');
-    expect(m).not.toMatch(/agrég/);
-    expect(m).not.toContain('—');
+    expect(m.split('\n')[0]).toBe('🚨 <b>LIQUIDATION ALERT</b>');
+    expect(m).toContain('🟢 <b>BTC</b> Long: $1.25M');
+    expect(m).toContain('Mark Price:');
+    expect(m).toContain('<code>0xabc</code>');
+    expect(m).toContain('<code>0x1234567890ABCDEF1234567890abcdef12345678</code>');
   });
 
-  it('liquidation: a liquidated short is green, aggregation is spelled out', () => {
-    const m = formatLiquidationAlert(
-      liq({
-        liq_dir: 'Short',
-        aggregation: {
-          isAggregated: true,
-          count: 3,
-          timeRangeMs: [0, 12_000],
-          originalTids: [],
-          totalNotional: 1_250_000,
-          totalSize: 20,
-          avgMarkPrice: 0,
-          avgFillPrice: 0,
-          uniqueLiquidators: [],
-        },
-      })
-    );
-    expect(m.split('\n')[0]).toBe('🟩 <b>BTC short liquidated · $1.25M</b>');
-    expect(m).toContain('3 liquidations of this wallet in 12s');
-  });
-
-  it('fill: side, size, coin and notional in the headline, then the alert name', () => {
+  it('fill: header with the alert name, side, notional, size and wallet', () => {
     const fill = {
       coin: 'ETH',
       side: 'B',
@@ -75,12 +50,14 @@ describe('alert messages share one shape', () => {
       twapId: null,
     } as unknown as AggregatedFill;
     const m = formatFillAlert(fill, 'Whale Fills', { walletLabel: 'Fund A' });
-    expect(m.split('\n')[0]).toBe('🟢 <b>Buy 12.5 ETH · $41.2K</b>');
-    expect(m.split('\n')[1]).toBe('<i>Whale Fills</i>');
-    expect(m).toContain('4 fills in 2s');
+    expect(m.split('\n')[0]).toBe('💸 <b>FILL ALERT</b> <code>PERP</code> · <i>Whale Fills</i>');
+    expect(m).toContain('🟢 <b>ETH</b> BUY');
+    expect(m).toContain('Filled in 4 fills (2s)');
     expect(m).toContain('<b>Fund A</b>');
   });
+});
 
+describe('doc update alerts', () => {
   it('doc update: readable page titles, added and removed lines', () => {
     expect(docPageTitle('for-developers/api/exchange-endpoint')).toBe('For developers › API › Exchange endpoint');
     const m = formatDocUpdateTelegramMessage([

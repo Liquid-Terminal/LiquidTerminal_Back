@@ -44,6 +44,7 @@ describe('wallet .hl names in alerts', () => {
     primaryNames.mockRejectedValue(new Error('down'));
     await prefetchWalletNames([other]);
     expect(walletName(other)).toBeNull();
-    expect(formatLiquidationAlert(liq(other))).toContain('0xaaaa…aaaa');
+    expect(formatLiquidationAlert(liq(other))).not.toContain('Liquidated Wallet</b> ·');
+    expect(formatLiquidationAlert(liq(other))).toContain(other);
   });
 });

@@ -22,6 +22,9 @@
  *               been frozen since 2026-07-11, so it cannot be added until that is fixed.
  *               Also not included: HyperEVM priority fees, a third and unrelated stream.
  *               @see https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/priority-fees
+ *   - reserve:  USDC reserve yield (aligned quote asset v2). Paid by the USDC deployers
+ *               into the interest address once per 30-date interval and forwarded to
+ *               the Assistance Fund. Booked on the day it landed. First one 3 Oct 2026.
  */
 
 export type RevenueWindow = '7d' | '30d' | '90d' | '1y' | 'all';
@@ -34,6 +37,7 @@ export interface RevenueDay {
   hip3: number;
   hip4: number;
   priority: number;
+  reserve: number;
   total: number;
 }
 
@@ -44,6 +48,7 @@ export interface RevenueLifetime {
   hip3: number;
   hip4: number;
   priority: number;
+  reserve: number;
   total: number;
 }
 
@@ -71,6 +76,7 @@ export interface RevenueMeta {
     hip3: RevenueSourceStatus;
     hip4: RevenueSourceStatus;
     priority: RevenueSourceStatus;
+    reserve: RevenueSourceStatus;
   };
 }
 

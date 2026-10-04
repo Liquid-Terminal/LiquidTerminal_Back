@@ -10,6 +10,12 @@ import { escapeHtml } from '../../utils/telegram.formatting';
 import { renderAlertMessage, SITE } from '../../utils/alert-message';
 import { AlertEngine, AlertRule } from './alert-engine';
 import { AlertRuleParams, AlertRuleType } from './alert-rule.types';
+import {
+  LedgerUpdate,
+  RY_ASSISTANCE_FUND,
+  RY_INTEREST_ADDRESS,
+  RY_MIN_USDC,
+} from '../revenue/reserve-yield.ledger';
 
 /**
  * Market alerts: price, funding, open interest, listings, leverage changes and
@@ -172,17 +178,8 @@ export class CascadeTracker {
 // RESERVE YIELD
 // ============================================================================
 
-/** System interest address for USDC (0x50..00 + token index 0) and the Assistance Fund. */
-export const RY_INTEREST_ADDRESS = '0x5000000000000000000000000000000000000000';
-export const RY_ASSISTANCE_FUND = '0xfefefefefefefefefefefefefefefefefefefefe';
-/** Activation and test transfers (1 USDC) are not payments. */
-export const RY_MIN_USDC = 1_000;
-
-export interface LedgerUpdate {
-  time: number;
-  hash: string;
-  delta: { type: string; user?: string; destination?: string; token?: string; amount?: string };
-}
+export { RY_INTEREST_ADDRESS, RY_ASSISTANCE_FUND, RY_MIN_USDC };
+export type { LedgerUpdate };
 
 /**
  * Reads the interest address ledger into reserve yield events: USDC arriving

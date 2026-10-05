@@ -1,6 +1,6 @@
 import { HypurrscanTokenHoldersClient } from '../../clients/hypurrscan/tokenHolders.client';
 import { redisService } from '../../core/redis.service';
-import { MarketData } from '../../types/market.types';
+import { AssetContext, MarketData, SpotContext } from '../../types/market.types';
 import { logDeduplicator } from '../../utils/logDeduplicator';
 import { OnDemandSnapshot } from '../../utils/onDemandSnapshot';
 import {
@@ -62,6 +62,7 @@ export class TokenHoldersService {
   private static readonly MAX_TOKENS = 8;
 
   private static readonly MARKETS_CACHE_KEY = 'spot:markets';
+  private static readonly SPOT_META_CACHE_KEY = 'spot:raw_data';
   private static readonly KNOWN_TOKENS_TTL_MS = 60_000;
 
   private readonly client = HypurrscanTokenHoldersClient.getInstance();
@@ -143,23 +144,35 @@ export class TokenHoldersService {
   }
 
   /**
-   * The listed spot token's name, matched case-insensitively like the token
-   * page does ("hype" → "HYPE"), or null. Only listed tokens are fetched, so a
-   * crafted name can't make this process download arbitrary paths. Fails open
-   * (shape check only, done by the route) while the spot poller hasn't filled
-   * Redis yet.
+   * Hypurrscan's name for a listed spot token, or null. The token page names
+   * tokens as `/market/spot` does — case-insensitively, and with display
+   * names for some ("BTC", "USDT_USDC") where Hypurrscan wants the on-chain
+   * one ("UBTC", "USDT0"): the two are linked by tokenId. Only listed tokens
+   * are fetched, so a crafted name can't make this process download arbitrary
+   * paths. Fails open (shape check only, done by the route) while the spot
+   * poller hasn't filled Redis yet.
    */
   private async resolveToken(token: string): Promise<string | null> {
     const now = Date.now();
     if (!this.knownTokens || now - this.knownTokens.loadedAt > TokenHoldersService.KNOWN_TOKENS_TTL_MS) {
       try {
-        const raw = await redisService.get(TokenHoldersService.MARKETS_CACHE_KEY);
-        if (raw) {
-          const markets = JSON.parse(raw) as MarketData[];
-          this.knownTokens = {
-            names: new Map(markets.map((m) => [m.name.toLowerCase(), m.name])),
-            loadedAt: now,
-          };
+        const [marketsRaw, spotRaw] = await Promise.all([
+          redisService.get(TokenHoldersService.MARKETS_CACHE_KEY),
+          redisService.get(TokenHoldersService.SPOT_META_CACHE_KEY),
+        ]);
+        if (marketsRaw) {
+          const markets = JSON.parse(marketsRaw) as MarketData[];
+          const onChainName = new Map<string, string>();
+          if (spotRaw) {
+            const [spotMeta] = JSON.parse(spotRaw) as [SpotContext, AssetContext[]];
+            for (const t of spotMeta.tokens) onChainName.set(t.tokenId, t.name);
+          }
+          const names = new Map<string, string>();
+          const resolved = markets.map((m) => [m.name, onChainName.get(m.tokenId) ?? m.name]);
+          for (const [, name] of resolved) names.set(name.toLowerCase(), name);
+          // Display names last: they win when one is also another token's on-chain name.
+          for (const [display, name] of resolved) names.set(display.toLowerCase(), name);
+          this.knownTokens = { names, loadedAt: now };
         }
       } catch (error) {
         logDeduplicator.warn('TokenHoldersService: failed to load the spot markets', {

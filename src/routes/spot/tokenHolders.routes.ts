@@ -12,8 +12,8 @@ const holdersService = TokenHoldersService.getInstance();
 
 router.use(marketRateLimiter);
 
-/** Hyperliquid spot token names are short alphanumerics ("HYPE", "UBTC"). */
-const TOKEN_RE = /^[A-Za-z0-9]{1,20}$/;
+/** Spot token names as `/market/spot` lists them ("HYPE", "UBTC", "USDT_USDC"). */
+const TOKEN_RE = /^[A-Za-z0-9_]{1,20}$/;
 const MAX_LIMIT = 100;
 
 const intParam = (value: unknown, fallback: number): number => {

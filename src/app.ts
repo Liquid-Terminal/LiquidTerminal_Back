@@ -35,6 +35,7 @@ import stablecoinsRoutes from './routes/spot/stablecoins.routes';
 import globalPerpStatsRoutes from './routes/perp/perpStats.routes';
 import metricsRoutes from './routes/metrics/metrics.routes';
 import auctionRoutes from './routes/spot/auction.routes';
+import tokenHoldersRoutes from './routes/spot/tokenHolders.routes';
 import vaultsRoutes from './routes/vault/vaults.routes';
 import feesRoutes from './routes/fees/fees.routes';
 
@@ -136,6 +137,7 @@ app.use('/user', userAuthRoutes);
 app.use('/market/spot', marketSpotRoutes);
 app.use('/market/perp', marketPerpRoutes);
 app.use('/market/auction', auctionRoutes);
+app.use('/market/holders', tokenHoldersRoutes);
 app.use('/market/vaults', vaultsRoutes);
 app.use('/market/fees', feesRoutes);
 app.use('/market/revenue', revenueRoutes);

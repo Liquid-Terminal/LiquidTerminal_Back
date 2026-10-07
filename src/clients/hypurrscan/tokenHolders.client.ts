@@ -3,10 +3,11 @@ import { CircuitBreakerService } from '../../core/circuit.breaker.service';
 import { RawTokenHolders } from '../../utils/token-holders.util';
 
 /**
- * Hypurrscan holder lists, fetched on demand by TokenHoldersService (no
- * polling, nothing stored in Redis). These payloads are huge — HYPE 14.9 MB,
- * USDC ~70 MB (2026-10) — so downloads run one at a time: two parsed lists in
- * memory at once is the peak this process accepts.
+ * Hypurrscan holder lists, fetched on demand by TokenHoldersService and
+ * StakedHoldersService (no polling, nothing stored in Redis). These payloads
+ * are huge — HYPE 14.9 MB, stakedHYPE 2.8 MB, USDC ~70 MB (2026-10) — so
+ * downloads run one at a time: two parsed lists in memory at once is the peak
+ * this process accepts.
  */
 export class HypurrscanTokenHoldersClient extends BaseApiService {
   private static instance: HypurrscanTokenHoldersClient;

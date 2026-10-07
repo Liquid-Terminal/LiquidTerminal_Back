@@ -13,7 +13,6 @@ import { HyperliquidSpotStatsClient } from '../clients/hyperliquid/spot/spot.sta
 import { HypurrscanFeesClient } from '../clients/hypurrscan/fees.client';
 import { HyperliquidGlobalStatsClient } from '../clients/hyperliquid/globalstats.client';
 import { HyperliquidLeaderboardClient } from '../clients/hyperliquid/leaderboard/leaderboard.client';
-import { HypurrscanStakedHoldersClient } from '../clients/hypurrscan/stakedHolders.client';
 import { HLIndexerLiquidationsClient } from '../clients/hypedexer/rest/liquidations/liquidations.client';
 import { SSEManagerService } from '../services/liquidations/sse-manager.service';
 import { LiquidationsWebSocketService } from '../services/liquidations/liquidations.ws.service';
@@ -147,10 +146,6 @@ export class ClientInitializerService {
       // Initialiser le client Leaderboard
       const leaderboardClient = HyperliquidLeaderboardClient.getInstance();
       this.clients.set('leaderboard', leaderboardClient);
-
-      // Initialiser le client Staked Holders
-      const stakedHoldersClient = HypurrscanStakedHoldersClient.getInstance();
-      this.clients.set('stakedHolders', stakedHoldersClient);
 
       // Initialiser le client Liquidations HLIndexer (polling disabled - data from historical DB)
       const liquidationsClient = HLIndexerLiquidationsClient.getInstance();

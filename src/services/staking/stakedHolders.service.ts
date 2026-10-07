@@ -1,13 +1,74 @@
-import { HypurrscanStakedHoldersClient } from '../../clients/hypurrscan/stakedHolders.client';
-import { StakedHoldersData, StakedHolder } from '../../types/staking.types';
+import { HypurrscanTokenHoldersClient } from '../../clients/hypurrscan/tokenHolders.client';
+import { StakedHolder } from '../../types/staking.types';
+import { logDeduplicator } from '../../utils/logDeduplicator';
+import { OnDemandSnapshot } from '../../utils/onDemandSnapshot';
 
+interface StakedHoldersStats {
+  totalHolders: number;
+  totalStaked: number;
+  averageStaked: number;
+  lastUpdate: number;
+  distributionByRange: {
+    range: string;
+    holdersCount: number;
+    totalStaked: number;
+    percentage: number;
+  }[];
+  topHoldersStats: {
+    topCount: number;
+    totalStaked: number;
+    percentage: number;
+  }[];
+}
+
+/** Hypurrscan's stakedHYPE list, sorted once per download. */
+interface StakedHoldersView {
+  token: string;
+  /** Hypurrscan regeneration time, in seconds. */
+  lastUpdate: number;
+  holdersCount: number;
+  /** Largest stake first. */
+  sorted: StakedHolder[];
+  /** Hypurrscan's address → amount map (lowercased addresses). */
+  amounts: Record<string, number>;
+  /** Computed on the first stats request. */
+  stats?: StakedHoldersStats;
+}
+
+const RANGES = [
+  { min: 0, max: 10, label: '0-10' },
+  { min: 10, max: 50, label: '10-50' },
+  { min: 50, max: 250, label: '50-250' },
+  { min: 250, max: 1000, label: '250-1000' },
+  { min: 1000, max: 5000, label: '1000-5000' },
+  { min: 5000, max: 25000, label: '5000-25000' },
+  { min: 25000, max: 100000, label: '25000-100000' },
+  { min: 100000, max: Infinity, label: '100000+' },
+];
+
+const TOP_COUNTS = [10, 50, 100, 500, 1000, 5000, 10000];
+
+/**
+ * HYPE stakers, read from Hypurrscan's `/holders/stakedHYPE` (2.8 MB, ~49k
+ * addresses, regenerated every ~10 min). A poller used to download it every
+ * 50 s into Redis, whether or not anyone opened the stakers table, and each
+ * request re-parsed and re-sorted the whole list. The list is now downloaded
+ * only while someone reads it (OnDemandSnapshot) and sorted once per download.
+ */
 export class StakedHoldersService {
   private static instance: StakedHoldersService;
-  private readonly client: HypurrscanStakedHoldersClient;
 
-  private constructor() {
-    this.client = HypurrscanStakedHoldersClient.getInstance();
-  }
+  /** Same windows as the token holders views: the upstream list moves every ~10 min. */
+  private static readonly FRESH_MS = 3 * 60_000;
+  private static readonly MAX_STALE_MS = 15 * 60_000;
+
+  private readonly client = HypurrscanTokenHoldersClient.getInstance();
+  private readonly snapshot = new OnDemandSnapshot(() => this.fetchView(), {
+    freshMs: StakedHoldersService.FRESH_MS,
+    maxStaleMs: StakedHoldersService.MAX_STALE_MS,
+  });
+
+  private constructor() {}
 
   public static getInstance(): StakedHoldersService {
     if (!StakedHoldersService.instance) {
@@ -45,34 +106,25 @@ export class StakedHoldersService {
     }
 
     try {
-      const data: StakedHoldersData = await this.client.getStakedHolders();
+      const view = await this.view();
 
-      // Convertir les holders en array et trier par montant décroissant
-      const holdersArray = Object.entries(data.holders)
-        .map(([address, amount]) => ({ address, amount }))
-        .sort((a, b) => b.amount - a.amount);
-
-      // Pagination
       const startIndex = (page - 1) * limit;
-      const endIndex = startIndex + limit;
-      const paginatedHolders = holdersArray.slice(startIndex, endIndex);
-
-      const totalPages = Math.ceil(holdersArray.length / limit);
+      const totalPages = Math.ceil(view.sorted.length / limit);
 
       return {
-        holders: paginatedHolders,
+        holders: view.sorted.slice(startIndex, startIndex + limit),
         pagination: {
           page,
           limit,
-          total: holdersArray.length,
+          total: view.sorted.length,
           totalPages,
           hasNext: page < totalPages,
           hasPrevious: page > 1
         },
         metadata: {
-          token: data.token,
-          lastUpdate: data.lastUpdate,
-          holdersCount: data.holdersCount
+          token: view.token,
+          lastUpdate: view.lastUpdate,
+          holdersCount: view.holdersCount
         }
       };
     } catch (error) {
@@ -89,13 +141,12 @@ export class StakedHoldersService {
     }
 
     try {
-      const data: StakedHoldersData = await this.client.getStakedHolders();
-      
-      // Chercher le holder par adresse
-      const amount = data.holders[address.toLowerCase()];
-      
-      if (amount !== undefined) {
-        return { address, amount };
+      const { amounts } = await this.view();
+      const key = address.toLowerCase();
+
+      // Own keys only: `constructor` & co. are not addresses.
+      if (Object.prototype.hasOwnProperty.call(amounts, key)) {
+        return { address, amount: amounts[key] };
       }
 
       return null;
@@ -123,98 +174,97 @@ export class StakedHoldersService {
   /**
    * Récupère les statistiques des holders
    */
-  public async getHoldersStats(): Promise<{
-    totalHolders: number;
-    totalStaked: number;
-    averageStaked: number;
-    lastUpdate: number;
-    distributionByRange: {
-      range: string;
-      holdersCount: number;
-      totalStaked: number;
-      percentage: number;
-    }[];
-    topHoldersStats: {
-      topCount: number;
-      totalStaked: number;
-      percentage: number;
-    }[];
-  }> {
+  public async getHoldersStats(): Promise<StakedHoldersStats> {
     try {
-      const data: StakedHoldersData = await this.client.getStakedHolders();
-      
-      // Convertir et trier les holders par montant décroissant
-      const holdersArray = Object.entries(data.holders)
-        .map(([address, amount]) => ({ address, amount }))
-        .sort((a, b) => b.amount - a.amount);
-
-      const amounts = holdersArray.map(holder => holder.amount);
-      const totalStaked = amounts.reduce((sum, amount) => sum + amount, 0);
-      const averageStaked = amounts.length > 0 ? totalStaked / amounts.length : 0;
-
-      // Définir les ranges
-      const ranges = [
-        { min: 0, max: 10, label: '0-10' },
-        { min: 10, max: 50, label: '10-50' },
-        { min: 50, max: 250, label: '50-250' },
-        { min: 250, max: 1000, label: '250-1000' },
-        { min: 1000, max: 5000, label: '1000-5000' },
-        { min: 5000, max: 25000, label: '5000-25000' },
-        { min: 25000, max: 100000, label: '25000-100000' },
-        { min: 100000, max: Infinity, label: '100000+' }
-      ];
-
-      // Calculer la distribution par range
-      const distributionByRange = ranges.map(range => {
-        const holdersInRange = holdersArray.filter(holder => 
-          holder.amount >= range.min && holder.amount < range.max
-        );
-        
-        const holdersCount = holdersInRange.length;
-        const rangeTotal = holdersInRange.reduce((sum, holder) => sum + holder.amount, 0);
-        const percentage = totalStaked > 0 ? (rangeTotal / totalStaked) * 100 : 0;
-
-        return {
-          range: range.label,
-          holdersCount,
-          totalStaked: rangeTotal,
-          percentage: Math.round(percentage * 100) / 100 // Arrondir à 2 décimales
-        };
-      });
-
-      // Définir les tops à calculer
-      const topCounts = [10, 50, 100, 500, 1000, 5000, 10000];
-
-      // Calculer les stats des top holders
-      const topHoldersStats = topCounts.map(topCount => {
-        const topHolders = holdersArray.slice(0, Math.min(topCount, holdersArray.length));
-        const topTotal = topHolders.reduce((sum, holder) => sum + holder.amount, 0);
-        const percentage = totalStaked > 0 ? (topTotal / totalStaked) * 100 : 0;
-
-        return {
-          topCount,
-          totalStaked: topTotal,
-          percentage: Math.round(percentage * 100) / 100 // Arrondir à 2 décimales
-        };
-      });
-
-      return {
-        totalHolders: data.holdersCount,
-        totalStaked,
-        averageStaked,
-        lastUpdate: data.lastUpdate,
-        distributionByRange,
-        topHoldersStats
-      };
+      const view = await this.view();
+      view.stats ??= computeStats(view);
+      return view.stats;
     } catch (error) {
       throw new Error(`Failed to fetch holders stats: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
 
-  /**
-   * Vérifie le rate limit pour une IP
-   */
-  public checkRateLimit(ip: string): boolean {
-    return this.client.checkRateLimit(ip);
+  private async view(): Promise<StakedHoldersView> {
+    const view = await this.snapshot.get();
+    if (!view) {
+      throw new Error('Staked holders unavailable');
+    }
+    return view;
   }
-} 
+
+  private async fetchView(): Promise<StakedHoldersView> {
+    try {
+      const data = await this.client.getStakedHolders('HYPE');
+      const amounts = data.holders ?? {};
+      const entries = Object.entries(amounts);
+      // An empty list is an upstream hiccup: don't serve it as "nobody
+      // stakes" for the next minutes.
+      if (entries.length === 0) {
+        throw new Error('Hypurrscan returned no stakedHYPE holders');
+      }
+
+      const sorted = entries
+        .map(([address, amount]) => ({ address, amount }))
+        .sort((a, b) => b.amount - a.amount);
+
+      logDeduplicator.info('Staked holders view built', { holders: sorted.length });
+      return {
+        token: data.token ?? 'stakedHYPE',
+        lastUpdate: data.lastUpdate ?? 0,
+        holdersCount: data.holdersCount ?? sorted.length,
+        sorted,
+        amounts,
+      };
+    } catch (error) {
+      logDeduplicator.error('Failed to fetch staked holders', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+  }
+}
+
+function computeStats(view: StakedHoldersView): StakedHoldersStats {
+  const holdersArray = view.sorted;
+  const amounts = holdersArray.map(holder => holder.amount);
+  const totalStaked = amounts.reduce((sum, amount) => sum + amount, 0);
+  const averageStaked = amounts.length > 0 ? totalStaked / amounts.length : 0;
+
+  const distributionByRange = RANGES.map(range => {
+    const holdersInRange = holdersArray.filter(holder =>
+      holder.amount >= range.min && holder.amount < range.max
+    );
+
+    const holdersCount = holdersInRange.length;
+    const rangeTotal = holdersInRange.reduce((sum, holder) => sum + holder.amount, 0);
+    const percentage = totalStaked > 0 ? (rangeTotal / totalStaked) * 100 : 0;
+
+    return {
+      range: range.label,
+      holdersCount,
+      totalStaked: rangeTotal,
+      percentage: Math.round(percentage * 100) / 100 // Arrondir à 2 décimales
+    };
+  });
+
+  const topHoldersStats = TOP_COUNTS.map(topCount => {
+    const topHolders = holdersArray.slice(0, Math.min(topCount, holdersArray.length));
+    const topTotal = topHolders.reduce((sum, holder) => sum + holder.amount, 0);
+    const percentage = totalStaked > 0 ? (topTotal / totalStaked) * 100 : 0;
+
+    return {
+      topCount,
+      totalStaked: topTotal,
+      percentage: Math.round(percentage * 100) / 100 // Arrondir à 2 décimales
+    };
+  });
+
+  return {
+    totalHolders: view.holdersCount,
+    totalStaked,
+    averageStaked,
+    lastUpdate: view.lastUpdate,
+    distributionByRange,
+    topHoldersStats
+  };
+}

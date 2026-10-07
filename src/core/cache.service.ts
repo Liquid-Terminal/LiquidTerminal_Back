@@ -53,6 +53,12 @@ export class CacheService {
     fetchFn: () => Promise<T>,
     ttl: CacheTtl<T> = CACHE_TTL.MEDIUM
   ): Promise<T> {
+    // Redis unhealthy (circuit open) → skip the cache entirely and serve from
+    // source. Without this a wedged Redis connection would stall every request
+    // through the get → lock → get → set path until the edge returns 502.
+    if (!redisService.isHealthy()) {
+      return fetchFn();
+    }
     try {
       const cachedData = await redisService.get(key);
       if (cachedData) {
@@ -112,16 +118,20 @@ export class CacheService {
       }
     }
 
-    // Lock not acquired — wait for the lock holder to populate cache
-    for (let i = 0; i < 3; i++) {
-      await new Promise(resolve => setTimeout(resolve, 200));
+    // Lock not acquired — wait for the lock holder (another instance) to
+    // populate the cache for as long as it holds the lock (up to 15s). Giving
+    // up after 600ms let a burst on one slow key run the same heavy query once
+    // per request.
+    for (let i = 0; i < 60; i++) {
+      await new Promise(resolve => setTimeout(resolve, 250));
       const retryCache = await redisService.get(key);
       if (retryCache) {
         return { data: JSON.parse(retryCache), serialized: retryCache };
       }
+      if (!(await redis.exists(lockKey))) break; // holder failed or finished without caching
     }
 
-    // Lock holder may have failed, fetch directly
+    // Lock holder failed (or is still running after 15s): fetch directly
     const data = await fetchFn();
     let serialized: string | undefined;
     try {

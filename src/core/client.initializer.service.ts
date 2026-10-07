@@ -19,6 +19,7 @@ import { LiquidationsWebSocketService } from '../services/liquidations/liquidati
 import { HLIndexerTopTradersClient } from '../clients/hypedexer/rest/toptraders/toptraders.client';
 import { AggregatePositioningClient } from '../clients/hyperliquid/positioning/aggregate-positioning.client';
 import { MetricsSnapshotClient } from '../clients/metrics/metrics-snapshot.client';
+import { ElysiumIngestionService } from '../services/elysium/elysium-ingestion.service';
 import { HLIndexerActiveUsersClient } from '../clients/hypedexer/rest/activeusers/activeusers.client';
 import { HLIndexerBuildersClient } from '../clients/hypedexer/rest/builders/builders-list-poller.client';
 import { LiquidationsIngestionService } from '../services/liquidations/liquidations.ingestion.service';
@@ -27,7 +28,7 @@ import { TelegramWalletDispatcherService } from '../services/telegram/telegram.w
 import { TelegramLiquidationDispatcherService } from '../services/telegram/telegram.liquidation-dispatcher.service';
 import { TelegramDocUpdateDispatcherService } from '../services/telegram/telegram.doc-update-dispatcher.service';
 import { TelegramFillAlertDispatcherService } from '../services/telegram/telegram.fill-alert-dispatcher.service';
-import { BotAnnouncementService } from '../services/telegram/bot-announcement.service';
+import { MarketAlertsService } from '../services/alerts/market-alerts.service';
 import { logDeduplicator } from '../utils/logDeduplicator';
 
 export type StartupStatus = 'booting' | 'ready' | 'degraded';
@@ -190,6 +191,12 @@ export class ClientInitializerService {
       this.clients.set('metricsSnapshot', metricsSnapshotClient);
       logDeduplicator.info('Metrics snapshot client initialized successfully');
 
+      // Elysium ingestion (REST → historical DB: txs, bridge transfers, tokens).
+      // startPolling() is a no-op when ELYSIUM_INGEST_ENABLED=false.
+      const elysiumIngestion = ElysiumIngestionService.getInstance();
+      this.clients.set('elysiumIngestion', elysiumIngestion);
+      logDeduplicator.info('Elysium ingestion service initialized successfully');
+
       // Initialiser le service d'ingestion des liquidations (WebSocket → DB historique)
       const ingestionService = LiquidationsIngestionService.getInstance();
       this.clients.set('liquidationsIngestion', ingestionService);
@@ -219,9 +226,10 @@ export class ClientInitializerService {
       this.clients.set('fillAlertDispatcher', fillAlertDispatcher);
       logDeduplicator.info('Telegram Fill Alert Dispatcher service initialized successfully');
 
-      const botAnnouncementService = BotAnnouncementService.getInstance();
-      this.clients.set('botAnnouncementService', botAnnouncementService);
-      logDeduplicator.info('Bot Announcement service initialized successfully');
+      // Market alerts (price, funding, OI, listings, leverage, liquidation cascades)
+      const marketAlerts = MarketAlertsService.getInstance();
+      this.clients.set('marketAlerts', marketAlerts);
+      logDeduplicator.info('Market Alerts service initialized successfully');
 
       // Démarrer le polling pour tous les clients
       logDeduplicator.info('All clients created, starting polling...');
@@ -332,16 +340,8 @@ export class ClientInitializerService {
       }
     }
 
-    // 5d. Start Bot Announcement Service (broadcasts changelog on deploy)
-    const botAnnouncementService = this.clients.get('botAnnouncementService');
-    if (botAnnouncementService) {
-      try {
-        botAnnouncementService.start();
-        logDeduplicator.info('Started Bot Announcement Service');
-      } catch (error) {
-        logDeduplicator.error('Error starting Bot Announcement Service:', { error: error instanceof Error ? error.message : String(error) });
-      }
-    }
+    // 5d. Bot release announcements are sent by the bot itself (its own
+    // changelog and delivery); the backend no longer broadcasts them.
 
     // 5e. Start Telegram Fill Alert Dispatcher (connects to HypeDexer allFills: perp + spot fills)
     const fillAlertDispatcher = this.clients.get('fillAlertDispatcher');
@@ -362,6 +362,17 @@ export class ClientInitializerService {
         logDeduplicator.info('Started Telegram Liquidation Dispatcher Service');
       } catch (error) {
         logDeduplicator.error('Error starting Telegram Liquidation Dispatcher Service:', { error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+
+    // 7. Start market alerts (reads the perp snapshot cache + liquidation stream)
+    const marketAlerts = this.clients.get('marketAlerts');
+    if (marketAlerts) {
+      try {
+        marketAlerts.start();
+        logDeduplicator.info('Started Market Alerts Service');
+      } catch (error) {
+        logDeduplicator.error('Error starting Market Alerts Service:', { error: error instanceof Error ? error.message : String(error) });
       }
     }
 
@@ -434,6 +445,15 @@ export class ClientInitializerService {
       }
     }
 
+    const marketAlerts = this.clients.get('marketAlerts');
+    if (marketAlerts) {
+      try {
+        marketAlerts.stop();
+      } catch (error) {
+        logDeduplicator.error('Error stopping Market Alerts Service:', { error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+
     // Stop fill alert dispatcher
     const fillAlertDispatcher = this.clients.get('fillAlertDispatcher');
     if (fillAlertDispatcher) {
@@ -445,15 +465,6 @@ export class ClientInitializerService {
       }
     }
 
-    const botAnnouncementService = this.clients.get('botAnnouncementService');
-    if (botAnnouncementService) {
-      try {
-        botAnnouncementService.stop();
-        logDeduplicator.info('Bot Announcement Service stopped');
-      } catch (error) {
-        logDeduplicator.error('Error stopping Bot Announcement Service:', { error: error instanceof Error ? error.message : String(error) });
-      }
-    }
 
     // Stop ingestion FIRST — flush remaining batch before disconnecting DB
     const ingestionClient = this.clients.get('liquidationsIngestion');

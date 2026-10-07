@@ -1,52 +1,11 @@
 import { logDeduplicator } from './logDeduplicator';
 
 /**
- * Shared deduplication / back-pressure helpers for the Telegram alert dispatchers
- * (liquidation, wallet, fill).
- *
- * Background — these helpers fix a connection-pool exhaustion incident:
- *  - WS re-flushes and reconnects re-dispatched the same events, so every
- *    duplicate did a wasted DB round-trip ("insert + catch P2002").
- *  - The dispatch callbacks ran without serialization, so slow batches
- *    overlapped and each held its own DB connections until the pool drained.
- *  - The duplicate-detection `catch {}` swallowed connection timeouts and
- *    treated them as "already sent", silently dropping real alerts.
+ * Helpers shared by the Telegram alert dispatchers. Matching, dedup and
+ * back-pressure live in the AlertEngine (services/alerts/alert-engine.ts);
+ * what remains here is the in-memory dedup cache it uses and the purge of
+ * the legacy *_sent_alerts tables.
  */
-
-/** Outcome of attempting to record an alert as sent. */
-export type MarkSentResult = 'new' | 'duplicate' | 'error';
-
-/** True if the error is a Prisma P2002 unique-constraint violation. */
-function isUniqueConstraintError(error: unknown): boolean {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    (error as { code?: unknown }).code === 'P2002'
-  );
-}
-
-/**
- * Attempt an atomic "mark as sent" insert and classify the outcome.
- * - `new`       → row inserted; the alert has not been sent before.
- * - `duplicate` → P2002 unique-constraint violation; already sent.
- * - `error`     → any other failure (e.g. connection timeout). The caller MUST
- *                 fail OPEN (send the alert anyway) rather than drop it silently.
- */
-export async function markAlertSent(
-  insert: () => Promise<unknown>,
-  context: string
-): Promise<MarkSentResult> {
-  try {
-    await insert();
-    return 'new';
-  } catch (error) {
-    if (isUniqueConstraintError(error)) return 'duplicate';
-    logDeduplicator.error(`${context}: markSent DB error — failing open (alert will be sent)`, {
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return 'error';
-  }
-}
 
 /**
  * Bounded in-memory set of recently-seen dedup keys with FIFO eviction.
@@ -76,42 +35,6 @@ export class RecentEventCache {
   clear(): void {
     this.keys.clear();
     this.order.length = 0;
-  }
-}
-
-/**
- * Serializes async batches into a single non-overlapping chain, so dispatch
- * batches never run concurrently and the DB connection usage stays bounded.
- * With `maxPending`, a task arriving while that many are already waiting is
- * dropped (and logged) instead of growing the chain without limit.
- */
-export class SerialQueue {
-  private tail: Promise<void> = Promise.resolve();
-  private pending = 0;
-
-  constructor(
-    private readonly context: string,
-    private readonly maxPending: number = Number.POSITIVE_INFINITY
-  ) {}
-
-  enqueue(task: () => Promise<void>): void {
-    if (this.pending >= this.maxPending) {
-      logDeduplicator.warn(`${this.context}: dispatch queue full, task dropped`, {
-        maxPending: this.maxPending,
-      });
-      return;
-    }
-    this.pending += 1;
-    this.tail = this.tail
-      .then(task)
-      .catch((error) => {
-        logDeduplicator.error(`${this.context}: queued task failed`, {
-          error: error instanceof Error ? error.message : String(error),
-        });
-      })
-      .then(() => {
-        this.pending -= 1;
-      });
   }
 }
 

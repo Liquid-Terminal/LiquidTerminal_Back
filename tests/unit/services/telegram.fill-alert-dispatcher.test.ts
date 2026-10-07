@@ -1,10 +1,12 @@
 /**
  * The fill-alert dispatcher consumes one network-wide stream (perp and spot
- * fills). Once the subscriptions are known it drops, before aggregation or any
- * queue / DB work, every fill nobody can be alerted about — and must never drop
+ * fills). Once the alert engine has loaded the subscriptions it drops, before
+ * aggregation, every fill nobody can be alerted about — and must never drop
  * one the unfiltered pipeline would have alerted on. The oracle below is the
  * matching logic the dispatcher used before those early exits, applied to every
- * order, with spot pair ids resolved to token names.
+ * order, with spot pair ids resolved to token names. The per-user budget of
+ * the engine (digests past 50 alerts/min) is lifted here: it is covered by
+ * alert-engine.test.ts and would turn the oracle's alerts into digests.
  */
 import type { AggregatedFill, NormalizedFill } from '../../../src/types/fill-alerts.types';
 import type { ActiveFillSubscription } from '../../../src/services/telegram/telegram.fill-subscription.service';
@@ -14,7 +16,8 @@ const mockState = {
   subscriptions: [] as ActiveFillSubscription[],
   loadGate: null as Promise<void> | null,
   broadcasts: [] as string[],
-  inserted: new Set<string>(),
+  /** Dedup keys claimed in "Redis". */
+  claimed: new Set<string>(),
   /** Spot pair id → token name, as SpotCoinNameService resolves them. */
   spotNames: {} as Record<string, string>,
 };
@@ -26,15 +29,26 @@ jest.mock('../../../src/utils/logDeduplicator', () => ({
 jest.mock('../../../src/core/prisma.telegram.service', () => ({
   prismaTelegram: {
     telegramFillSentAlert: {
-      create: jest.fn(async ({ data }: { data: { subscriptionId: string; eventId: string } }) => {
-        const key = `${data.subscriptionId}|${data.eventId}`;
-        if (mockState.inserted.has(key)) throw Object.assign(new Error('duplicate'), { code: 'P2002' });
-        mockState.inserted.add(key);
-        return {};
-      }),
       deleteMany: jest.fn(async () => ({ count: 0 })),
     },
   },
+}));
+
+jest.mock('../../../src/core/redis.service', () => ({
+  redisService: {
+    isHealthy: () => true,
+    claimKeys: async (keys: string[]) =>
+      keys.map((key) => {
+        if (mockState.claimed.has(key)) return false;
+        mockState.claimed.add(key);
+        return true;
+      }),
+  },
+}));
+
+jest.mock('../../../src/services/names/alert-wallet-names', () => ({
+  prefetchWalletNames: async () => undefined,
+  walletName: () => undefined,
 }));
 
 jest.mock('../../../src/clients/hypedexer/websocket/live-data.ws.client', () => ({
@@ -84,6 +98,7 @@ jest.mock('../../../src/websocket/ws.server', () => ({
 jest.mock('../../../src/utils/telegram.formatting', () => ({
   formatFillAlert: (fill: AggregatedFill, name: string) =>
     `${name}|${fill.eventId}|${fill.fillCount}|${fill.notionalUsd.toFixed(6)}`,
+  formatFillDigestLine: (fill: AggregatedFill, name: string) => `digest|${name}|${fill.eventId}`,
 }));
 
 // ---------------------------------------------------------------------------
@@ -224,10 +239,12 @@ describe('TelegramFillAlertDispatcherService', () => {
     mockState.subscriptions = [];
     mockState.loadGate = null;
     mockState.broadcasts = [];
-    mockState.inserted.clear();
+    mockState.claimed.clear();
     mockState.spotNames = SPOT_NAMES;
     FillAggregator = require('../../../src/services/telegram/fill-aggregator').FillAggregator;
     addSpy = jest.spyOn(FillAggregator.prototype, 'add');
+    const { DeliveryLimiter } = require('../../../src/services/alerts/alert-engine');
+    jest.spyOn(DeliveryLimiter.prototype, 'allow').mockReturnValue(true);
     Dispatcher = require('../../../src/services/telegram/telegram.fill-alert-dispatcher.service')
       .TelegramFillAlertDispatcherService;
   });
@@ -355,29 +372,5 @@ describe('TelegramFillAlertDispatcherService', () => {
 
     expect(addSpy.mock.calls.map(([fill]) => (fill as NormalizedFill).coin)).toEqual(['HYPE', '@99']);
     expect(mockState.broadcasts).toEqual([`t-spot-hype|sub-spot-hype|spot:7:${WALLETS[0]}|1|30.000000`]);
-  });
-});
-
-describe('SerialQueue', () => {
-  it('drops tasks beyond maxPending and accepts new ones once the backlog drains', async () => {
-    const { SerialQueue } = require('../../../src/utils/telegram.alert-dedup');
-    const queue = new SerialQueue('test', 3);
-    const ran: number[] = [];
-    let release!: () => void;
-    const gate = new Promise<void>((resolve) => { release = resolve; });
-
-    for (let i = 1; i <= 5; i++) {
-      queue.enqueue(async () => {
-        if (i === 1) await gate;
-        ran.push(i);
-      });
-    }
-    release();
-    await drain();
-    expect(ran).toEqual([1, 2, 3]);
-
-    queue.enqueue(async () => { ran.push(6); });
-    await drain();
-    expect(ran).toEqual([1, 2, 3, 6]);
   });
 });

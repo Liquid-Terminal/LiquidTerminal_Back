@@ -22,6 +22,12 @@ import {
   lastPopulatedDate,
   utcDateKey,
 } from './revenue.daily';
+import {
+  LedgerUpdate,
+  RY_ACTIVATION_MS,
+  RY_INTEREST_ADDRESS,
+  bucketReserveYieldByDay,
+} from './reserve-yield.ledger';
 
 
 const HIP3_CACHE_KEY = 'revenue:hip3:auctions';
@@ -30,6 +36,9 @@ const HIP4_CACHE_KEY = 'revenue:hip4:daily-fees';
 const HIP4_CACHE_TTL_SECONDS = 30 * 60;
 const PRIORITY_CACHE_KEY = 'revenue:priority:daily';
 const PRIORITY_CACHE_TTL_SECONDS = 30 * 60;
+const RESERVE_CACHE_KEY = 'revenue:reserve:ledger';
+const RESERVE_CACHE_TTL_SECONDS = 10 * 60;
+const INFO_URL = 'https://api.hyperliquid.xyz/info';
 const BREAKDOWN_CACHE_PREFIX = 'revenue:breakdown:';
 const BREAKDOWN_CACHE_TTL_SECONDS = 5 * 60;
 
@@ -96,13 +105,14 @@ export class RevenueService {
   }
 
   private async buildBreakdown(window: RevenueWindow): Promise<RevenueBreakdown> {
-    const [feesResult, auctionsResult, hip3Result, hip4Result, priorityResult, hypeUsdResult] = await Promise.allSettled([
+    const [feesResult, auctionsResult, hip3Result, hip4Result, priorityResult, hypeUsdResult, reserveResult] = await Promise.allSettled([
       this.feesHistoricalClient.getHistoricalData(),
       this.auctionClient.getPastAuctions(),
       this.fetchHip3AuctionsCached(),
       this.fetchHip4DailyFeesCached(),
       this.fetchPriorityFeesCached(),
       this.readHypeUsd(),
+      this.fetchReserveLedgerCached(),
     ]);
 
     const fees = feesResult.status === 'fulfilled' ? feesResult.value : [];
@@ -111,6 +121,7 @@ export class RevenueService {
     const hip4Rows = hip4Result.status === 'fulfilled' ? hip4Result.value : [];
     const priorityRows = priorityResult.status === 'fulfilled' ? priorityResult.value : [];
     const hypeUsd = hypeUsdResult.status === 'fulfilled' ? hypeUsdResult.value : null;
+    const reserveLedger = reserveResult.status === 'fulfilled' ? reserveResult.value : [];
 
     if (feesResult.status === 'rejected') {
       logDeduplicator.error('RevenueService: fees historical fetch failed', { error: String(feesResult.reason) });
@@ -128,6 +139,10 @@ export class RevenueService {
       logDeduplicator.error('RevenueService: priority fees fetch failed', { error: String(priorityResult.reason) });
     }
 
+    if (reserveResult.status === 'rejected') {
+      logDeduplicator.error('RevenueService: reserve yield ledger fetch failed', { error: String(reserveResult.reason) });
+    }
+
     if (fees.length === 0) {
       throw new RevenueError('No fees historical data available', 503, 'REVENUE_NO_DATA');
     }
@@ -138,6 +153,7 @@ export class RevenueService {
     const hip3Daily = this.bucketHip3ByDay(hip3Rows, hypeUsd);
     const hip4Daily = this.bucketHip4ByDay(hip4Rows);
     const priorityDaily = this.bucketPriorityByDay(priorityRows, hypeUsd);
+    const reserveDaily = bucketReserveYieldByDay(reserveLedger);
 
     const allDates = new Set<string>([
       ...perpSpotDaily.keys(),
@@ -145,6 +161,7 @@ export class RevenueService {
       ...hip3Daily.keys(),
       ...hip4Daily.keys(),
       ...priorityDaily.keys(),
+      ...reserveDaily.keys(),
     ]);
     // Perp and spot are ~97% of the book. An auction or a HIP-4 bucket landing
     // on a day perp/spot does not cover would render as a near-empty bar rather
@@ -159,8 +176,9 @@ export class RevenueService {
       const hip3 = hip3Daily.get(date) ?? 0;
       const hip4 = hip4Daily.get(date) ?? 0;
       const priority = priorityDaily.get(date) ?? 0;
-      const total = ps.perp + ps.spot + hip1 + hip3 + hip4 + priority;
-      return { date, perp: ps.perp, spot: ps.spot, hip1, hip3, hip4, priority, total };
+      const reserve = reserveDaily.get(date) ?? 0;
+      const total = ps.perp + ps.spot + hip1 + hip3 + hip4 + priority + reserve;
+      return { date, perp: ps.perp, spot: ps.spot, hip1, hip3, hip4, priority, reserve, total };
     });
 
     const lifetime = this.computeLifetime(days);
@@ -193,6 +211,7 @@ export class RevenueService {
         hip3: this.hip3Status(hip3Result, hypeUsd),
         hip4: hip4Result.status === 'fulfilled' ? 'ok' : 'error',
         priority: this.priorityStatus(priorityResult, hypeUsd, priorityThrough, expectedThrough),
+        reserve: reserveResult.status === 'fulfilled' ? 'ok' : 'error',
       },
     };
 
@@ -259,7 +278,7 @@ export class RevenueService {
   }
 
   private computeLifetime(days: RevenueDay[]): RevenueLifetime {
-    const lifetime: RevenueLifetime = { perp: 0, spot: 0, hip1: 0, hip3: 0, hip4: 0, priority: 0, total: 0 };
+    const lifetime: RevenueLifetime = { perp: 0, spot: 0, hip1: 0, hip3: 0, hip4: 0, priority: 0, reserve: 0, total: 0 };
     for (const d of days) {
       lifetime.perp += d.perp;
       lifetime.spot += d.spot;
@@ -267,6 +286,7 @@ export class RevenueService {
       lifetime.hip3 += d.hip3;
       lifetime.hip4 += d.hip4;
       lifetime.priority += d.priority;
+      lifetime.reserve += d.reserve;
       lifetime.total += d.total;
     }
     return lifetime;
@@ -342,6 +362,34 @@ export class RevenueService {
       : Array.isArray(raw?.data) ? raw.data : [];
 
     await redisService.set(HIP3_CACHE_KEY, JSON.stringify(rows), HIP3_CACHE_TTL_SECONDS);
+    return rows;
+  }
+
+  /**
+   * The interest address ledger since activation, with a 10 min cache. One
+   * payment a month, so the whole history stays a handful of rows.
+   */
+  private async fetchReserveLedgerCached(): Promise<LedgerUpdate[]> {
+    const cached = await redisService.get(RESERVE_CACHE_KEY);
+    if (cached) {
+      try {
+        return JSON.parse(cached) as LedgerUpdate[];
+      } catch {
+        // fall through to refresh
+      }
+    }
+
+    const res = await fetch(INFO_URL, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ type: 'userNonFundingLedgerUpdates', user: RY_INTEREST_ADDRESS, startTime: RY_ACTIVATION_MS }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) throw new Error(`info userNonFundingLedgerUpdates ${res.status}`);
+    const rows = (await res.json()) as LedgerUpdate[];
+    if (!Array.isArray(rows)) throw new Error('unexpected ledger payload');
+
+    await redisService.set(RESERVE_CACHE_KEY, JSON.stringify(rows), RESERVE_CACHE_TTL_SECONDS);
     return rows;
   }
 

@@ -12,6 +12,7 @@ jest.mock('../../../src/core/redis.service', () => ({
     }),
     delete: jest.fn(async () => undefined),
     getClient: () => ({ set: async () => 'OK' }),
+    isHealthy: () => true,
   },
 }));
 jest.mock('../../../src/utils/logDeduplicator', () => ({

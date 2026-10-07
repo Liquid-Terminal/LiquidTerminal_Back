@@ -17,6 +17,7 @@ import {
 import { AnalyticsLiquidationStatsResponse } from '../../types/analytics-liquidations.types';
 import { logDeduplicator } from '../../utils/logDeduplicator';
 import { SingleFlight } from '../../utils/singleFlight';
+import { mergeLiquidationResponse } from '../../utils/liquidations-merge';
 import { redisService } from '../../core/redis.service';
 import { SSEManagerService } from './sse-manager.service';
 import { LiquidationDataProvider } from '../../types/liquidation-provider.interface';
@@ -392,7 +393,9 @@ export class LiquidationsService implements LiquidationDataProvider {
         logDeduplicator.warn('Redis cache error, proceeding without cache', { error: String(cacheError) });
       }
 
-      const response = await this.client.getLiquidations({ ...params, limit });
+      const response = mergeLiquidationResponse(
+        await this.client.getLiquidations({ ...params, limit })
+      );
 
       // A wallet's liquidation history (the address pages poll it every
       // minute) only changes when that wallet gets liquidated.
@@ -423,9 +426,10 @@ export class LiquidationsService implements LiquidationDataProvider {
       const limit = params.limit ?? LiquidationsService.DEFAULT_LIMIT;
       // Every param shapes the upstream query, so every param is in the key.
       // Only hours + limit were: a filtered request (coin, user, amount…) could
-      // get the unfiltered answer for 15 s, or the other way round.
+      // get the unfiltered answer for 15 s, or the other way round. v2: rows
+      // are merged per event before caching (see liquidations-merge).
       const { hours, coin, user, start_time, end_time, amount_dollars, cursor, order } = params;
-      const cacheKey = `liquidations:recent:${JSON.stringify({
+      const cacheKey = `liquidations:recent:v2:${JSON.stringify({
         hours, limit, coin, user, start_time, end_time, amount_dollars, cursor, order,
       })}`;
 
@@ -436,7 +440,9 @@ export class LiquidationsService implements LiquidationDataProvider {
         logDeduplicator.warn('Redis cache error, proceeding without cache', { error: String(cacheError) });
       }
 
-      const response = await this.client.getRecentLiquidations({ ...params, limit });
+      const response = mergeLiquidationResponse(
+        await this.client.getRecentLiquidations({ ...params, limit })
+      );
 
       try {
         await redisService.set(cacheKey, JSON.stringify(response), LiquidationsService.RECENT_CACHE_TTL);

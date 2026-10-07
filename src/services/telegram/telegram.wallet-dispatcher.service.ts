@@ -4,14 +4,15 @@ import { HypeDexerCompletedTradesPoller } from '../../clients/hypedexer/rest/com
 import { TelegramWalletSubscriptionService } from './telegram.wallet-subscription.service';
 import { InternalWebSocketServer } from '../../websocket/ws.server';
 import { CompletedTrade } from '../../types/wallet-events.types';
-import {
-  markAlertSent,
-  RecentEventCache,
-  SerialQueue,
-  startSentAlertPurge,
-} from '../../utils/telegram.alert-dedup';
+import { startSentAlertPurge } from '../../utils/telegram.alert-dedup';
+import { formatTradeDigestLine } from '../../utils/telegram.formatting';
+import { AlertEngine, AlertRule } from '../alerts/alert-engine';
 
 const CONTEXT = 'TelegramWalletDispatcherService';
+
+interface TradeRule extends AlertRule<CompletedTrade> {
+  name: string;
+}
 
 /**
  * Shape of an active subscription returned by getActiveSubscriptions()
@@ -25,12 +26,6 @@ interface ActiveSubscription {
   minAmountUsd: number;
 }
 
-/** A subscription with its wallet addresses lower-cased into a set. */
-interface CompiledWalletSubscription {
-  sub: ActiveSubscription;
-  wallets: Set<string>;
-}
-
 /**
  * TelegramWalletDispatcherService
  *
@@ -38,16 +33,15 @@ interface CompiledWalletSubscription {
  *
  * Flow:
  * 1. Subscribes to HypeDexerCompletedTradesPoller (network-wide, polled every 5s)
- * 2. On each trade, checks active wallet subscriptions (cached 30s)
- * 3. Filters by walletAddress, eventType, minAmountUsd
- * 4. Deduplicates via TelegramWalletSentAlert unique constraint
- * 5. Pushes matching events to InternalWebSocketServer.broadcastWalletEvent()
+ * 2. Hands each closed trade to the shared AlertEngine: indexed match on the
+ *    subscription's wallets (none = no alert), TRADE event type and minimum
+ *    position value; Redis dedup per (subscription, tradeId); per-user budget
+ * 3. Delivers via InternalWebSocketServer.broadcastWalletEvent()
  *    → Bot receives { type: 'wallet_event', data: { telegramId, trade, subscriptionName } }
- *    → Bot routes by telegramId and sends the Telegram message
  *
  * The feed is network-wide while every subscription is wallet-scoped: once
- * the subscriptions are known, only trades of a watched wallet are queued,
- * and the feed is paused while no wallet is watched at all.
+ * the rules are known, only trades of a watched wallet are queued, and the
+ * feed is paused while no wallet is watched at all.
  */
 export class TelegramWalletDispatcherService {
   private static instance: TelegramWalletDispatcherService;
@@ -55,20 +49,43 @@ export class TelegramWalletDispatcherService {
   private feed: HypeDexerCompletedTradesPoller | null = null;
   private unsubscribeCallback: (() => void) | null = null;
 
-  private subscriptionCache: CompiledWalletSubscription[] = [];
-  private cacheLoadedAt: number = 0;
-  private static readonly CACHE_TTL_MS = 30_000;
-  // Until the first load succeeds every batch is queued, as before.
-  private subscriptionsLoaded = false;
-  // Union of every subscription's wallets.
+  // Until the engine's first rule load every batch is queued.
+  private rulesLoaded = false;
+  // Union of every rule's wallets.
   private watchedWallets = new Set<string>();
-  private cacheRefresh: Promise<void> | null = null;
-  private refreshTimer: NodeJS.Timeout | null = null;
 
-  // In-memory dedup: absorbs WS re-flushes/reconnects so the DB is hit once per alert
-  private readonly recentAlerts = new RecentEventCache();
-  // Serializes dispatch batches so they never overlap and exhaust the DB pool
-  private readonly queue = new SerialQueue(CONTEXT);
+  private readonly engine = new AlertEngine<CompletedTrade, TradeRule>({
+    name: 'trade',
+    loadRules: async () => {
+      const rules = ((await TelegramWalletSubscriptionService.getInstance().getActiveSubscriptions()) as ActiveSubscription[])
+        // A wallet subscription without wallets never matched: keep it that way
+        // (an empty wallet list would mean "every wallet" to the index).
+        .filter((sub) => sub.walletAddresses.length > 0)
+        .map((sub) => ({
+          id: sub.id,
+          telegramId: sub.telegramId,
+          wallets: sub.walletAddresses.map((a) => a.toLowerCase()),
+          coins: [],
+          matches: (trade: CompletedTrade) =>
+            (sub.eventTypes.length === 0 || sub.eventTypes.includes('TRADE')) &&
+            trade.positionValue >= sub.minAmountUsd,
+          dedupScope: sub.id,
+          name: sub.name,
+        }));
+      this.setPrefilter(rules);
+      return rules;
+    },
+    keys: (trade) => ({ id: trade.tradeId, wallets: [trade.user], coin: trade.coin }),
+    deliver: (rule, trade) => {
+      InternalWebSocketServer.getInstance().broadcastWalletEvent(rule.telegramId, trade, rule.name);
+    },
+    summarize: (rule, trade) => formatTradeDigestLine(trade, rule.name),
+    // wallet_event carries a trade, not text: digests go through the plain-text channel.
+    notify: (telegramId, message) => {
+      InternalWebSocketServer.getInstance().broadcastFillAlert(telegramId, message);
+    },
+  });
+
   private purgeTimer: NodeJS.Timeout | null = null;
 
   private constructor() {}
@@ -86,25 +103,20 @@ export class TelegramWalletDispatcherService {
   public start(): void {
     this.feed = HypeDexerCompletedTradesPoller.getInstance();
 
-    // Enqueue each batch onto a serial chain — batches never run concurrently,
-    // so the DB connection pool can't be exhausted by overlapping dispatches.
     this.unsubscribeCallback = this.feed.onCompletedTrade((trades) => {
-      const relevant = this.subscriptionsLoaded
+      const relevant = this.rulesLoaded
         ? trades.filter((trade) => this.watchedWallets.has(trade.user))
         : trades;
-      if (relevant.length === 0) return;
-      this.queue.enqueue(() => this.processBatch(relevant));
+      this.engine.ingest(relevant);
     });
     this.feed.start();
 
-    // The subscriptions are refreshed on a timer, not only from dispatch():
-    // trades of unwatched wallets never reach dispatch() any more.
-    void this.refreshSubscriptions();
-    this.refreshTimer = setInterval(() => {
-      void this.refreshSubscriptions();
-    }, TelegramWalletDispatcherService.CACHE_TTL_MS);
-    this.refreshTimer.unref();
+    // The engine queues batches serially (bounded), so they never overlap. Its
+    // rule loads pause the feed while no wallet is watched — after start(),
+    // which unpauses it.
+    this.engine.start();
 
+    // Legacy dedup rows (dedup now lives in Redis): purge what is left.
     this.purgeTimer = startSentAlertPurge(
       (cutoff) =>
         prismaTelegram.telegramWalletSentAlert.deleteMany({ where: { sentAt: { lt: cutoff } } }),
@@ -115,16 +127,7 @@ export class TelegramWalletDispatcherService {
   }
 
   /**
-   * Process one batch of completed trades sequentially.
-   */
-  private async processBatch(trades: CompletedTrade[]): Promise<void> {
-    for (const trade of trades) {
-      await this.dispatch(trade);
-    }
-  }
-
-  /**
-   * Stop the dispatcher — stop the feed and clear cache
+   * Stop the dispatcher — stop the feed and clear the rules
    */
   public stop(): void {
     if (this.unsubscribeCallback) {
@@ -139,123 +142,22 @@ export class TelegramWalletDispatcherService {
       clearInterval(this.purgeTimer);
       this.purgeTimer = null;
     }
-    if (this.refreshTimer) {
-      clearInterval(this.refreshTimer);
-      this.refreshTimer = null;
-    }
-    this.subscriptionCache = [];
-    this.cacheLoadedAt = 0;
-    this.subscriptionsLoaded = false;
+    this.engine.stop();
+    this.rulesLoaded = false;
     this.watchedWallets = new Set();
-    this.recentAlerts.clear();
 
     logDeduplicator.info('TelegramWalletDispatcherService: Stopped');
   }
 
-  // ============================================================================
-  // PRIVATE METHODS
-  // ============================================================================
-
-  /**
-   * Reload subscription cache if stale (every 30s)
-   */
-  private async ensureCacheFresh(): Promise<void> {
-    if (Date.now() - this.cacheLoadedAt < TelegramWalletDispatcherService.CACHE_TTL_MS) return;
-    await this.refreshSubscriptions();
-  }
-
-  /** Reload the active subscriptions; concurrent callers share one query. */
-  private refreshSubscriptions(): Promise<void> {
-    if (!this.cacheRefresh) {
-      this.cacheRefresh = this.loadSubscriptions().finally(() => {
-        this.cacheRefresh = null;
-      });
+  /** Called with every rule set the engine loads (a failed load keeps the previous one). */
+  private setPrefilter(rules: TradeRule[]): void {
+    const watched = new Set<string>();
+    for (const rule of rules) {
+      for (const wallet of rule.wallets) watched.add(wallet);
     }
-    return this.cacheRefresh;
+    this.watchedWallets = watched;
+    this.rulesLoaded = true;
+    // No watched wallet, no possible alert: skip the network-wide requests.
+    this.feed?.setPaused(watched.size === 0);
   }
-
-  private async loadSubscriptions(): Promise<void> {
-    try {
-      const subscriptions: ActiveSubscription[] =
-        await TelegramWalletSubscriptionService.getInstance().getActiveSubscriptions();
-      const compiled = subscriptions.map((sub) => ({
-        sub,
-        wallets: new Set(sub.walletAddresses.map((addr) => addr.toLowerCase())),
-      }));
-      const watched = new Set<string>();
-      for (const { wallets } of compiled) {
-        for (const wallet of wallets) watched.add(wallet);
-      }
-
-      this.subscriptionCache = compiled;
-      this.watchedWallets = watched;
-      this.subscriptionsLoaded = true;
-      this.cacheLoadedAt = Date.now();
-      // No watched wallet, no possible alert: skip the network-wide requests.
-      this.feed?.setPaused(watched.size === 0);
-
-      logDeduplicator.info('TelegramWalletDispatcherService: Subscription cache refreshed', {
-        count: this.subscriptionCache.length,
-      });
-    } catch (error) {
-      logDeduplicator.error('TelegramWalletDispatcherService: Failed to refresh subscription cache', {
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
-
-  /**
-   * Dispatch a single completed trade to all matching subscriptions
-   */
-  private async dispatch(trade: CompletedTrade): Promise<void> {
-    await this.ensureCacheFresh();
-
-    if (this.subscriptionCache.length === 0) return;
-
-    for (const { sub, wallets } of this.subscriptionCache) {
-      // Filter by wallet address (case-insensitive, user is already lowercase)
-      if (!wallets.has(trade.user)) continue;
-
-      // Filter by event type — if eventTypes is empty, all types pass
-      if (sub.eventTypes.length > 0 && !sub.eventTypes.includes('TRADE')) continue;
-
-      // Filter by minimum amount
-      if (trade.positionValue < sub.minAmountUsd) continue;
-
-      // Deduplicate — in-memory first (no DB hit), then atomic insert.
-      const dedupKey = `${sub.id}|${trade.tradeId}`;
-      if (this.recentAlerts.has(dedupKey)) continue;
-
-      const sentResult = await markAlertSent(
-        () =>
-          prismaTelegram.telegramWalletSentAlert.create({
-            data: { subscriptionId: sub.id, eventId: trade.tradeId },
-          }),
-        CONTEXT
-      );
-      this.recentAlerts.add(dedupKey);
-      // 'duplicate' → already sent, skip. 'new'/'error' → send (fail open on DB error).
-      if (sentResult === 'duplicate') continue;
-
-      // Push to bot via internal WebSocket
-      try {
-        InternalWebSocketServer.getInstance().broadcastWalletEvent(sub.telegramId, trade, sub.name);
-
-        logDeduplicator.info('TelegramWalletDispatcherService: Alert dispatched', {
-          telegramId: sub.telegramId,
-          subscriptionName: sub.name,
-          tradeId: trade.tradeId,
-          coin: trade.coin,
-          pnlRealized: trade.pnlRealized,
-        });
-      } catch (error) {
-        logDeduplicator.error('TelegramWalletDispatcherService: Failed to broadcast wallet event', {
-          error: error instanceof Error ? error.message : String(error),
-          subscriptionId: sub.id,
-          tradeId: trade.tradeId,
-        });
-      }
-    }
-  }
-
 }

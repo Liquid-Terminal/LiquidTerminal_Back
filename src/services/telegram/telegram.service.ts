@@ -206,6 +206,9 @@ export class TelegramService {
    * (Was `randomBytes(8).slice(0,8)` = only 32 bits after truncation.) */
   private static readonly LINK_CODE_BYTES = 16;
 
+  /** Shape of a link code as issued by generateLinkCode (32 uppercase hex chars). */
+  public static readonly LINK_CODE_PATTERN = /^[A-F0-9]{32}$/;
+
   /** Short, non-reversible tag for correlating a link code in logs without
    * writing the live credential itself. */
   private static hashCode(code: string): string {
@@ -270,9 +273,10 @@ export class TelegramService {
     firstName?: string
   ): Promise<{ userId: number }> {
     try {
-      // Get the code from Redis
+      // Consume the code atomically (GETDEL): a code can be redeemed once,
+      // even if two requests race with it.
       const redisKey = `${TelegramService.LINK_CODE_PREFIX}${code}`;
-      const stored = await redisService.get(redisKey);
+      const stored = await redisService.getDel(redisKey);
 
       if (!stored) {
         throw new TelegramError('Invalid or expired link code', 400, 'INVALID_LINK_CODE');
@@ -310,9 +314,6 @@ export class TelegramService {
         });
       }
 
-      // Delete the code from Redis (one-time use)
-      await redisService.delete(redisKey);
-
       logDeduplicator.info('TelegramService: Account linked via deep link', {
         telegramId: telegramId.toString(),
         userId,
@@ -325,7 +326,7 @@ export class TelegramService {
         throw error;
       }
       logDeduplicator.error('TelegramService: Error verifying link code', {
-        code,
+        codeHash: TelegramService.hashCode(code),
         telegramId: telegramId.toString(),
         error: error instanceof Error ? error.message : String(error),
       });
@@ -337,7 +338,7 @@ export class TelegramService {
    * Check if a link code has been consumed (account linked).
    * Called by frontend to poll: GET /auth/telegram/link-status/:code
    */
-  public async getLinkStatus(code: string, userId: number): Promise<{ linked: boolean; telegramUsername?: string }> {
+  public async getLinkStatus(code: string, userId: number): Promise<{ linked: boolean; expired?: boolean; telegramUsername?: string }> {
     try {
       // Check if user now has a linked telegram
       const telegramUser = await prismaTelegram.telegramUser.findFirst({
@@ -351,21 +352,41 @@ export class TelegramService {
         };
       }
 
-      // Check if the code is still valid (pending)
+      // Not linked yet: tell the caller whether the code is still pending, so
+      // the UI can stop polling and offer a fresh link once it has expired.
       const redisKey = `${TelegramService.LINK_CODE_PREFIX}${code}`;
       const stored = await redisService.get(redisKey);
 
-      return {
-        linked: false,
-        // Code still pending = user hasn't clicked the bot link yet
-      };
+      return { linked: false, expired: stored === null };
     } catch (error) {
       logDeduplicator.error('TelegramService: Error checking link status', {
-        code,
+        codeHash: TelegramService.hashCode(code),
         userId,
         error: error instanceof Error ? error.message : String(error),
       });
       throw error;
+    }
+  }
+
+  /**
+   * Telegram handle linked to a LiquidTerminal user, if any. Lets the session
+   * endpoints report the link state, so the UI stays correct after a reload.
+   * Fail-soft: null when the Telegram DB is unreachable.
+   */
+  public async getLinkedTelegram(userId: number): Promise<{ linked: boolean; username: string | null }> {
+    try {
+      const telegramUser = await prismaTelegram.telegramUser.findFirst({
+        where: { linkedUserId: userId },
+        select: { username: true, firstName: true },
+      });
+      if (!telegramUser) return { linked: false, username: null };
+      return { linked: true, username: telegramUser.username || telegramUser.firstName || null };
+    } catch (error) {
+      logDeduplicator.warn('TelegramService: Could not read link state', {
+        userId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return { linked: false, username: null };
     }
   }
 

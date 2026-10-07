@@ -21,6 +21,7 @@
     "prisma:migrate": "prisma migrate deploy && prisma migrate deploy --schema ./prisma-historical/schema.prisma --config ./prisma-historical/prisma.config.ts && prisma migrate deploy --schema ./prisma-content/schema.prisma --config ./prisma-content/prisma.config.ts && prisma migrate deploy --schema ./prisma-telegram/schema.prisma --config ./prisma-telegram/prisma.config.ts",
     "prisma:studio": "prisma studio",
     "prisma:generate:historical": "prisma generate --schema ./prisma-historical/schema.prisma",
+    "prisma:migrate:predeploy": "prisma migrate deploy && npm run prisma:migrate:historical",
     "prisma:migrate:historical": "prisma migrate deploy --schema ./prisma-historical/schema.prisma --config ./prisma-historical/prisma.config.ts",
     "prisma:migrate:dev:historical": "prisma migrate dev --schema ./prisma-historical/schema.prisma --config ./prisma-historical/prisma.config.ts",
     "prisma:studio:historical": "prisma studio --schema ./prisma-historical/schema.prisma --config ./prisma-historical/prisma.config.ts",

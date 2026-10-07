@@ -140,3 +140,21 @@ export const walletSubscriptionByIdSchema = z.object({
   query: z.object({ telegramId: telegramIdQuery }),
   params: z.object({ id: z.string().min(1) }),
 });
+
+/**
+ * PUT /telegram/site-alerts/active
+ * Pause or resume the alert rules created on the site for a Telegram user:
+ * one rule when `id` is given, all of them otherwise.
+ */
+export const siteAlertsActiveSchema = z.object({
+  body: z.object({
+    telegramId: z.string().refine(
+      (val) => { try { return BigInt(val) > 0n; } catch { return false; } },
+      { message: 'telegramId must be a valid positive numeric ID' }
+    ),
+    isActive: z.boolean(),
+    id: z.string().min(1).max(40).optional(),
+  }),
+  query: z.object({}).optional(),
+  params: z.object({}).optional(),
+});

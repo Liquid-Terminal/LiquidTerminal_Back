@@ -19,6 +19,16 @@ export type ProcessedLiquidationCallback = (liquidations: AggregatedLiquidation[
  * 
  * Follows singleton pattern.
  */
+/**
+ * A liquidation of one coin fills near that coin's mark. A fill price off by
+ * more than 2x means the row mixes coins (or is otherwise corrupt).
+ */
+export function isPriceCoherent(liq: Pick<Liquidation, 'fill_px_vwap' | 'mark_px'>): boolean {
+  if (liq.fill_px_vwap == null || !(liq.fill_px_vwap > 0) || !(liq.mark_px > 0)) return true;
+  const ratio = liq.fill_px_vwap / liq.mark_px;
+  return ratio >= 0.5 && ratio <= 2;
+}
+
 export class LiquidationsWebSocketService {
   private static instance: LiquidationsWebSocketService;
 
@@ -185,8 +195,21 @@ export class LiquidationsWebSocketService {
       }
     }
 
-    // Add to aggregation buffer
+    // Add to aggregation buffer. Rows whose fill price is nowhere near the
+    // mark of their coin are not one coin's liquidation: the upstream stream
+    // has sent rows that sum several coins of one wallet under the first
+    // coin's name (2.86M "BTC" at $0.11 with BTC marked at $85K). They stay in
+    // the historical DB for the totals but never reach an alert.
     for (const liq of validLiquidations) {
+      if (!isPriceCoherent(liq)) {
+        logDeduplicator.warn('LiquidationsWebSocketService: Incoherent liquidation kept out of alerts', {
+          tid: liq.tid,
+          coin: liq.coin,
+          fill_px_vwap: liq.fill_px_vwap,
+          mark_px: liq.mark_px,
+        });
+        continue;
+      }
       this.addToAggregationBuffer(liq);
     }
 

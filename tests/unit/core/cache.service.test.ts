@@ -7,6 +7,8 @@ const mockRedis = {
   store: new Map<string, string>(),
   locks: new Set<string>(),
   foreignLock: false,
+  healthy: true,
+  isHealthy: jest.fn(() => mockRedis.healthy),
   get: jest.fn(async (key: string) => mockRedis.store.get(key) ?? null),
   set: jest.fn(async (key: string, value: string) => {
     mockRedis.store.set(key, value);
@@ -20,6 +22,7 @@ const mockRedis = {
       mockRedis.locks.add(key);
       return 'OK';
     },
+    exists: async (key: string) => (mockRedis.foreignLock || mockRedis.locks.has(key) ? 1 : 0),
   }),
 };
 
@@ -39,6 +42,7 @@ describe('CacheService.getOrSet', () => {
     mockRedis.store.clear();
     mockRedis.locks.clear();
     mockRedis.foreignLock = false;
+    mockRedis.healthy = true;
     mockRedis.set.mockClear();
     cache = new CacheService();
   });
@@ -100,10 +104,23 @@ describe('CacheService.getOrSet', () => {
 
   it('shares the wait when another instance holds the Redis lock', async () => {
     mockRedis.foreignLock = true;
+    // The other instance gives up without caching: waiters stop polling once
+    // its lock is gone instead of waiting out the 15 s.
+    setTimeout(() => { mockRedis.foreignLock = false; }, 600);
     const fetchFn = jest.fn(async () => 'mine');
     const results = await Promise.all(Array.from({ length: 5 }, () => cache.getOrSet('k', fetchFn)));
     expect(results).toEqual(['mine', 'mine', 'mine', 'mine', 'mine']);
     expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
+  it('skips Redis entirely while its circuit is open', async () => {
+    mockRedis.healthy = false;
+    mockRedis.store.set('k', JSON.stringify('cached'));
+    mockRedis.get.mockClear();
+    const fetchFn = jest.fn(async () => 'fresh');
+    await expect(cache.getOrSet('k', fetchFn)).resolves.toBe('fresh');
+    expect(mockRedis.get).not.toHaveBeenCalled();
+    expect(mockRedis.set).not.toHaveBeenCalled();
   });
 
   it('stores a constant TTL as given', async () => {

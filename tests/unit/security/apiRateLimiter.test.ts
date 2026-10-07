@@ -14,6 +14,7 @@ const mockRedis = {
 
 jest.mock('../../../src/core/redis.service', () => ({
   redisService: {
+    isHealthy: () => true,
     getClient: () => {
       const ops: (() => [Error | null, unknown])[] = [];
       const pipeline = {

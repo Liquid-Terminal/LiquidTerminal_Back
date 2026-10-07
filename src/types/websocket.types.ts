@@ -178,7 +178,8 @@ export type WSInternalSubscriptionType =
   | 'liquidation_alert'
   | 'fill_alert'
   | 'doc_update_alert'
-  | 'bot_announcement';
+  | 'bot_announcement'
+  | 'alert';
 
 export interface WSClientSubscription {
   type: WSInternalSubscriptionType;
@@ -233,6 +234,7 @@ export type WSEventType =
   | 'fill_alert'
   | 'doc_update_alert'
   | 'bot_announcement'
+  | 'alert'
   | 'heartbeat'
   | 'error';
 

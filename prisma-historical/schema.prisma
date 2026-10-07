@@ -88,3 +88,191 @@ model MetricSnapshot {
   @@index([metric, time])
   @@map("metric_snapshots")
 }
+
+// ============================================================================
+// Elysium (Arbitrum Orbit L2 testnet settled on HyperEVM)
+// Raw rows pulled from the provider's REST API by ElysiumIngestionService and
+// aggregated in SQL by the /elysium/analytics routes. Every write is an
+// idempotent upsert, so replaying an overlapping window is always safe.
+// ============================================================================
+
+/// One non-system Elysium transaction (spam kept, flagged by `isSpam`).
+model ElysiumTx {
+  txHash          String   @id @map("tx_hash") @db.VarChar(66)
+  blockNumber     BigInt   @map("block_number")
+  blockTime       DateTime @map("block_time") @db.Timestamptz(3)
+  fromAddr        String   @map("from_addr") @db.VarChar(42)
+  /// Null for contract creations.
+  toAddr          String?  @map("to_addr") @db.VarChar(42)
+  /// Set only when the transaction deployed a contract.
+  contractAddress String?  @map("contract_address") @db.VarChar(42)
+  methodId        String?  @map("method_id") @db.VarChar(10)
+  /// EIP-2718 type as sent upstream (0x2 EIP-1559; 0x64/0x68/0x69 = Arbitrum
+  /// deposit / submit-retryable / retry, i.e. bridge-driven txs).
+  txType          String?  @map("tx_type") @db.VarChar(6)
+  gasUsed         BigInt   @map("gas_used")
+  /// gas_used * effective_gas_price, in wei.
+  feeWei          Decimal  @map("fee_wei") @db.Decimal(38, 0)
+  success         Boolean
+  isSpam          Boolean  @map("is_spam")
+
+  @@index([blockTime])
+  @@index([toAddr, blockTime])
+  @@index([fromAddr, blockTime])
+  @@index([contractAddress])
+  @@map("elysium_tx")
+}
+
+/// Contract deployed on Elysium, derived from txs whose contract_address is set.
+model ElysiumContract {
+  address     String   @id @db.VarChar(42)
+  deployer    String   @db.VarChar(42)
+  deployTx    String   @map("deploy_tx") @db.VarChar(66)
+  deployedAt  DateTime @map("deployed_at") @db.Timestamptz(3)
+  blockNumber BigInt   @map("block_number")
+
+  @@index([deployedAt])
+  @@index([deployer, deployedAt])
+  @@map("elysium_contract")
+}
+
+/// Per-sender daily tx count (non-spam txs only), for active/new/retention.
+model ElysiumAddressDay {
+  address String   @db.VarChar(42)
+  day     DateTime @db.Date
+  txCount Int      @map("tx_count")
+
+  @@id([address, day])
+  @@index([day])
+  @@map("elysium_address_day")
+}
+
+/// First time a sender was seen (non-spam txs only).
+model ElysiumAddress {
+  address   String   @id @db.VarChar(42)
+  firstSeen DateTime @map("first_seen") @db.Timestamptz(3)
+  firstDay  DateTime @map("first_day") @db.Date
+
+  @@index([firstDay])
+  @@map("elysium_address")
+}
+
+/// Bridge transfer between HyperEVM (L1) and Elysium (L2). Status evolves, so
+/// rows are upserted with UPDATE on conflict.
+model ElysiumBridgeTransfer {
+  transferId  String    @id @map("transfer_id") @db.VarChar(80)
+  direction   String    @db.VarChar(16)
+  asset       String    @db.VarChar(16)
+  route       String    @db.VarChar(16)
+  status      String    @db.VarChar(24)
+  symbol      String?   @db.VarChar(64)
+  decimals    Int?
+  fromAddr    String?   @map("from_addr") @db.VarChar(42)
+  toAddr      String?   @map("to_addr") @db.VarChar(42)
+  /// Human units (amount_raw / 10^decimals).
+  amount      Decimal?  @db.Decimal(96, 18)
+  l1TxHash    String?   @map("l1_tx_hash") @db.VarChar(66)
+  l2TxHash    String?   @map("l2_tx_hash") @db.VarChar(66)
+  initiatedAt DateTime  @map("initiated_at") @db.Timestamptz(3)
+  completedAt DateTime? @map("completed_at") @db.Timestamptz(3)
+  durationS   Float?    @map("duration_s")
+  updatedAt   DateTime  @default(now()) @map("updated_at") @db.Timestamptz(3)
+
+  @@index([initiatedAt])
+  @@index([direction, initiatedAt])
+  @@index([fromAddr, initiatedAt])
+  @@map("elysium_bridge_transfer")
+}
+
+/// Token registry snapshot (ERC-20) from the provider's /tokens listing.
+model ElysiumToken {
+  address       String    @id @db.VarChar(42)
+  standard      String    @db.VarChar(16)
+  name          String?   @db.VarChar(256)
+  symbol        String?   @db.VarChar(128)
+  decimals      Int?
+  origin        String?   @db.VarChar(16)
+  firstSeen     DateTime? @map("first_seen") @db.Timestamptz(3)
+  transferCount BigInt    @default(0) @map("transfer_count")
+  updatedAt     DateTime  @default(now()) @map("updated_at") @db.Timestamptz(3)
+
+  @@map("elysium_token")
+}
+
+/// DEX pool created on Elysium: Uniswap V2 PairCreated / V3 PoolCreated logs.
+/// `factory` is the emitting contract (log address).
+model ElysiumDexPool {
+  pool        String   @id @db.VarChar(42)
+  factory     String   @db.VarChar(42)
+  /// 'v2' (PairCreated) or 'v3' (PoolCreated).
+  version     String   @db.VarChar(4)
+  token0      String   @db.VarChar(42)
+  token1      String   @db.VarChar(42)
+  /// V3 fee tier in hundredths of a bip (e.g. 3000 = 0.3%); null for V2.
+  fee         Int?
+  createdAt   DateTime @map("created_at") @db.Timestamptz(3)
+  blockNumber BigInt   @map("block_number")
+  txHash      String   @map("tx_hash") @db.VarChar(66)
+
+  @@index([createdAt])
+  @@index([factory])
+  @@map("elysium_dex_pool")
+}
+
+/// One Uniswap V2 / V3 Swap log. Amounts are raw integers (token base units),
+/// signed from the pool's point of view: positive = paid into the pool.
+model ElysiumDexSwap {
+  txHash      String   @map("tx_hash") @db.VarChar(66)
+  logIndex    Int      @map("log_index")
+  pool        String   @db.VarChar(42)
+  version     String   @db.VarChar(4)
+  blockTime   DateTime @map("block_time") @db.Timestamptz(3)
+  blockNumber BigInt   @map("block_number")
+  /// topic1 (usually a router), not necessarily the end user.
+  sender      String   @db.VarChar(42)
+  /// topic2 (V2 `to` / V3 `recipient`).
+  recipient   String   @db.VarChar(42)
+  amount0     Decimal  @db.Decimal(80, 0)
+  amount1     Decimal  @db.Decimal(80, 0)
+
+  @@id([txHash, logIndex])
+  @@index([blockTime])
+  @@index([pool, blockTime])
+  @@map("elysium_dex_swap")
+}
+
+/// 4-byte method selector resolved via a public signature database. A null
+/// signature means it was looked up and nothing was found (retried later).
+model ElysiumMethodSig {
+  methodId   String   @id @map("method_id") @db.VarChar(10)
+  signature  String?  @db.Text
+  /// Number of candidate signatures returned (collisions exist).
+  candidates Int      @default(0)
+  source     String   @db.VarChar(32)
+  resolvedAt DateTime @default(now()) @map("resolved_at") @db.Timestamptz(3)
+
+  @@map("elysium_method_sig")
+}
+
+/// Holder count / supply snapshot for the most active tokens only
+/// (upstream /tokens/{address}), refreshed by the tokens stream.
+model ElysiumTokenStat {
+  address     String   @id @db.VarChar(42)
+  holders     Int
+  totalSupply Decimal? @map("total_supply") @db.Decimal(96, 18)
+  fetchedAt   DateTime @default(now()) @map("fetched_at") @db.Timestamptz(3)
+
+  @@map("elysium_token_stat")
+}
+
+/// Watermark per ingestion stream (tx, bridge, tokens) for resume + monitoring.
+model ElysiumIngestState {
+  stream       String    @id @db.VarChar(32)
+  cursor       DateTime? @db.Timestamptz(3)
+  rows         BigInt    @default(0)
+  backfillDone Boolean   @default(false) @map("backfill_done")
+  lastError    String?   @map("last_error") @db.Text
+  updatedAt    DateTime  @default(now()) @map("updated_at") @db.Timestamptz(3)
+
+  @@map("elysium_ingest_state")
+}

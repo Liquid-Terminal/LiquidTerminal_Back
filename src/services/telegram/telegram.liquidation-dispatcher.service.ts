@@ -1,66 +1,101 @@
+import { prisma } from '../../core/prisma.service';
 import { prismaTelegram } from '../../core/prisma.telegram.service';
 import { logDeduplicator } from '../../utils/logDeduplicator';
 import { LiquidationsWebSocketService } from '../liquidations/liquidations.ws.service';
 import { InternalWebSocketServer } from '../../websocket/ws.server';
 import { AggregatedLiquidation } from '../../types/liquidations.types';
-import { formatLiquidationAlert } from '../../utils/telegram.formatting';
-import { TelegramAccountNotLinkedError, TelegramUserNotFoundError } from '../../errors/telegram.errors';
-import { TelegramService } from './telegram.service';
-import {
-  markAlertSent,
-  RecentEventCache,
-  SerialQueue,
-  startSentAlertPurge,
-} from '../../utils/telegram.alert-dedup';
+import { formatLiquidationAlert, formatLiquidationDigestLine } from '../../utils/telegram.formatting';
+import { prefetchWalletNames } from '../names/alert-wallet-names';
+import { startSentAlertPurge } from '../../utils/telegram.alert-dedup';
+import { AlertEngine, AlertRule } from '../alerts/alert-engine';
 
 const CONTEXT = 'TelegramLiquidationDispatcherService';
 
-/**
- * Shape of an active liquidation subscription
- */
-interface ActiveLiquidationSubscription {
+interface LiquidationSubscriptionRow {
   id: string;
+  name: string;
   telegramUserId: string;
-  telegramId: string; // BigInt as string for WS routing
   subscriptionType: string; // 'all' | 'filtered'
   filterCoins: string[];
-  filterMinUsd: number;
+  filterMinUsd: { toNumber(): number } | number;
   filterWallets: string[];
   useLinkedWallets: boolean;
+  telegramUser: { telegramId: bigint; linkedUserId: number | null };
+}
+
+/**
+ * Compile liquidation subscriptions into engine rules. Same semantics as
+ * before the engine:
+ * - 'all' matches every liquidation;
+ * - otherwise coins (if set), minimum USD (if set), and wallets: the user's
+ *   Liquid Terminal wallets when useLinkedWallets (no wallets = no alert),
+ *   else filterWallets (if set);
+ * - one alert per (Telegram user, liquidation hash), across their subscriptions.
+ * Linked wallets are resolved here, in one query, instead of per event.
+ */
+/** A compiled liquidation subscription; the name goes in the alert message. */
+export interface LiquidationRule extends AlertRule<AggregatedLiquidation> {
+  name: string;
+}
+
+export function compileLiquidationRules(
+  subs: LiquidationSubscriptionRow[],
+  linkedWalletsByUserId: Map<number, string[]>
+): LiquidationRule[] {
+  const rules: LiquidationRule[] = [];
+  for (const sub of subs) {
+    const telegramId = sub.telegramUser.telegramId.toString();
+    const base = { id: sub.id, telegramId, dedupScope: sub.telegramUserId, name: sub.name };
+    if (sub.subscriptionType === 'all') {
+      rules.push({ ...base, wallets: [], coins: [], matches: () => true });
+      continue;
+    }
+    let wallets: string[];
+    if (sub.useLinkedWallets) {
+      const linkedUserId = sub.telegramUser.linkedUserId;
+      wallets = linkedUserId != null ? linkedWalletsByUserId.get(linkedUserId) ?? [] : [];
+      if (wallets.length === 0) continue; // linked wallets required, none: never matches
+    } else {
+      wallets = sub.filterWallets.map((w) => w.toLowerCase());
+    }
+    const minUsd = Number(sub.filterMinUsd);
+    rules.push({
+      ...base,
+      wallets,
+      coins: sub.filterCoins.map((c) => c.toUpperCase()),
+      matches: (liq) => !(minUsd > 0 && liq.notional_total < minUsd),
+    });
+  }
+  return rules;
 }
 
 /**
  * TelegramLiquidationDispatcherService
  *
- * Bridges LiquidationsWebSocketService events to the Telegram bot via /ws.
- *
- * Flow:
- * 1. Subscribes to LiquidationsWebSocketService.onProcessedLiquidation()
- * 2. On each liquidation, checks active subscriptions (cached 30s in memory)
- * 3. Filters by subscriptionType, filterCoins, filterMinUsd, filterWallets, useLinkedWallets
- * 4. Deduplicates via TelegramSentAlert unique constraint (telegramUserId, liquidationId)
- * 5. Pushes matching alerts to InternalWebSocketServer.broadcastLiquidationAlert()
- *    → Bot receives { type: 'liquidation_alert', data: { telegramId, message } }
- *    → Bot routes by telegramId and calls bot.api.sendMessage()
+ * Bridges LiquidationsWebSocketService events to the Telegram bot via /ws,
+ * through the shared AlertEngine (indexed matching, Redis dedup, per-user
+ * budget, bounded queue). The bot receives
+ * { type: 'liquidation_alert', data: { telegramId, message } }.
  */
 export class TelegramLiquidationDispatcherService {
   private static instance: TelegramLiquidationDispatcherService;
 
   private unsubscribeCallback: (() => void) | null = null;
-
-  private subscriptionCache: ActiveLiquidationSubscription[] = [];
-  private cacheLoadedAt: number = 0;
-  private static readonly CACHE_TTL_MS = 30_000;
-
-  // Cache linked wallets per user (TTL 60s) to avoid DB round-trips per liquidation
-  private linkedWalletsCache = new Map<string, { wallets: string[]; fetchedAt: number }>();
-  private static readonly LINKED_WALLETS_CACHE_TTL_MS = 60_000;
-
-  // In-memory dedup: absorbs WS re-flushes/reconnects so the DB is hit once per alert
-  private readonly recentAlerts = new RecentEventCache();
-  // Serializes dispatch batches so they never overlap and exhaust the DB pool
-  private readonly queue = new SerialQueue(CONTEXT);
   private purgeTimer: NodeJS.Timeout | null = null;
+
+  private readonly engine = new AlertEngine<AggregatedLiquidation, LiquidationRule>({
+    name: 'liquidation',
+    loadRules: () => this.loadRules(),
+    keys: (liq) => ({ id: liq.hash, wallets: [liq.liquidated_user.toLowerCase()], coin: liq.coin }),
+    deliver: (rule, liq) => {
+      InternalWebSocketServer.getInstance().broadcastLiquidationAlert(rule.telegramId, formatLiquidationAlert(liq, rule.name));
+    },
+    prepare: (liqs) => prefetchWalletNames(liqs.map((l) => l.liquidated_user)),
+    summarize: (_rule, liq) => formatLiquidationDigestLine(liq),
+    notify: (telegramId, message) => {
+      InternalWebSocketServer.getInstance().broadcastLiquidationAlert(telegramId, message);
+    },
+  });
 
   private constructor() {}
 
@@ -71,39 +106,21 @@ export class TelegramLiquidationDispatcherService {
     return TelegramLiquidationDispatcherService.instance;
   }
 
-  /**
-   * Start the dispatcher — subscribe to processed liquidations
-   */
   public start(): void {
-    const wsService = LiquidationsWebSocketService.getInstance();
-
-    // Enqueue each batch onto a serial chain — batches never run concurrently,
-    // so the DB connection pool can't be exhausted by overlapping flushes.
-    this.unsubscribeCallback = wsService.onProcessedLiquidation((liquidations) => {
-      this.queue.enqueue(() => this.processBatch(liquidations));
+    this.engine.start();
+    this.unsubscribeCallback = LiquidationsWebSocketService.getInstance().onProcessedLiquidation((liquidations) => {
+      this.engine.ingest(liquidations);
     });
 
+    // Legacy dedup rows (dedup now lives in Redis): purge what is left.
     this.purgeTimer = startSentAlertPurge(
-      (cutoff) =>
-        prismaTelegram.telegramSentAlert.deleteMany({ where: { sentAt: { lt: cutoff } } }),
+      (cutoff) => prismaTelegram.telegramSentAlert.deleteMany({ where: { sentAt: { lt: cutoff } } }),
       CONTEXT
     );
 
     logDeduplicator.info('TelegramLiquidationDispatcherService: Started');
   }
 
-  /**
-   * Process one batch of liquidations sequentially.
-   */
-  private async processBatch(liquidations: AggregatedLiquidation[]): Promise<void> {
-    for (const liq of liquidations) {
-      await this.dispatch(liq);
-    }
-  }
-
-  /**
-   * Stop the dispatcher
-   */
   public stop(): void {
     if (this.unsubscribeCallback) {
       this.unsubscribeCallback();
@@ -113,168 +130,36 @@ export class TelegramLiquidationDispatcherService {
       clearInterval(this.purgeTimer);
       this.purgeTimer = null;
     }
-    this.subscriptionCache = [];
-    this.cacheLoadedAt = 0;
-    this.linkedWalletsCache.clear();
-    this.recentAlerts.clear();
-
+    this.engine.stop();
     logDeduplicator.info('TelegramLiquidationDispatcherService: Stopped');
   }
 
-  // ============================================================================
-  // PRIVATE METHODS
-  // ============================================================================
+  private async loadRules(): Promise<LiquidationRule[]> {
+    const subs = await prismaTelegram.telegramSubscription.findMany({
+      where: { isActive: true },
+      include: { telegramUser: { select: { telegramId: true, linkedUserId: true } } },
+    });
 
-  /**
-   * Reload subscription cache if stale (every 30s)
-   */
-  private async ensureCacheFresh(): Promise<void> {
-    if (Date.now() - this.cacheLoadedAt < TelegramLiquidationDispatcherService.CACHE_TTL_MS) return;
-
-    try {
-      const subs = await prismaTelegram.telegramSubscription.findMany({
-        where: { isActive: true },
-        include: { telegramUser: { select: { telegramId: true } } },
+    const linkedUserIds = [
+      ...new Set(
+        subs
+          .filter((s) => s.useLinkedWallets && s.subscriptionType !== 'all')
+          .map((s) => s.telegramUser.linkedUserId)
+          .filter((id): id is number => id != null)
+      ),
+    ];
+    const linked = new Map<number, string[]>();
+    if (linkedUserIds.length) {
+      const rows = await prisma.userWallet.findMany({
+        where: { userId: { in: linkedUserIds } },
+        select: { userId: true, Wallet: { select: { address: true } } },
       });
-
-      this.subscriptionCache = subs.map((sub) => ({
-        id: sub.id,
-        telegramUserId: sub.telegramUserId,
-        telegramId: sub.telegramUser.telegramId.toString(),
-        subscriptionType: sub.subscriptionType,
-        filterCoins: sub.filterCoins,
-        filterMinUsd: Number(sub.filterMinUsd),
-        filterWallets: sub.filterWallets,
-        useLinkedWallets: sub.useLinkedWallets,
-      }));
-
-      this.cacheLoadedAt = Date.now();
-
-      logDeduplicator.debug('TelegramLiquidationDispatcherService: Subscription cache refreshed', {
-        count: this.subscriptionCache.length,
-      });
-    } catch (error) {
-      logDeduplicator.error('TelegramLiquidationDispatcherService: Failed to refresh subscription cache', {
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
-
-  /**
-   * Dispatch a single processed liquidation to all matching subscriptions
-   */
-  private async dispatch(liq: AggregatedLiquidation): Promise<void> {
-    await this.ensureCacheFresh();
-
-    if (this.subscriptionCache.length === 0) return;
-
-    // Use hash as deduplication ID (same as bot alertDispatcher)
-    const liquidationId = liq.hash;
-
-    for (const sub of this.subscriptionCache) {
-      // Check if liquidation matches subscription filters
-      const matches = await this.matchesFilters(liq, sub);
-      if (!matches) continue;
-
-      // Deduplicate — in-memory first (no DB hit), then atomic insert.
-      const dedupKey = `${sub.telegramUserId}|${liquidationId}`;
-      if (this.recentAlerts.has(dedupKey)) continue;
-
-      const sentResult = await markAlertSent(
-        () =>
-          prismaTelegram.telegramSentAlert.create({
-            data: { telegramUserId: sub.telegramUserId, liquidationId },
-          }),
-        CONTEXT
-      );
-      this.recentAlerts.add(dedupKey);
-      // 'duplicate' → already sent, skip. 'new'/'error' → send (fail open on DB error).
-      if (sentResult === 'duplicate') continue;
-
-      // Format message and broadcast via /ws
-      try {
-        const message = formatLiquidationAlert(liq);
-        InternalWebSocketServer.getInstance().broadcastLiquidationAlert(sub.telegramId, message);
-
-        logDeduplicator.info('TelegramLiquidationDispatcherService: Alert dispatched', {
-          telegramId: sub.telegramId,
-          liquidationId,
-          coin: liq.coin,
-          notionalUsd: liq.notional_total,
-        });
-      } catch (error) {
-        logDeduplicator.error('TelegramLiquidationDispatcherService: Failed to broadcast alert', {
-          error: error instanceof Error ? error.message : String(error),
-          subscriptionId: sub.id,
-          liquidationId,
-        });
+      for (const row of rows) {
+        const list = linked.get(row.userId) ?? [];
+        list.push(row.Wallet.address.toLowerCase());
+        linked.set(row.userId, list);
       }
     }
-  }
-
-  /**
-   * Check if a liquidation matches a subscription's filters
-   */
-  private async matchesFilters(
-    liq: AggregatedLiquidation,
-    sub: ActiveLiquidationSubscription
-  ): Promise<boolean> {
-    // 'all' type — no filtering
-    if (sub.subscriptionType === 'all') return true;
-
-    // Filter by coin
-    if (sub.filterCoins.length > 0) {
-      if (!sub.filterCoins.includes(liq.coin.toUpperCase())) return false;
-    }
-
-    // Filter by minimum USD
-    if (sub.filterMinUsd > 0) {
-      if (liq.notional_total < sub.filterMinUsd) return false;
-    }
-
-    // Filter by linked wallets (fetched from LiquidTerminal DB, cached 60s)
-    if (sub.useLinkedWallets) {
-      const linkedWallets = await this.getLinkedWallets(sub.telegramId, sub.telegramUserId);
-      if (linkedWallets.length === 0) return false;
-      if (!linkedWallets.includes(liq.liquidated_user.toLowerCase())) return false;
-      return true;
-    }
-
-    // Filter by manual wallets
-    if (sub.filterWallets.length > 0) {
-      if (!sub.filterWallets.includes(liq.liquidated_user.toLowerCase())) return false;
-    }
-
-    return true;
-  }
-
-  /**
-   * Get linked wallet addresses for a Telegram user (cached 60s)
-   */
-  private async getLinkedWallets(telegramId: string, telegramUserId: string): Promise<string[]> {
-    const cached = this.linkedWalletsCache.get(telegramUserId);
-    if (cached && Date.now() - cached.fetchedAt < TelegramLiquidationDispatcherService.LINKED_WALLETS_CACHE_TTL_MS) {
-      return cached.wallets;
-    }
-
-    try {
-      const result = await TelegramService.getInstance().getLinkedWallets(BigInt(telegramId));
-      const wallets = result.data.map((w) => w.address.toLowerCase());
-
-      this.linkedWalletsCache.set(telegramUserId, { wallets, fetchedAt: Date.now() });
-      return wallets;
-    } catch (error) {
-      if (error instanceof TelegramUserNotFoundError || error instanceof TelegramAccountNotLinkedError) {
-        // No linked account — cache empty result to avoid hammering DB
-        this.linkedWalletsCache.set(telegramUserId, { wallets: [], fetchedAt: Date.now() });
-        return [];
-      }
-      logDeduplicator.warn('TelegramLiquidationDispatcherService: Failed to fetch linked wallets', {
-        telegramUserId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      // Return stale cache if available
-      return cached?.wallets ?? [];
-    }
+    return compileLiquidationRules(subs, linked);
   }
 }

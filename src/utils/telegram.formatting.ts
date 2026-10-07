@@ -1,5 +1,7 @@
 import { AggregatedLiquidation } from '../types/liquidations.types';
 import { AggregatedFill } from '../types/fill-alerts.types';
+import { CompletedTrade } from '../types/wallet-events.types';
+import { walletName } from '../services/names/alert-wallet-names';
 
 /**
  * Format a dollar amount in a human-readable way
@@ -53,7 +55,7 @@ function formatTimeRange(timeRange: [number, number]): string {
 /**
  * Format a liquidation alert message for Telegram (HTML parse mode)
  */
-export function formatLiquidationAlert(liq: AggregatedLiquidation): string {
+export function formatLiquidationAlert(liq: AggregatedLiquidation, _alertName?: string | null): string {
   // null direction: neutral marker rather than defaulting to the Short styling.
   const directionEmoji = liq.liq_dir === 'Long' ? '🟢' : liq.liq_dir === 'Short' ? '🔴' : '⚪';
   const trendEmoji = liq.liq_dir === 'Long' ? '📉' : liq.liq_dir === 'Short' ? '📈' : '➖';
@@ -67,6 +69,7 @@ export function formatLiquidationAlert(liq: AggregatedLiquidation): string {
   const hypurrscanTx = `https://hypurrscan.io/tx/${liq.hash}`;
   const hypurrscanAddress = `https://hypurrscan.io/address/${liq.liquidated_user}`;
 
+  const name = walletName(liq.liquidated_user);
   const isAggregated = liq.aggregation?.isAggregated;
   const aggregationInfo = isAggregated
     ? `\n📊 <b>${liq.aggregation!.count} liquidations agrégées</b> (${formatTimeRange(liq.aggregation!.timeRangeMs)})`
@@ -83,7 +86,7 @@ ${trendEmoji} Mark Price: ${priceFormatted}
 <a href="${liquidTerminalTx}">Liquid Terminal</a> • <a href="${hypurrscanTx}">Hypurrscan</a>
 <code>${escapeHtml(liq.hash)}</code>
 
-<b>👛 Liquidated Wallet</b>
+<b>👛 Liquidated Wallet</b>${name ? ` · <b>${escapeHtml(name)}</b>` : ''}
 <a href="${liquidTerminalAddress}">Liquid Terminal</a> • <a href="${hypurrscanAddress}">Hypurrscan</a>
 <code>${escapeHtml(liq.liquidated_user)}</code>
 
@@ -114,8 +117,7 @@ function shortenAddress(address: string): string {
 }
 
 /**
- * Format a fill timestamp (perp = epoch ms number, spot = ISO-8601 string)
- * to a compact `YYYY-MM-DD HH:MM` UTC string.
+ * Format a fill time (ISO string or epoch ms) as `YYYY-MM-DD HH:MM`.
  */
 function formatFillTime(time: string | number): string {
   const iso = typeof time === 'number' ? new Date(time).toISOString() : time;
@@ -157,14 +159,29 @@ function formatDurationMs(durationMs: number): string {
  * Format a Fill alert message for Telegram (HTML parse mode).
  * Driven by HypeDexer `allFills` (perp and spot fills) — an executed order.
  */
-export function formatFillAlert(fill: AggregatedFill, subscriptionName: string): string {
+export interface FillAlertContext {
+  /** Name the user gave this wallet in their Liquid Terminal list. */
+  walletLabel?: string;
+  /** The alert follows a Liquid Terminal list: link the wallet to its tracker page. */
+  fromList?: boolean;
+}
+
+export function formatFillAlert(
+  fill: AggregatedFill,
+  subscriptionName: string,
+  context: FillAlertContext = {}
+): string {
   const isBuy = fill.side === 'B';
   const sideEmoji = isBuy ? '🟢' : '🔴';
   const sideLabel = isBuy ? 'BUY' : 'SELL';
   const sourceTag = fill.source === 'perp' ? 'PERP' : 'SPOT';
   const twapTag = fill.twapId != null ? ' <code>TWAP</code>' : '';
 
-  const liquidTerminalAddress = `https://liquidterminal.xyz/explorer/address/${fill.wallet}`;
+  const liquidTerminalAddress = context.fromList
+    ? `https://liquidterminal.xyz/market/tracker/wallet/${fill.wallet}`
+    : `https://liquidterminal.xyz/explorer/address/${fill.wallet}`;
+  const label = context.walletLabel || walletName(fill.wallet);
+  const walletLabel = label ? `<b>${escapeHtml(label)}</b> ` : '';
   const hypurrscanAddress = `https://hypurrscan.io/address/${fill.wallet}`;
 
   const dirLine =
@@ -210,11 +227,36 @@ ${sideEmoji} <b>${escapeHtml(fill.coin)}</b> ${sideLabel}
 
 ${transactionBlock}
 
-<b>👛 Wallet</b> <code>${escapeHtml(shortenAddress(fill.wallet))}</code>
+<b>👛 Wallet</b> ${walletLabel}<code>${escapeHtml(shortenAddress(fill.wallet))}</code>
 <a href="${liquidTerminalAddress}">Liquid Terminal</a> • <a href="${hypurrscanAddress}">Hypurrscan</a>
 
 ━━━━━━━━━━━━━━━━━━━━
 <i>Data by <a href="https://app.hypedexer.com/">HypeDexer</a> (Enigma Validator)</i>
 <a href="https://x.com/liquidterminal">𝕏</a> • <a href="https://liquidterminal.xyz/">Website</a>
 `.trim();
+}
+
+// ==================== DIGEST LINES ====================
+// One line per alert, used when a user is over the per-minute budget and their
+// alerts are grouped into a digest message (see AlertEngine).
+
+const walletLink = (wallet: string, label?: string) =>
+  `<a href="https://liquidterminal.xyz/market/tracker/wallet/${wallet}">${escapeHtml(label || walletName(wallet) || shortenAddress(wallet))}</a>`;
+
+export function formatFillDigestLine(fill: AggregatedFill, subscriptionName: string, walletLabel?: string): string {
+  const side = fill.side === 'B' ? '🟢' : '🔴';
+  const what = fill.source === 'perp' && fill.dir ? escapeHtml(fill.dir) : fill.side === 'B' ? 'Buy' : 'Sell';
+  const pnl =
+    fill.closedPnlTotal !== undefined && fill.closedPnlTotal !== 0 ? ` · PnL ${formatSignedPnl(fill.closedPnlTotal)}` : '';
+  return `${side} <b>${escapeHtml(fill.coin)}</b> ${what} ${formatAmount(fill.notionalUsd)}${pnl} · ${walletLink(fill.wallet, walletLabel)} · <i>${escapeHtml(subscriptionName)}</i>`;
+}
+
+export function formatLiquidationDigestLine(liq: AggregatedLiquidation): string {
+  const dir = liq.liq_dir ? ` ${liq.liq_dir}` : '';
+  return `🚨 <b>${escapeHtml(liq.coin)}</b>${dir} liquidated ${formatAmount(liq.notional_total)} · ${walletLink(liq.liquidated_user.toLowerCase())}`;
+}
+
+export function formatTradeDigestLine(trade: CompletedTrade, subscriptionName: string): string {
+  const icon = trade.pnlRealized >= 0 ? '✅' : '❌';
+  return `${icon} <b>${escapeHtml(trade.coin)}</b> ${trade.direction} closed · PnL ${formatSignedPnl(trade.pnlRealized)} on ${formatAmount(trade.positionValue)} · ${walletLink(trade.user)} · <i>${escapeHtml(subscriptionName)}</i>`;
 }

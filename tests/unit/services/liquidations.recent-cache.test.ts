@@ -11,6 +11,7 @@ jest.mock('../../../src/utils/logDeduplicator', () => ({
 jest.mock('../../../src/repositories', () => ({ historicalLiquidationRepository: {} }));
 jest.mock('../../../src/core/redis.service', () => ({
   redisService: {
+    isHealthy: () => true,
     get: jest.fn(async (key: string) => mockStore.get(key) ?? null),
     set: jest.fn(async (key: string, value: string) => {
       mockStore.set(key, value);
@@ -36,7 +37,7 @@ describe('LiquidationsService.getRecentLiquidations cache', () => {
     mockClient.getRecentLiquidations.mockImplementation(async (params: LiquidationQueryParams) => ({
       success: true,
       message: '',
-      data: [{ coin: params.coin ?? 'ALL' }],
+      data: [{ coin: params.coin ?? 'ALL', size_total: 1, notional_total: 1 }],
       total_count: 1,
       execution_time_ms: 0,
       next_cursor: null,

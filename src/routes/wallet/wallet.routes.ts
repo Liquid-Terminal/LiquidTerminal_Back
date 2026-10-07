@@ -270,7 +270,11 @@ router.get("/my-wallets", validatePrivyToken, (async (req: Request, res: Respons
 
     logDeduplicator.info('Fetching wallets for user', { userId: user.id });
 
-    const wallets = await walletService.getWalletsByUser(user.id);
+    // Honour ?page & ?limit: the tracker loads the whole set in one call, and
+    // the service default (10) silently hid every wallet past the tenth.
+    const page = Math.max(1, Number.parseInt(String(req.query.page ?? '1'), 10) || 1);
+    const limit = Math.min(1000, Math.max(1, Number.parseInt(String(req.query.limit ?? '1000'), 10) || 1000));
+    const wallets = await walletService.getWalletsByUser(user.id, page, limit);
     logDeduplicator.info('Wallets retrieved successfully', { 
       userId: user.id,
       count: wallets.data.length,

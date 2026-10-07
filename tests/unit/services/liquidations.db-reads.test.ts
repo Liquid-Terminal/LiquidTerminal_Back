@@ -14,6 +14,7 @@ jest.mock('../../../src/utils/logDeduplicator', () => ({
 jest.mock('../../../src/repositories', () => ({ historicalLiquidationRepository: mockRepo }));
 jest.mock('../../../src/core/redis.service', () => ({
   redisService: {
+    isHealthy: () => true,
     get: jest.fn(async (key: string) => mockStore.get(key) ?? null),
     set: jest.fn(async (key: string, value: string, ttl?: number) => {
       mockStore.set(key, value);
@@ -33,7 +34,7 @@ import type { LiquidationQueryParams } from '../../../src/types/liquidations.typ
 const envelope = (tag: string) => ({
   success: true,
   message: '',
-  data: [{ tag }],
+  data: [{ tag, size_total: 1, notional_total: 1 }],
   total_count: 1,
   execution_time_ms: 0,
   next_cursor: null,
@@ -83,8 +84,8 @@ describe('LiquidationsService DB reads and history cache', () => {
     const b = await service.getLiquidations({ user, limit: 50, order: 'DESC' });
     await service.getLiquidations({ coin: 'BTC', limit: 100 });
 
-    expect(a.data).toEqual([{ tag: `${user}:100` }]);
-    expect(b.data).toEqual([{ tag: `${user}:50` }]);
+    expect(a.data).toMatchObject([{ tag: `${user}:100` }]);
+    expect(b.data).toMatchObject([{ tag: `${user}:50` }]);
     expect(mockClient.getLiquidations).toHaveBeenCalledTimes(3);
     const ttls = [...mockTtls.entries()];
     expect(ttls.filter(([k]) => k.includes(user)).every(([, ttl]) => ttl === 300)).toBe(true);

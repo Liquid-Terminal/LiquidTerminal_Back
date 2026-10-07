@@ -15,6 +15,7 @@ const mockRedis = {
     mockRedis.store.delete(key);
   }),
   getClient: () => ({ set: async () => 'OK' }),
+  isHealthy: () => true,
 };
 
 jest.mock('../../../src/core/redis.service', () => ({ redisService: mockRedis }));

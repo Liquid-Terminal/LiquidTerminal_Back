@@ -1,8 +1,10 @@
 /**
  * The wallet dispatcher consumes the network-wide completed trades feed while
- * every subscription is wallet-scoped: once the subscriptions are known, only
- * trades of a watched wallet may reach the queue — and the alerts must be
- * exactly those of the unfiltered pipeline (oracle: the pre-refactor matching).
+ * every subscription is wallet-scoped: once the alert engine has loaded the
+ * subscriptions, only trades of a watched wallet may reach it — and the
+ * alerts must be exactly those of the unfiltered pipeline (oracle: the
+ * pre-refactor matching). The engine's per-user budget is lifted here (see
+ * alert-engine.test.ts): past 50 alerts/min it would turn alerts into digests.
  */
 import type { CompletedTrade } from '../../../src/types/wallet-events.types';
 
@@ -20,7 +22,8 @@ const mockState = {
   subscriptions: [] as WalletSubscription[],
   loadGate: null as Promise<void> | null,
   broadcasts: [] as string[],
-  inserted: new Set<string>(),
+  /** Dedup keys claimed in "Redis". */
+  claimed: new Set<string>(),
   paused: [] as boolean[],
 };
 
@@ -31,15 +34,26 @@ jest.mock('../../../src/utils/logDeduplicator', () => ({
 jest.mock('../../../src/core/prisma.telegram.service', () => ({
   prismaTelegram: {
     telegramWalletSentAlert: {
-      create: jest.fn(async ({ data }: { data: { subscriptionId: string; eventId: string } }) => {
-        const key = `${data.subscriptionId}|${data.eventId}`;
-        if (mockState.inserted.has(key)) throw Object.assign(new Error('duplicate'), { code: 'P2002' });
-        mockState.inserted.add(key);
-        return {};
-      }),
       deleteMany: jest.fn(async () => ({ count: 0 })),
     },
   },
+}));
+
+jest.mock('../../../src/core/redis.service', () => ({
+  redisService: {
+    isHealthy: () => true,
+    claimKeys: async (keys: string[]) =>
+      keys.map((key) => {
+        if (mockState.claimed.has(key)) return false;
+        mockState.claimed.add(key);
+        return true;
+      }),
+  },
+}));
+
+jest.mock('../../../src/services/names/alert-wallet-names', () => ({
+  prefetchWalletNames: async () => undefined,
+  walletName: () => undefined,
 }));
 
 jest.mock('../../../src/clients/hypedexer/rest/completed-trades/completed-trades-poller.client', () => ({
@@ -74,6 +88,9 @@ jest.mock('../../../src/websocket/ws.server', () => ({
     getInstance: () => ({
       broadcastWalletEvent: (telegramId: string, trade: CompletedTrade, name: string) => {
         mockState.broadcasts.push(`${telegramId}|${name}|${trade.tradeId}`);
+      },
+      broadcastFillAlert: (telegramId: string, message: string) => {
+        mockState.broadcasts.push(`digest|${telegramId}|${message}`);
       },
     }),
   },
@@ -145,7 +162,9 @@ const drain = async (): Promise<void> => {
 
 describe('TelegramWalletDispatcherService', () => {
   let Dispatcher: typeof import('../../../src/services/telegram/telegram.wallet-dispatcher.service').TelegramWalletDispatcherService;
-  let enqueueSpy: jest.SpyInstance;
+  let ingestSpy: jest.SpyInstance;
+  /** Trades handed to the alert engine. */
+  const ingested = (): CompletedTrade[] => ingestSpy.mock.calls.flatMap(([trades]) => trades as CompletedTrade[]);
 
   beforeEach(() => {
     jest.resetModules();
@@ -153,10 +172,11 @@ describe('TelegramWalletDispatcherService', () => {
     mockState.subscriptions = [];
     mockState.loadGate = null;
     mockState.broadcasts = [];
-    mockState.inserted.clear();
+    mockState.claimed.clear();
     mockState.paused = [];
-    const { SerialQueue } = require('../../../src/utils/telegram.alert-dedup');
-    enqueueSpy = jest.spyOn(SerialQueue.prototype, 'enqueue');
+    const { AlertEngine, DeliveryLimiter } = require('../../../src/services/alerts/alert-engine');
+    ingestSpy = jest.spyOn(AlertEngine.prototype, 'ingest');
+    jest.spyOn(DeliveryLimiter.prototype, 'allow').mockReturnValue(true);
     Dispatcher = require('../../../src/services/telegram/telegram.wallet-dispatcher.service')
       .TelegramWalletDispatcherService;
   });
@@ -185,9 +205,8 @@ describe('TelegramWalletDispatcherService', () => {
     await drain();
 
     expect([...mockState.broadcasts].sort()).toEqual(expected);
-    const queuedTrades = enqueueSpy.mock.calls.length;
-    const batchesWithWatched = batches.filter((b) => b.some((t) => watched.has(t.user))).length;
-    expect(queuedTrades).toBe(batchesWithWatched);
+    const watchedTrades = batches.flat().filter((t) => watched.has(t.user));
+    expect(ingested()).toEqual(watchedTrades);
   });
 
   it('queues nothing when no subscription exists', async () => {
@@ -195,8 +214,9 @@ describe('TelegramWalletDispatcherService', () => {
     await drain();
     emit(randomBatches(rng(7), 100));
     await drain();
-    expect(enqueueSpy).not.toHaveBeenCalled();
+    expect(ingested()).toEqual([]);
     expect(mockState.broadcasts).toEqual([]);
+    expect(mockState.paused).toEqual([true]);
   });
 
   it('queues every batch until the first subscription load completes', async () => {
@@ -208,7 +228,7 @@ describe('TelegramWalletDispatcherService', () => {
 
     const batches = randomBatches(rng(9), 40);
     emit(batches);
-    expect(enqueueSpy).toHaveBeenCalledTimes(batches.length);
+    expect(ingested()).toEqual(batches.flat());
 
     release();
     await drain();

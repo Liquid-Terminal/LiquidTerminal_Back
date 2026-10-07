@@ -54,6 +54,8 @@ const MARKET_WINDOWS: readonly RateWindow[] = [
  * swallowing it returned a count of 0, which let everything through.
  */
 async function countRequest(prefix: string, windows: readonly RateWindow[]): Promise<number[]> {
+  // Circuit open: don't queue on a wedged connection, use the fallback now.
+  if (!redisService.isHealthy()) throw new Error('Redis circuit open');
   const now = Math.floor(Date.now() / 1000);
   const pipeline = redisService.getClient().pipeline();
   for (const window of windows) {
@@ -177,44 +179,64 @@ const PASSTHROUGH_LIMITS = {
   MINUTE: { WINDOW: 60, MAX_REQUESTS: 300 },
 };
 
-const PASSTHROUGH_WINDOWS: readonly RateWindow[] = [
-  { name: 'burst', seconds: PASSTHROUGH_LIMITS.BURST.WINDOW },
-  { name: 'minute', seconds: PASSTHROUGH_LIMITS.MINUTE.WINDOW },
-];
+interface IpLimits {
+  BURST: { WINDOW: number; MAX_REQUESTS: number };
+  MINUTE: { WINDOW: number; MAX_REQUESTS: number };
+}
 
-export const passthroughRateLimiter = async (
-  req: Request,
-  res: Response,
-  next: NextFunction
-): Promise<void> => {
-  const ip = req.ip;
-  if (!ip) {
-    res.status(400).json({ error: 'IP address not found', message: 'Could not determine client IP address' });
-    return;
-  }
-
-  try {
-    const [burstCount, minuteCount] = await countRequest(`ratelimit:pt:${ip}`, PASSTHROUGH_WINDOWS);
-
-    if (burstCount > PASSTHROUGH_LIMITS.BURST.MAX_REQUESTS) {
-      return sendLimitExceededResponse(res, 'Too many indexer requests per second');
+/**
+ * Per-IP limiter with its own Redis namespace (so it stacks on top of the
+ * general limiter instead of sharing its counters), in-memory fallback when
+ * Redis cannot answer.
+ */
+function createIpLimiter(namespace: string, limits: IpLimits, what: string) {
+  const windows: readonly RateWindow[] = [
+    { name: 'burst', seconds: limits.BURST.WINDOW },
+    { name: 'minute', seconds: limits.MINUTE.WINDOW },
+  ];
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    const ip = req.ip;
+    if (!ip) {
+      res.status(400).json({ error: 'IP address not found', message: 'Could not determine client IP address' });
+      return;
     }
-    if (minuteCount > PASSTHROUGH_LIMITS.MINUTE.MAX_REQUESTS) {
-      return sendLimitExceededResponse(res, 'Too many indexer requests per minute');
-    }
-    next();
-  } catch (error) {
-    logDeduplicator.error('Passthrough rate limiter Redis error, using in-memory fallback', {
-      error: error instanceof Error ? error.message : String(error),
-      path: req.path,
-      ip,
-    });
-    // Fail-secure, same as the general limiter. Distinct key namespace so the
-    // two fallbacks don't share a counter.
-    if (checkInMemoryFallback(`pt:${ip}`)) {
+    try {
+      const [burstCount, minuteCount] = await countRequest(`ratelimit:${namespace}:${ip}`, windows);
+      if (burstCount > limits.BURST.MAX_REQUESTS) {
+        return sendLimitExceededResponse(res, `Too many ${what} requests per second`);
+      }
+      if (minuteCount > limits.MINUTE.MAX_REQUESTS) {
+        return sendLimitExceededResponse(res, `Too many ${what} requests per minute`);
+      }
       next();
-    } else {
-      sendLimitExceededResponse(res, 'Too many requests (fallback mode)');
+    } catch (error) {
+      logDeduplicator.error('IP rate limiter Redis error, using in-memory fallback', {
+        namespace,
+        error: error instanceof Error ? error.message : String(error),
+        path: req.path,
+        ip,
+      });
+      // Fail-secure, same as the general limiter. Distinct key namespace so the
+      // fallbacks don't share a counter.
+      if (checkInMemoryFallback(`${namespace}:${ip}`)) {
+        next();
+      } else {
+        sendLimitExceededResponse(res, 'Too many requests (fallback mode)');
+      }
     }
-  }
-};
+  };
+}
+
+export const passthroughRateLimiter = createIpLimiter('pt', PASSTHROUGH_LIMITS, 'indexer');
+
+/**
+ * Per-address lookups (Elysium address / contract profiles, per-user indexer
+ * pass-through). Any valid address is a fresh cache key, so each request can
+ * run a batch of SQL or a paid upstream call: a page view makes 1-4 of them,
+ * 60/min per IP is ample for people and caps a scripted sweep.
+ */
+export const addressLookupRateLimiter = createIpLimiter(
+  'addr',
+  { BURST: { WINDOW: 1, MAX_REQUESTS: 8 }, MINUTE: { WINDOW: 60, MAX_REQUESTS: 60 } },
+  'address lookup'
+);

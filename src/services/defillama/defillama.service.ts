@@ -4,6 +4,7 @@ import { cacheService } from '../../core/cache.service';
 import { DEFILLAMA_CACHE_KEYS, DEFILLAMA_TTL } from '../../constants/defillama.cache';
 import {
   DefiLlamaChain,
+  DefiLlamaFeeRank,
   DefiLlamaMoneyBlock,
   DefiLlamaPrices,
   DefiLlamaProjectOverview,
@@ -11,6 +12,7 @@ import {
   DefiLlamaProtocolListItem,
   DefiLlamaSummary,
 } from '../../types/defillama.types';
+import { rankHyperliquidFees } from './feeRank';
 
 /** Extract the compact fees/volume block shared by the aggregate overview. */
 function toMoneyBlock(summary: DefiLlamaSummary): DefiLlamaMoneyBlock {
@@ -87,6 +89,20 @@ export class DefiLlamaService {
       DEFILLAMA_CACHE_KEYS.fees(slug, dataType),
       () => this.client.getFeesSummary(slug, dataType),
       DEFILLAMA_TTL.fees
+    );
+  }
+
+  /**
+   * Hyperliquid's rank among every protocol DefiLlama tracks, by 24h fees (the
+   * /hype/financials Fee rank card). The browser used to download the whole
+   * overview for this one number: 7.1 MB on the wire, 28.6 MB of JSON, every
+   * 5 minutes.
+   */
+  public getHyperliquidFeeRank(): Promise<DefiLlamaFeeRank | null> {
+    return cacheService.getOrSet(
+      DEFILLAMA_CACHE_KEYS.hlFeeRank,
+      async () => rankHyperliquidFees(await this.client.getFeesOverview()),
+      DEFILLAMA_TTL.ranking
     );
   }
 

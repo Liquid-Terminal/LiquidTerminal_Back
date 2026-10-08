@@ -105,6 +105,16 @@ export class DefiLlamaClient extends BaseApiService {
     );
   }
 
+  /**
+   * `GET /overview/fees` — every protocol DefiLlama tracks, charts excluded
+   * (4.8 MB of JSON instead of 28.6 MB with them, 2026-10-08).
+   */
+  public getFeesOverview(): Promise<DefiLlamaChainOverview> {
+    return this.getPath<DefiLlamaChainOverview>(
+      '/overview/fees?excludeTotalDataChart=true&excludeTotalDataChartBreakdown=true'
+    );
+  }
+
   /** `GET /overview/fees/{chain}` — chain-wide fees ranking, charts excluded. */
   public getChainFeesOverview(chain: string): Promise<DefiLlamaChainOverview> {
     return this.getPath<DefiLlamaChainOverview>(

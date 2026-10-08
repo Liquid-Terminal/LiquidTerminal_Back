@@ -64,6 +64,14 @@ router.get(
   run(() => contextService.getChainStats(), 'GET /defillama/chain-stats')
 );
 
+// Hyperliquid's rank among every protocol on DefiLlama by 24h fees (null when unmatched).
+router.get(
+  '/fee-rank',
+  marketRateLimiter,
+  validateGetRequest(defillamaEmptyQuerySchema),
+  run(() => service.getHyperliquidFeeRank(), 'GET /defillama/fee-rank')
+);
+
 // Batch map for the projects list: HL TVL, ranks and fees rank per linked project.
 router.get(
   '/projects-map',

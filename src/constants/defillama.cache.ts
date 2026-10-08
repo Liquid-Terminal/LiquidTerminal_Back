@@ -18,6 +18,7 @@ export const DEFILLAMA_CACHE_KEYS = {
   hlSnapshot: `${DEFILLAMA_CACHE_PREFIX}:hl:snapshot`,
   hlFeesRanking: `${DEFILLAMA_CACHE_PREFIX}:hl:fees-ranking`,
   hlVolumeRanking: `${DEFILLAMA_CACHE_PREFIX}:hl:volume-ranking`,
+  hlFeeRank: `${DEFILLAMA_CACHE_PREFIX}:hl:fee-rank`,
   linkedProjects: `${DEFILLAMA_CACHE_PREFIX}:linked-projects`,
   tvlHistory: (slug: string) => `${DEFILLAMA_CACHE_PREFIX}:tvl-history:${slug}`,
 } as const;

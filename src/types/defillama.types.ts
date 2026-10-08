@@ -44,6 +44,18 @@ export interface DefiLlamaChainOverview {
   [key: string]: unknown;
 }
 
+/** Hyperliquid's place among every protocol of DefiLlama's fee overview, by 24h fees. */
+export interface DefiLlamaFeeRank {
+  /** 1-based position; ties share the lower rank. */
+  rank: number;
+  /** Protocols in the overview. */
+  protocolCount: number;
+  /** 24h fees (USD) of the Hyperliquid row the rank is computed from. */
+  hlFees24h: number;
+  /** That row's name as DefiLlama labels it. */
+  name: string;
+}
+
 /** Single point of a historical TVL series. */
 export interface DefiLlamaTvlPoint {
   date: number;

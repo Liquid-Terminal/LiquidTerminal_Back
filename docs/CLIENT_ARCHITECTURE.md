@@ -40,7 +40,7 @@ All clients inherit from `BaseApiService` and follow the Singleton pattern:
 - **Vault**: `HyperliquidVaultClient`, `HyperliquidVaultsClient`
 - **Staking**: `ValidatorClient`
 - **Deploy**: `HyperliquidSpotDeployClient`
-- **Token Info**: `HyperliquidTokenInfoClient`
+- **Token details / fund fills**: read on demand by `TokenDetailsService` and `AfBuybacksService` (their own small clients, no poller)
 - **Stats**: `HyperliquidSpotStatsClient`, `HyperliquidGlobalStatsClient`
 
 #### B. Hypurrscan Clients (src/clients/hypurrscan/)

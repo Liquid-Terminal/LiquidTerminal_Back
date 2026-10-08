@@ -23,24 +23,6 @@ export class MarketDataError extends SpotError {
 }
 
 /**
- * Erreur lors de la récupération des informations sur un token
- */
-export class TokenInfoError extends SpotError {
-  constructor(message: string = 'Failed to fetch token information') {
-    super(message, 500, 'TOKEN_INFO_ERROR');
-  }
-}
-
-/**
- * Erreur lorsqu'un token n'est pas trouvé
- */
-export class TokenNotFoundError extends SpotError {
-  constructor(message: string = 'Token not found') {
-    super(message, 404, 'TOKEN_NOT_FOUND');
-  }
-}
-
-/**
  * Erreur lors de la récupération des données d'enchères
  */
 export class AuctionError extends SpotError {

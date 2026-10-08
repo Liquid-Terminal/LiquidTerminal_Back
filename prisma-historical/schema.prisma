@@ -264,6 +264,55 @@ model ElysiumTokenStat {
   @@map("elysium_token_stat")
 }
 
+/// A token launched on an Elysium launchpad (Chainzy, CorePad, Signal), from
+/// the launchpad's own creation event. Holder stats are refreshed periodically.
+model ElysiumLaunch {
+  token       String    @id @db.VarChar(42)
+  launchpad   String    @db.VarChar(16)
+  /// curve (bonding curve), v3 (Uniswap V3 pool), v4 (Uniswap V4 pool).
+  kind        String    @db.VarChar(8)
+  creator     String?   @db.VarChar(42)
+  createdAt   DateTime  @map("created_at") @db.Timestamptz(3)
+  blockNumber BigInt    @map("block_number")
+  txHash      String    @map("tx_hash") @db.VarChar(66)
+  curve       String?   @db.VarChar(42)
+  /// V3 pool, V2 pair (curve launches, after graduation) or V4 poolId.
+  pool        String?   @db.VarChar(66)
+  quote       String    @db.VarChar(42)
+  name        String?   @db.VarChar(256)
+  symbol      String?   @db.VarChar(128)
+  graduatedAt DateTime? @map("graduated_at") @db.Timestamptz(3)
+  holders     Int?
+  top10Pct    Float?    @map("top10_pct")
+  devPct      Float?    @map("dev_pct")
+  statsAt     DateTime? @map("stats_at") @db.Timestamptz(3)
+
+  @@index([createdAt])
+  @@index([curve])
+  @@map("elysium_launch")
+}
+
+/// One trade on a launchpad token (curve, V2, V3 or V4). Amounts are raw
+/// 18-decimal integers; price is quote per token after the trade.
+model ElysiumLaunchTrade {
+  txHash      String   @map("tx_hash") @db.VarChar(66)
+  logIndex    Int      @map("log_index")
+  token       String   @db.VarChar(42)
+  venue       String   @db.VarChar(8)
+  blockTime   DateTime @map("block_time") @db.Timestamptz(3)
+  blockNumber BigInt   @map("block_number")
+  trader      String?  @db.VarChar(42)
+  isBuy       Boolean  @map("is_buy")
+  quoteAmount Decimal  @map("quote_amount") @db.Decimal(80, 0)
+  tokenAmount Decimal  @map("token_amount") @db.Decimal(80, 0)
+  price       Float
+
+  @@id([txHash, logIndex])
+  @@index([token, blockTime])
+  @@index([blockTime])
+  @@map("elysium_launch_trade")
+}
+
 /// Watermark per ingestion stream (tx, bridge, tokens) for resume + monitoring.
 model ElysiumIngestState {
   stream       String    @id @db.VarChar(32)

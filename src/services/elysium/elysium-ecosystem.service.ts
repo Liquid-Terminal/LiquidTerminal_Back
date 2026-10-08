@@ -6,6 +6,8 @@ import { ELYSIUM_PROJECTS, ElysiumProject } from '../../constants/elysium-projec
 import { CURVE_SALE_SUPPLY, HYPE_QUOTES, LAUNCH_TOTAL_SUPPLY } from './elysium-launchpad.util';
 
 const CACHE_TTL_S = 60;
+/** How long a computed value is kept to be served while it refreshes. */
+const KEEP_S = 6 * 3600;
 const PROJECTS_KEY = 'elysium:ecosystem:projects:v2';
 const TOKENS_KEY = 'elysium:ecosystem:launchpads:v1';
 const PERP_MARKETS_CACHE_KEY = 'perp:markets';
@@ -74,7 +76,7 @@ interface TokenSqlRow {
  *   contracts; launchpads also get their traded volume and launches.
  * - Tokens: every launch decoded from the launchpads' own events, priced from
  *   their last trade, valued at the current HYPE price.
- * Cached 60s.
+ * Served from the last value, refreshed in the background every 60s.
  */
 export class ElysiumEcosystemService {
   private static instance: ElysiumEcosystemService;
@@ -87,11 +89,11 @@ export class ElysiumEcosystemService {
   }
 
   public getProjects(): Promise<{ projects: ElysiumProjectView[]; computedAt: string }> {
-    return cacheService.getOrSet(PROJECTS_KEY, () => this.computeProjects(), CACHE_TTL_S);
+    return cacheService.getOrRefresh(PROJECTS_KEY, () => this.computeProjects(), CACHE_TTL_S, KEEP_S);
   }
 
   public getLaunchpadTokens(): Promise<{ tokens: ElysiumLaunchTokenView[]; hypeUsd: number | null; computedAt: string }> {
-    return cacheService.getOrSet(TOKENS_KEY, () => this.computeTokens(), CACHE_TTL_S);
+    return cacheService.getOrRefresh(TOKENS_KEY, () => this.computeTokens(), CACHE_TTL_S, KEEP_S);
   }
 
   /** HYPE mid from the perp markets cache kept warm by the market pollers. */

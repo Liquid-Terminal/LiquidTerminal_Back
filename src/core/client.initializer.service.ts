@@ -21,6 +21,8 @@ import { HLIndexerTopTradersClient } from '../clients/hypedexer/rest/toptraders/
 import { AggregatePositioningClient } from '../clients/hyperliquid/positioning/aggregate-positioning.client';
 import { MetricsSnapshotClient } from '../clients/metrics/metrics-snapshot.client';
 import { ElysiumIngestionService } from '../services/elysium/elysium-ingestion.service';
+import { ElysiumAnalyticsService } from '../services/elysium/elysium-analytics.service';
+import { ElysiumEcosystemService } from '../services/elysium/elysium-ecosystem.service';
 import { HLIndexerActiveUsersClient } from '../clients/hypedexer/rest/activeusers/activeusers.client';
 import { HLIndexerBuildersClient } from '../clients/hypedexer/rest/builders/builders-list-poller.client';
 import { LiquidationsIngestionService } from '../services/liquidations/liquidations.ingestion.service';
@@ -200,6 +202,12 @@ export class ClientInitializerService {
       // startPolling() is a no-op when ELYSIUM_INGEST_ENABLED=false.
       const elysiumIngestion = ElysiumIngestionService.getInstance();
       this.clients.set('elysiumIngestion', elysiumIngestion);
+      // Warm the Elysium analytics caches once the server is up (served stale-while-revalidate after that).
+      setTimeout(() => {
+        void ElysiumEcosystemService.getInstance().getProjects().catch(() => undefined);
+        void ElysiumEcosystemService.getInstance().getLaunchpadTokens().catch(() => undefined);
+        void ElysiumAnalyticsService.getInstance().warmDefaults();
+      }, 30_000).unref?.();
       logDeduplicator.info('Elysium ingestion service initialized successfully');
 
       // Initialiser le service d'ingestion des liquidations (WebSocket → DB historique)

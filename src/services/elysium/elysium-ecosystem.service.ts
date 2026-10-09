@@ -8,10 +8,12 @@ import { CURVE_SALE_SUPPLY, HYPE_QUOTES, LAUNCH_TOTAL_SUPPLY } from './elysium-l
 const CACHE_TTL_S = 60;
 /** How long a computed value is kept to be served while it refreshes. */
 const KEEP_S = 6 * 3600;
-const PROJECTS_KEY = 'elysium:ecosystem:projects:v2';
+const PROJECTS_KEY = 'elysium:ecosystem:projects:v3';
 const TOKENS_KEY = 'elysium:ecosystem:launchpads:v1';
 const PERP_MARKETS_CACHE_KEY = 'perp:markets';
 const DAY_MS = 86_400_000;
+/** Length of the daily active-user series, in rolling 24h buckets ending now. */
+const SERIES_DAYS = 14;
 const WEI = 1e18;
 
 export interface ElysiumProjectView extends Omit<ElysiumProject, 'contracts'> {
@@ -19,6 +21,13 @@ export interface ElysiumProjectView extends Omit<ElysiumProject, 'contracts'> {
   /** Distinct wallets that sent a tx to one of the project's contracts over 7 days; null without contracts. */
   wallets7d: number | null;
   txs7d: number | null;
+  /** Active users (distinct senders) over the last 24h and the 24h before; null without contracts. */
+  users24h: number | null;
+  usersPrev24h: number | null;
+  /** Active users over the 7 days before the last 7. */
+  usersPrev7d: number | null;
+  /** Active users per rolling 24h bucket, oldest first, last bucket ending now; empty without contracts. */
+  usersDaily: number[];
   /** Launchpads only: traded volume (USD) and tokens launched over 7 days. */
   volume7d: number | null;
   launches7d: number | null;
@@ -46,6 +55,15 @@ export interface ElysiumLaunchTokenView {
   /** Unix seconds. */
   bornAt: number;
   graduated: boolean;
+}
+
+interface ActivityRow {
+  slug: string;
+  wallets: number;
+  txs: number;
+  wallets_prev7: number;
+  wallets24: number;
+  wallets_prev24: number;
 }
 
 interface TokenSqlRow {
@@ -114,25 +132,45 @@ export class ElysiumEcosystemService {
 
   private async computeProjects(): Promise<{ projects: ElysiumProjectView[]; computedAt: string }> {
     const now = new Date();
-    const since = new Date(now.getTime() - 7 * DAY_MS).toISOString();
+    const ago = (days: number) => new Date(now.getTime() - days * DAY_MS).toISOString();
+    const nowIso = now.toISOString();
+    const [since1, since2, since7, since14] = [ago(1), ago(2), ago(7), ago(SERIES_DAYS)];
     const pairs = ELYSIUM_PROJECTS.flatMap((p) => p.contracts.map((c) => ({ slug: p.slug, addr: c.address })));
 
-    const [activity, pads, hypeUsd] = await Promise.all([
-      prismaHistorical.$queryRaw<Array<{ slug: string; wallets: number; txs: number }>>`
+    const [activity, daily, pads, hypeUsd] = await Promise.all([
+      prismaHistorical.$queryRaw<ActivityRow[]>`
         WITH reg AS (
           SELECT * FROM jsonb_to_recordset(${JSON.stringify(pairs)}::jsonb) AS r(slug text, addr text)
         )
-        SELECT reg.slug, count(DISTINCT t.from_addr)::int AS wallets, count(*)::int AS txs
+        SELECT reg.slug,
+               count(DISTINCT t.from_addr) FILTER (WHERE t.block_time >= ${since7}::timestamptz)::int AS wallets,
+               count(*) FILTER (WHERE t.block_time >= ${since7}::timestamptz)::int AS txs,
+               count(DISTINCT t.from_addr) FILTER (WHERE t.block_time < ${since7}::timestamptz)::int AS wallets_prev7,
+               count(DISTINCT t.from_addr) FILTER (WHERE t.block_time >= ${since1}::timestamptz)::int AS wallets24,
+               count(DISTINCT t.from_addr) FILTER (WHERE t.block_time >= ${since2}::timestamptz
+                                                     AND t.block_time < ${since1}::timestamptz)::int AS wallets_prev24
         FROM reg
-        JOIN elysium_tx t ON t.to_addr = reg.addr AND t.block_time >= ${since}::timestamptz AND NOT t.is_spam
+        JOIN elysium_tx t ON t.to_addr = reg.addr AND t.block_time >= ${since14}::timestamptz AND NOT t.is_spam
         GROUP BY reg.slug`,
+      // Bucket 0 is the last 24h; buckets are rolling so the latest one is never a partial day.
+      prismaHistorical.$queryRaw<Array<{ slug: string; bucket: number; users: number }>>`
+        WITH reg AS (
+          SELECT * FROM jsonb_to_recordset(${JSON.stringify(pairs)}::jsonb) AS r(slug text, addr text)
+        )
+        SELECT reg.slug,
+               floor(extract(epoch FROM (${nowIso}::timestamptz - t.block_time)) / 86400)::int AS bucket,
+               count(DISTINCT t.from_addr)::int AS users
+        FROM reg
+        JOIN elysium_tx t ON t.to_addr = reg.addr AND t.block_time >= ${since14}::timestamptz
+                         AND t.block_time <= ${nowIso}::timestamptz AND NOT t.is_spam
+        GROUP BY 1, 2`,
       prismaHistorical.$queryRaw<Array<{ launchpad: string; volume: string | null; launches: number }>>`
         SELECT l.launchpad,
                (SELECT sum(tr.quote_amount) FROM elysium_launch_trade tr
                   JOIN elysium_launch l2 ON l2.token = tr.token
                  WHERE l2.launchpad = l.launchpad AND l2.quote = ANY(${HYPE_QUOTES}::text[])
-                   AND tr.block_time >= ${since}::timestamptz)::text AS volume,
-               count(*) FILTER (WHERE l.created_at >= ${since}::timestamptz)::int AS launches
+                   AND tr.block_time >= ${since7}::timestamptz)::text AS volume,
+               count(*) FILTER (WHERE l.created_at >= ${since7}::timestamptz)::int AS launches
         FROM elysium_launch l
         GROUP BY l.launchpad`,
       this.readHypeUsd(),
@@ -140,6 +178,13 @@ export class ElysiumEcosystemService {
 
     const bySlug = new Map(activity.map((r) => [r.slug, r]));
     const byPad = new Map(pads.map((r) => [r.launchpad, r]));
+    const series = new Map<string, number[]>();
+    for (const r of daily) {
+      if (r.bucket < 0 || r.bucket >= SERIES_DAYS) continue;
+      const arr = series.get(r.slug) ?? new Array<number>(SERIES_DAYS).fill(0);
+      arr[SERIES_DAYS - 1 - r.bucket] = r.users;
+      series.set(r.slug, arr);
+    }
     const projects = ELYSIUM_PROJECTS.map(({ contracts, ...p }) => {
       const hit = bySlug.get(p.slug);
       const has = contracts.length > 0;
@@ -150,6 +195,10 @@ export class ElysiumEcosystemService {
         contracts: contracts.length,
         wallets7d: has ? (hit?.wallets ?? 0) : null,
         txs7d: has ? (hit?.txs ?? 0) : null,
+        users24h: has ? (hit?.wallets24 ?? 0) : null,
+        usersPrev24h: has ? (hit?.wallets_prev24 ?? 0) : null,
+        usersPrev7d: has ? (hit?.wallets_prev7 ?? 0) : null,
+        usersDaily: has ? (series.get(p.slug) ?? new Array<number>(SERIES_DAYS).fill(0)) : [],
         volume7d: p.launchpad && hypeUsd !== null ? volumeHype * hypeUsd : null,
         launches7d: p.launchpad ? (pad?.launches ?? 0) : null,
       };

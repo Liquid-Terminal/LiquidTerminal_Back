@@ -100,6 +100,8 @@ export class HyperliquidSpotClient extends BaseApiService {
           supply: Number(ctx.circulatingSupply),
           marketIndex: market.index,
           tokenId: token.tokenId,
+          // Not always USDC: 17 of the 330 pairs were quoted in USDH, USDT0 or USDE on 2026-10-09.
+          quote: tokenMap[market.tokens[1]]?.name ?? 'USDC',
         };
       }).filter(Boolean) as MarketData[];
 

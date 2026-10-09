@@ -53,6 +53,8 @@ export interface MarketData {
     supply: number;
     marketIndex: number;
     tokenId: string;
+    /** Quote token of the pair as Hyperliquid names it (USDC, USDH, USDT0, USDE...). */
+    quote: string;
 }
 
 export interface SpotUSDCData {

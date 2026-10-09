@@ -57,6 +57,7 @@ export interface MarketData {
     quote: string;
 }
 
+/** One point of Hypurrscan `/spotUSDC`, which sends the whole series as an array. */
 export interface SpotUSDCData {
     date?: number;
     lastUpdate: number;

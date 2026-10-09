@@ -60,37 +60,46 @@ export class SpotUSDCClient extends BaseApiService {
 
   private async updateSpotUSDCData(): Promise<void> {
     try {
-      const data = await this.circuitBreaker.execute(() => 
-        this.get<SpotUSDCData>('/spotUSDC')
+      // The whole series, oldest point first (~800 points), not one object.
+      const series = await this.circuitBreaker.execute(() =>
+        this.get<SpotUSDCData[]>('/spotUSDC')
       );
-      
-      if (data) {
-        await redisService.set(this.CACHE_KEY_RAW, JSON.stringify(data));
-        await redisService.publish(this.UPDATE_CHANNEL, JSON.stringify({
-          type: 'DATA_UPDATED',
-          timestamp: Date.now()
-        }));
 
-        logDeduplicator.info('SpotUSDC data updated successfully', {
-          lastUpdate: data.lastUpdate,
-          totalSpotUSDC: data.totalSpotUSDC
+      if (!Array.isArray(series) || series.length === 0) {
+        // Readers expect a non-empty array: keep the last good series.
+        logDeduplicator.warn('SpotUSDC: unexpected payload, cache left as is', {
+          type: Array.isArray(series) ? 'empty array' : typeof series
         });
+        return;
       }
+
+      await redisService.set(this.CACHE_KEY_RAW, JSON.stringify(series));
+      await redisService.publish(this.UPDATE_CHANNEL, JSON.stringify({
+        type: 'DATA_UPDATED',
+        timestamp: Date.now()
+      }));
+
+      const latest = series[series.length - 1];
+      logDeduplicator.info('SpotUSDC data updated successfully', {
+        points: series.length,
+        lastUpdate: latest.lastUpdate,
+        totalSpotUSDC: latest.totalSpotUSDC
+      });
     } catch (error) {
       logDeduplicator.error('Failed to update SpotUSDC data:', { error: error instanceof Error ? error.message : String(error) });
     }
   }
 
-  public async getSpotUSDCData(): Promise<SpotUSDCData> {
+  public async getSpotUSDCData(): Promise<SpotUSDCData[]> {
     try {
       const cachedData = await redisService.get(this.CACHE_KEY_RAW);
-      
+
       if (cachedData) {
-        return JSON.parse(cachedData) as SpotUSDCData;
+        return JSON.parse(cachedData) as SpotUSDCData[];
       }
-      
-      return await this.circuitBreaker.execute(() => 
-        this.get<SpotUSDCData>('/spotUSDC')
+
+      return await this.circuitBreaker.execute(() =>
+        this.get<SpotUSDCData[]>('/spotUSDC')
       );
     } catch (error) {
       logDeduplicator.error('Error retrieving SpotUSDC data:', { error: error instanceof Error ? error.message : String(error) });

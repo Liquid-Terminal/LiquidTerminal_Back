@@ -5,6 +5,7 @@ import { RateLimiterService } from '../../../core/hyperLiquid.ratelimiter.servic
 import { redisService } from '../../../core/redis.service';
 import { logDeduplicator } from '../../../utils/logDeduplicator';
 import { startGuardedInterval } from '../../../utils/guardedInterval';
+import { SpotBridgeReserveService } from '../../../services/spot/bridgeReserve.service';
 import * as unitTokens from './unit.json';
 
 export class HyperliquidSpotClient extends BaseApiService {
@@ -74,6 +75,9 @@ export class HyperliquidSpotClient extends BaseApiService {
         if (!contextByCoin.has(ctx.coin)) contextByCoin.set(ctx.coin, ctx);
       }
 
+      const bridgeReserves = SpotBridgeReserveService.getInstance();
+      await bridgeReserves.load();
+
       const markets: MarketData[] = spotContext.universe.map((market: Market) => {
         const ctx = contextByCoin.get(market.name);
         if (!ctx) return null;
@@ -89,19 +93,26 @@ export class HyperliquidSpotClient extends BaseApiService {
         const displayName = unitTokens[token.name as keyof typeof unitTokens] || token.name;
         const logoName = displayName;
 
+        // Hyperliquid counts the bridge reserve parked on a token's HyperEVM
+        // system address as circulating (XAUT0 at $770,000B).
+        const circulating = Number(ctx.circulatingSupply);
+        const bridgeReserve = Math.min(bridgeReserves.reserveOf(token.tokenId), circulating);
+        const supply = circulating - bridgeReserve;
+
         return {
           name: displayName,
           logo: `https://app.hyperliquid.xyz/coins/${logoName}_USDC.svg`,
           price: current,
-          marketCap: current * Number(ctx.circulatingSupply),
+          marketCap: current * supply,
           volume: Number(ctx.dayNtlVlm),
           change24h: change,
           liquidity: Number(ctx.midPx),
-          supply: Number(ctx.circulatingSupply),
+          supply,
           marketIndex: market.index,
           tokenId: token.tokenId,
           // Not always USDC: 17 of the 330 pairs were quoted in USDH, USDT0 or USDE on 2026-10-09.
           quote: tokenMap[market.tokens[1]]?.name ?? 'USDC',
+          ...(bridgeReserve > 0 ? { bridgeReserve } : {}),
         };
       }).filter(Boolean) as MarketData[];
 

@@ -1,4 +1,5 @@
 import { HyperliquidSpotClient } from '../clients/hyperliquid/spot/spot.assetcontext.client';
+import { SpotBridgeReserveService } from '../services/spot/bridgeReserve.service';
 import { HyperliquidPerpClient } from '../clients/hyperliquid/perp/perp.assetcontext.client';
 import { HyperliquidSpotDeployClient } from '../clients/hyperliquid/spot/spot.deploy.client';
 import { ValidatorClient } from '../clients/hyperliquid/staking/validator';
@@ -91,6 +92,10 @@ export class ClientInitializerService {
       const spotClient = HyperliquidSpotClient.getInstance();
       this.clients.set('spot', spotClient);
       logDeduplicator.info('Spot client initialized successfully');
+
+      // Bridge reserves the spot poller subtracts from the circulating supply
+      // (supply parked on a token's HyperEVM system address).
+      this.clients.set('spotBridgeReserve', SpotBridgeReserveService.getInstance());
 
       // Initialiser le client Perp
       logDeduplicator.info('Initializing Perp client...');

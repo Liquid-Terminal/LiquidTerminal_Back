@@ -50,11 +50,18 @@ export interface MarketData {
     volume: number;
     change24h: number;
     liquidity: number;
+    /** Circulating supply on HyperCore: Hyperliquid's figure less `bridgeReserve`. `marketCap` = price × supply. */
     supply: number;
     marketIndex: number;
     tokenId: string;
     /** Quote token of the pair as Hyperliquid names it (USDC, USDH, USDT0, USDE...). */
     quote: string;
+    /**
+     * Bridge reserve on the token's HyperEVM system address (supply minted there
+     * at genesis, or parked there by the token's issuer), which Hyperliquid
+     * counts as circulating. Absent when none.
+     */
+    bridgeReserve?: number;
 }
 
 /** One point of Hypurrscan `/spotUSDC`, which sends the whole series as an array. */
